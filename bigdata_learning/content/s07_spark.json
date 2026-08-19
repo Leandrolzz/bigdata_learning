@@ -1,0 +1,3004 @@
+{
+  "stage_id": "s07_spark",
+  "title": "阶段 7：Spark 大数据计算",
+  "subtitle": "海量数据的秒级计算引擎",
+  "emoji": "⚡",
+  "estimated_days": 16,
+  "learning_goal": "掌握 Spark 核心架构、RDD 与 DataFrame 编程、Spark SQL、数据读写、性能调优与 Structured Streaming，能够使用 PySpark 完成离线批处理与实时流处理任务。",
+  "chapters": [
+    {
+      "chapter_id": "s07c01",
+      "title": "7.1 Spark 概述与架构",
+      "goal": "理解 Spark 为什么快（内存计算 + DAG + 并行）、Driver/Executor 架构、RDD 概念与血缘懒加载",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**Spark 是什么**：Apache Spark 是**统一的大数据计算引擎**，提供内存计算、DAG 调度与 SQL / 流 / 图 / 机器学习一体化 API，支持 Java / Scala / Python（PySpark）/ R 四种语言。其中 **PySpark** 是大数据工程师最常用的组合：用 Python 写 Spark 作业。\n\n**为什么 Spark 快**：\n- **内存计算**：MapReduce 每轮结果都写回 HDFS，Spark 优先把中间结果放在**内存**，省掉大量磁盘读写；\n- **DAG 调度**：Spark 把一串算子构造成有向无环图（DAG），自动合并窄依赖、优化执行计划，减少不必要的 shuffle；\n- **并行计算**：一个任务按**分区（partition）**切分成多个子任务，分布到多台机器的 Executor 上同时执行。"
+        },
+        {
+          "type": "text",
+          "content": "Spark 集群是**主从架构**：\n- **Driver（驱动器）**：运行 main 方法，负责解析代码、构建 DAG、划分 Stage、把 Task 调度给 Executor，最后汇总结果；\n- **Executor（执行器）**：真正干活的工作进程，分布在多台机器上，并行执行 Task 并缓存数据；\n- **Cluster Manager（集群管理器）**：Standalone / YARN / K8s，负责资源分配。\n\n一句话总结：**Driver 负责『思考』（规划），Executor 负责『执行』（干活）**。"
+        },
+        {
+          "type": "code",
+          "lang": "python",
+          "content": "# PySpark WordCount：认识 Spark 计算模型\nfrom pyspark.sql import SparkSession\n\nspark = SparkSession.builder \\\n    .appName('WordCountDemo') \\\n    .master('local[2]') \\\n    .getOrCreate()\n\nsc = spark.sparkContext\nlines = sc.textFile('hdfs:///data/words.txt')  # 读取（懒加载，未真正计算）\nwords = lines.flatMap(lambda line: line.split(' '))   # transformation\npairs = words.map(lambda w: (w, 1))                   # transformation\ncounts = pairs.reduceByKey(lambda a, b: a + b)        # transformation\nresult = counts.collect()                             # action：触发计算！\nfor word, cnt in result:\n    print(word, cnt)",
+          "caption": "WordCount——注意 transformation 与 action 的分界线"
+        },
+        {
+          "type": "text",
+          "content": "**RDD（弹性分布式数据集）** 是 Spark 最核心的抽象：一个**只读、分区的分布式集合**。每次对 RDD 做转换都会产生**新的 RDD**，原 RDD 不变。\n\n- **血缘（Lineage）**：每个 RDD 都记录自己『从哪来』（父 RDD + 转换函数）。一旦某个分区丢失，可以根据血缘**重新计算**恢复——这就是『弹性』的来源；\n- **懒加载（Lazy）**：transformation 只是『记下要做的事』，**不会立即执行**；只有遇到 action（collect / count / take / save）才真正触发计算。好处：Spark 可以**先看到整条计算链，再统一优化**，避免中间结果落盘。"
+        },
+        {
+          "type": "warning",
+          "content": "**懒加载的坑**：写了一大串 transformation 却什么也没输出？因为你忘了加 action！`rdd.map(...)` 不会打印任何东西，必须 `rdd.map(...).collect()` 才真正执行。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：很多公司 2015 年前后用 Spark 替换 MapReduce，批处理提速 10~100 倍，核心就是『少落盘 + DAG 优化』。面试必问题：**『Spark 为什么比 MapReduce 快？』**标准回答四板斧：① 内存计算减少磁盘 IO；② DAG 调度避免重复读写；③ 并行度高；④ 数据本地性。再补一句『数据量超过内存时也会溢写磁盘，所以调优仍重要』，立刻显得有实战经验。"
+        }
+      ],
+      "hands_on": "1. 画一张 Spark 集群架构图（Driver / Executor / Cluster Manager），标注每个角色的职责。\n2. 用文字向同学解释『懒加载』：为什么 transformation 不立即执行？什么操作会触发执行？\n3. 阅读 Spark 官方 quick-start 文档，找出创建 SparkSession 的标准写法。",
+      "tasks": [
+        {
+          "task_id": "s07c01t01",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "哪个操作会真正触发计算",
+          "question": "在 Spark 中，以下哪个操作会**立即触发**真正的计算（action）？",
+          "options": [
+            {
+              "text": "rdd.map(lambda x: x * 2)",
+              "correct": false,
+              "explain": "map 是 transformation，只是记录转换，惰性执行。"
+            },
+            {
+              "text": "rdd.filter(lambda x: x > 0)",
+              "correct": false,
+              "explain": "filter 同样是 transformation，惰性执行。"
+            },
+            {
+              "text": "rdd.collect()",
+              "correct": true,
+              "explain": "collect 是 action，会把结果收集到 Driver，触发整条血缘链真正执行。"
+            },
+            {
+              "text": "rdd.distinct()",
+              "correct": false,
+              "explain": "distinct 是 transformation，返回新 RDD 但不会触发计算。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 先把算子分两类：transformation（惰性）与 action（触发执行）。\n2. map / filter / distinct 都是 transformation，只生成新的 RDD 定义，不会真正计算。\n3. collect 是 action，把分布式结果拉回 Driver，触发整条血缘链执行。\n4. 故选 C。\n**为什么**：懒加载让 Spark 能整体优化执行计划；action 才是『按下执行按钮』的那一下。",
+          "enterprise_tip": "面试高频题：『哪些算子属于 action？』要能随口举出 collect / count / take / saveAsTextFile / foreach 等。"
+        },
+        {
+          "task_id": "s07c01t02",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "Spark 快的因素（多选）",
+          "question": "Spark 相比 MapReduce 更快，主要得益于哪些设计？（多选）",
+          "options": [
+            {
+              "text": "中间结果优先驻留内存，减少磁盘读写",
+              "correct": true,
+              "explain": "内存计算是 Spark 提速的第一功臣。"
+            },
+            {
+              "text": "DAG 调度器对整条计算链做优化，减少不必要的 shuffle 与 IO",
+              "correct": true,
+              "explain": "DAG 让 Spark 能全局优化，而 MapReduce 每个任务各自为战。"
+            },
+            {
+              "text": "任务按分区切分，分布到多个 Executor 并行执行",
+              "correct": true,
+              "explain": "高并行度是分布式计算提速的基础。"
+            },
+            {
+              "text": "所有数据都只在一台机器上处理，不需要任何网络传输",
+              "correct": false,
+              "explain": "分布式集群恰恰依赖网络，shuffle 阶段需要网络传输数据。"
+            },
+            {
+              "text": "数据永远不需要落到磁盘",
+              "correct": false,
+              "explain": "数据量超过内存时仍会溢写磁盘（spill），说法过于绝对。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 定位问题核心：Spark 快的原因。\n2. 逐个判断：A 内存计算 ✓；B DAG 全局优化 ✓；C 并行执行 ✓。\n3. 排除 D：分布式必然有网络传输（尤其 shuffle）；排除 E：数据量大时会溢写磁盘，『永远不落盘』是错误说法。\n4. 选 A、B、C。\n**延伸**：这三点也是面试『为什么 Spark 快』的标准答案骨架。",
+          "enterprise_tip": "面试被问『Spark 为什么快』，按『内存计算 → DAG 优化 → 并行度 → 数据本地性』展开，再主动提一句溢写与调优，就是高分答案。"
+        },
+        {
+          "task_id": "s07c01t03",
+          "type": "order",
+          "difficulty": 3,
+          "title": "Spark 任务执行流程排序",
+          "question": "把 Spark 作业从提交到出结果的流程按正确顺序排列。",
+          "steps": [
+            "提交作业：spark-submit 将代码提交给集群",
+            "Driver 解析代码构建 DAG，并划分 Stage",
+            "调度器为每个 Stage 生成一批 Task",
+            "Task 分发到各 Executor 并行执行",
+            "Executor 返回结果，Driver 汇总输出"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "作业先由 Driver 规划（DAG → Stage → Task），再分发到 Executor 执行，最后汇总——『先规划后执行』是分布式计算的标准流程。",
+          "analysis": "**标准解题思路**\n1. 一切从提交开始：spark-submit 把作业送进集群。\n2. Driver 拿到代码后先『想清楚怎么做』：构建 DAG，并按 shuffle 边界切分 Stage。\n3. 每个 Stage 再按分区粒度拆成一个个 Task。\n4. Task 被分发到各 Executor 并行执行。\n5. 执行结果汇总回 Driver，输出给用户。\n**为什么**：先整体规划（DAG / Stage）才能做全局优化，这也是懒加载的意义所在。",
+          "enterprise_tip": "面试问『一个 Job 是怎么变成 Task 的』：Job → Stage（按 shuffle 切分）→ Task（按分区）→ Executor 并行执行。"
+        },
+        {
+          "task_id": "s07c01t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Driver 与 Executor 的职责",
+          "question": "在 Spark 集群中，真正负责**执行计算任务（Task）**并缓存数据的进程是？",
+          "options": [
+            {
+              "text": "Driver",
+              "correct": false,
+              "explain": "Driver 负责解析代码、构建 DAG、划分 Stage 并调度 Task，但不直接执行计算。"
+            },
+            {
+              "text": "Executor",
+              "correct": true,
+              "explain": "正确。Executor 是真正干活的工作进程，并行执行 Task 并缓存数据。"
+            },
+            {
+              "text": "Cluster Manager",
+              "correct": false,
+              "explain": "Cluster Manager（Standalone / YARN / K8s）只负责资源分配，不执行计算。"
+            },
+            {
+              "text": "NameNode",
+              "correct": false,
+              "explain": "NameNode 是 HDFS 的元数据管理节点，与 Spark 计算无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 回忆 Spark 主从架构：Driver（驱动器）+ Executor（执行器）+ Cluster Manager（资源管理器）。\n2. 定位『真正执行 Task』：一定是 Executor，它分布在各机器上并行干活并缓存数据。\n3. 排除 Driver（负责规划与调度）、Cluster Manager（只管资源）、NameNode（HDFS 组件）。\n4. 故选 B。\n**为什么**：一句话记忆——『Driver 负责思考（规划），Executor 负责干活（执行）』，面试答职责分工时按这个骨架展开即可。",
+          "enterprise_tip": "面试追问：『Driver 挂了对作业有什么影响？』答：离线作业需要重新提交，流作业可从 checkpoint 恢复——所以生产环境 Driver 通常也有高可用配置。"
+        },
+        {
+          "task_id": "s07c01t05",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：DAG 全称",
+          "question": "Spark 将一系列计算算子构建成用于调度优化的有向无环图，其英文缩写是 ______（三个大写字母）。",
+          "answer": [
+            "DAG",
+            "dag",
+            "Dag"
+          ],
+          "hint": "题目已给出中文『有向无环图』，先分别翻译『有向』『无环』『图』三个词，再取各自首字母。",
+          "analysis": "**标准解题思路**\n1. 关键词：有向无环图 → Directed Acyclic Graph。\n2. 取三个首字母：Directed → D，Acyclic → A，Graph → G。\n3. 填 `DAG`（比对时忽略大小写）。\n**为什么**：DAG 是 Spark 调度优化的核心——按 shuffle 边界把 DAG 切分成 Stage，再按分区切分成 Task，这是『Spark 快』的重要原因之一。"
+        },
+        {
+          "task_id": "s07c01t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "DAG 与血缘",
+          "question": "关于 Spark 的 DAG 与 RDD 血缘（Lineage），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "每个 RDD 都记录自己的来源（父 RDD + 转换函数）形成血缘，分区丢失时可沿血缘重算恢复",
+              "correct": true,
+              "explain": "正确。血缘是 RDD 弹性容错的根本。"
+            },
+            {
+              "text": "血缘信息由 HDFS 的 NameNode 统一持久化管理",
+              "correct": false,
+              "explain": "血缘记录在 RDD 对象内部，不依赖 NameNode。"
+            },
+            {
+              "text": "DAG 是磁盘上的物理存储结构，与任务调度无关",
+              "correct": false,
+              "explain": "DAG 是内存中的调度优化图，Spark 按 shuffle 边界切分 Stage。"
+            },
+            {
+              "text": "RDD 创建后内容可变，血缘无法用于容错",
+              "correct": false,
+              "explain": "RDD 是只读的，转换产生新 RDD，血缘正是容错机制。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 血缘（Lineage）：每个 RDD 记录『从哪来』（父 RDD + 转换函数）。\n2. 容错：分区丢失 → 沿血缘重新计算恢复。\n3. 排除 B（不依赖 NameNode）、C（DAG 是调度图）、D（RDD 只读）。\n4. 选 A。\n**延伸**：DAG 把整条转换链组织成有向无环图，按 shuffle 边界切 Stage，是『Spark 快』与『血缘容错』的共同基础。",
+          "enterprise_tip": "面试题『RDD 为什么叫弹性』：分区丢失可沿血缘重算恢复，这就是『弹性』的来源。"
+        },
+        {
+          "task_id": "s07c01t07",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：Executor 的职责",
+          "question": "Spark 主从架构中，真正负责**并行执行 Task 并缓存数据**的工作进程是 ____（英文）。",
+          "answer": [
+            "Executor",
+            "executor",
+            "EXECUTOR",
+            "执行器"
+          ],
+          "hint": "先回忆 Spark 主从架构里有哪几个角色，再想『真正执行任务并缓存数据』对应哪一个；它的中文译名与英文含义一致。",
+          "analysis": "**标准解题思路**\n1. 主从架构：Driver（思考/规划）+ Executor（干活/执行）+ Cluster Manager（资源）。\n2. 『执行 Task 并缓存数据』→ Executor。\n3. 填 Executor。\n**面试延伸**：Driver 挂了对离线作业要重新提交，流作业可从 checkpoint 恢复；生产上 Driver 通常配高可用。"
+        },
+        {
+          "task_id": "s07c01t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "RDD 的特性",
+          "question": "关于 RDD（弹性分布式数据集），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "RDD 是只读、分区、分布式的集合，对它的转换会生成新的 RDD，原 RDD 不变",
+              "correct": true,
+              "explain": "正确。只读 + 分区 + 分布式是 RDD 三大特征。"
+            },
+            {
+              "text": "RDD 创建后可以随意修改内部的数据元素",
+              "correct": false,
+              "explain": "RDD 是只读的，修改只能通过转换生成新 RDD。"
+            },
+            {
+              "text": "RDD 的所有数据必须存放在同一台机器上",
+              "correct": false,
+              "explain": "RDD 按分区分布在整个集群的 Executor 上。"
+            },
+            {
+              "text": "RDD 只能存放文本数据，不能存放数值",
+              "correct": false,
+              "explain": "RDD 可以存放任意类型的对象，包括数值、元组等。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. RDD 三特征：只读（Read-only）、分区（Partitioned）、分布式（Distributed）。\n2. 转换不修改原 RDD，而是生成新 RDD。\n3. 选 A。\n**为什么**：只读 + 血缘让 RDD 可以安全重算；分区让任务可以并行执行。"
+        },
+        {
+          "task_id": "s07c01t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "懒加载的底层原理",
+          "question": "从**底层机制**看，Spark 的 transformation（如 map）为什么不立即计算？",
+          "options": [
+            {
+              "text": "transformation 只是把'新 RDD 与父 RDD 的转换关系（血缘）'记录进 DAG，不真正执行；只有 action 触发时才按血缘链实际计算，这样 Spark 能先看到整条链再整体优化",
+              "correct": true,
+              "explain": "正确。懒加载的本质是'只记账、不干活'，先记账才能整体优化。"
+            },
+            {
+              "text": "transformation 会立即计算，只是结果不保存，所以看起来像没执行",
+              "correct": false,
+              "explain": "transformation 压根不执行计算，不是算完不保存。"
+            },
+            {
+              "text": "transformation 需要等待网络同步，所以延迟到 action",
+              "correct": false,
+              "explain": "与网络无关，纯粹是执行策略设计。"
+            },
+            {
+              "text": "transformation 把数据写入 HDFS，再由 action 读回来",
+              "correct": false,
+              "explain": "懒加载恰恰是为了避免中间结果落盘。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 每次转换生成新 RDD，记录的是'从哪来'（父 RDD + 转换函数），即血缘。\n2. 这些记录先进入 DAG，不触发任何计算，这就是懒加载。\n3. action 触发时，Spark 沿血缘链实际执行，并且因为提前看到了整条链，可以做优化（合并窄依赖、减少 shuffle）。\n4. A 正确。\n5. 排除 B（不执行计算）、C（与网络无关）、D（不写 HDFS）。\n6. 选 A。\n**面试延伸**：懒加载的两大收益——整体优化执行计划、避免中间结果落盘。",
+          "enterprise_tip": "调试口诀：写了 transformation 没输出，先检查是不是忘了加 action；Spark UI 的 DAG 图就是血缘链的可视化。"
+        },
+        {
+          "task_id": "s07c01t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Spark 3 新特性：动态分区裁剪",
+          "question": "关于 Spark 3.0 引入的**动态分区裁剪**（Dynamic Partition Pruning，DPP），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "大表与小表 join 时，Spark 先根据小表过滤后的分区信息，在运行期动态裁剪大表的分区，只扫描匹配的分区，显著减少扫描量",
+              "correct": true,
+              "explain": "正确。DPP 让 join 场景的大表只读需要的分区，是 Spark 3 的杀手锏优化。"
+            },
+            {
+              "text": "它把查询结果自动按天分区写入 HDFS",
+              "correct": false,
+              "explain": "按字段分区写出是 partitionBy 的职责，与 DPP 无关。"
+            },
+            {
+              "text": "它只对流处理生效，离线批处理无法使用",
+              "correct": false,
+              "explain": "DPP 正是面向离线批处理 join 场景的优化。"
+            },
+            {
+              "text": "它需要开发者手动在每个查询里写 HINT 才能生效",
+              "correct": false,
+              "explain": "DPP 由优化器自动触发，无需手写 HINT。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 场景：大表 join 小表，小表经过 WHERE 过滤后只剩少量分区。\n2. 传统做法：大表仍然扫描全部分区再参与 join，白白浪费 IO。\n3. DPP：运行期先根据小表过滤结果确定有效分区集合，再把该集合传给大表读取端，只扫描匹配分区。\n4. A 正确。\n5. 排除 B（partitionBy 的活）、C（面向批处理 join）、D（自动触发）。\n6. 选 A。\n**面试延伸**：DPP 与静态分区裁剪（WHERE 带分区条件）不同，它是在 join 运行过程中动态推导出的分区集合，是 Spark 3.0 的代表性优化。",
+          "enterprise_tip": "生产上大表 join 维度表时，先在小表侧过滤、让 DPP 生效，能把大表扫描量砍掉一个数量级；Spark UI 的 SQL 计划里能看到 DPP 是否被触发。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "Spark 为什么比 MapReduce 快？",
+          "a": "四板斧：① 内存计算，中间结果优先驻留内存，减少磁盘 IO；② DAG 调度，整条计算链统一优化，减少不必要的 shuffle；③ 并行度高，任务按分区切分到多台 Executor 并行执行；④ 数据本地性。补充一句：数据量超过内存时也会溢写磁盘，所以调优仍然重要。"
+        },
+        {
+          "q": "Driver 和 Executor 分别负责什么？",
+          "a": "Driver 是驱动器：解析代码、构建 DAG、划分 Stage、把 Task 调度给 Executor、最后汇总结果；Executor 是执行器：真正并行执行 Task 并缓存数据。一句话：Driver 负责思考，Executor 负责干活。"
+        },
+        {
+          "q": "什么是 RDD 的血缘（Lineage）？",
+          "a": "每个 RDD 都记录自己『从哪来』（父 RDD + 转换函数），这就是血缘。一旦某个分区丢失，可以沿血缘重新计算恢复——这就是 RDD『弹性』的来源，也是容错机制的核心。"
+        },
+        {
+          "q": "transformation 和 action 有什么区别？",
+          "a": "transformation 惰性执行、返回新的 RDD（如 map、filter、flatMap）；action 触发真正的计算并返回结果（如 collect、count、take）。懒加载让 Spark 先看到整条计算链再统一优化。"
+        },
+        {
+          "q": "懒加载（Lazy）有什么好处？",
+          "a": "① 先看到整条计算链，统一优化执行计划，避免中间结果落盘；② 减少重复读写；③ 失败时可按血缘重算恢复。代价是容易忘记加 action，导致『什么都没执行』。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "RDD",
+          "desc": "弹性分布式数据集，Spark 最核心的抽象：只读、分区、可容错的分布式集合。"
+        },
+        {
+          "term": "DAG",
+          "desc": "有向无环图，Spark 把算子链构造成的调度与优化图，按 shuffle 边界切分 Stage。"
+        },
+        {
+          "term": "Driver",
+          "desc": "驱动器进程，负责解析代码、构建 DAG、划分 Stage、调度 Task、汇总结果。"
+        },
+        {
+          "term": "Executor",
+          "desc": "执行器进程，真正并行执行 Task 并缓存数据的 worker 进程。"
+        },
+        {
+          "term": "Cluster Manager",
+          "desc": "集群资源管理器（Standalone / YARN / K8s），负责为 Spark 应用分配资源。"
+        },
+        {
+          "term": "Lineage（血缘）",
+          "desc": "RDD 记录自身来源的转换链，分区丢失时据此重算实现容错。"
+        },
+        {
+          "term": "Lazy（懒加载）",
+          "desc": "transformation 惰性执行、遇到 action 才真正计算的机制，便于整体优化。"
+        }
+      ],
+      "kps": [
+        "Spark 为什么快（内存计算、DAG 调度、并行计算）",
+        "主从架构：Driver / Executor / Cluster Manager 职责",
+        "RDD 的概念与特性（只读、分区、分布式）",
+        "血缘 Lineage：来源记录与容错重算",
+        "懒加载 Lazy：transformation 与 action",
+        "DAG 与 Stage / Task 划分、作业执行流程"
+      ]
+    },
+    {
+      "chapter_id": "s07c02",
+      "title": "7.2 环境与 PySpark 快速上手",
+      "goal": "了解 Spark 安装与 PySpark 环境，掌握 SparkSession、spark.read.csv 与基础代码",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**安装说明（本平台以理论学习为主）**：生产环境 Spark 通常部署在 Linux 集群（YARN / K8s），开发环境常配合 Jupyter 使用。本地学习最轻量的方式：\n1. 安装 JDK 8/11；\n2. 下载 Spark 二进制包（内含 PySpark）；\n3. 执行 `pip install pyspark`；\n4. 用 `pyspark` 命令或代码里的 SparkSession 启动本地模式（`local[2]` 表示用 2 个核）。\n\n> 注意：本平台的任务只需**纯 Python**，不需要安装 pyspark；这里的安装知识用于你在自己电脑上搭建真实环境。"
+        },
+        {
+          "type": "code",
+          "lang": "python",
+          "content": "from pyspark.sql import SparkSession\n\n# 1. 创建 SparkSession（一切 DataFrame 操作的入口）\nspark = SparkSession.builder \\\n    .appName('OrderAnalysis') \\\n    .master('local[2]') \\\n    .config('spark.sql.shuffle.partitions', '4') \\\n    .getOrCreate()\n\n# 2. 读取 CSV（自动推断 schema）\ndf = spark.read.csv('hdfs:///data/orders.csv',\n                    header=True, inferSchema=True)\n\n# 3. 快速浏览\nprint('订单总数:', df.count())\n\ndf.show(5)          # 表格形式展示前 5 行\ndf.printSchema()    # 打印列名与类型",
+          "caption": "SparkSession 创建与 CSV 读取入门"
+        },
+        {
+          "type": "text",
+          "content": "**SparkSession** 是 Spark 2.0 之后**统一的入口对象**，集成了 SQL、流、DataFrame 等能力，替代了早期的 SparkContext + SQLContext 组合。\n\n**spark.read** 是统一的读入口：\n- `spark.read.csv(...)` 读 CSV；\n- `spark.read.parquet(...)` 读 parquet；\n- `spark.read.json(...)` 读 JSON；\n- `spark.read.table('库.表')` 读 Hive 表。\n\n读到的都是 **DataFrame**——带 schema（列名 + 类型）的分布式表，类似关系数据库里的表，第 4 章会深入讲解。"
+        },
+        {
+          "type": "tip",
+          "content": "**header=True** 表示第一行是列名；**inferSchema=True** 让 Spark 自动推断字段类型（否则全是字符串）。生产环境建议用 `schema` 参数**显式声明类型**，避免自动推断出错。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：真正的生产环境不用 `local` 模式，而是 `spark-submit --master yarn` 提交到集群，并配 `--executor-memory`、`--num-executors` 等资源参数。公司里还有『Spark 版本地狱』：Hive、Spark、Hadoop 版本互相依赖，所以环境版本由平台组统一管理，业务同学只写代码。面试题：『spark-submit 常用参数有哪些？』答：--master、--executor-memory、--num-executors、--executor-cores、--conf。"
+        }
+      ],
+      "hands_on": "（可选，有条件的同学）1. 在自己电脑上 `pip install pyspark`。\n2. 用本地模式运行本章示例，读取一个自制 CSV 并用 show() 展示。\n3. 用 printSchema() 观察推断出的字段类型。\n（无法安装也没关系，本章任务均为纯 Python。）",
+      "tasks": [
+        {
+          "task_id": "s07c02t01",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "创建 SparkSession 的方式",
+          "question": "在 PySpark 中，**推荐**的创建 SparkSession 的方式是？",
+          "options": [
+            {
+              "text": "SparkSession.builder.appName('demo').getOrCreate()",
+              "correct": true,
+              "explain": "正确。builder 模式链式配置，getOrCreate 保证全局唯一。"
+            },
+            {
+              "text": "new SparkSession()",
+              "correct": false,
+              "explain": "SparkSession 没有 public 构造器，不能直接 new。"
+            },
+            {
+              "text": "SparkSession.create()",
+              "correct": false,
+              "explain": "没有这个 API，正确入口是 builder。"
+            },
+            {
+              "text": "spark.newSession()",
+              "correct": false,
+              "explain": "这是从已有 SparkSession 派生新会话的方法，不是创建入口。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 回忆 SparkSession 的创建方式：Builder 设计模式。\n2. 链式调用 appName / master / config 配置，最后 getOrCreate()。\n3. 排除 new SparkSession()（无公开构造器）与不存在的 create()。\n4. 选 A。\n**为什么用 getOrCreate**：同一个 Spark 应用内会话应复用，避免重复创建浪费资源。",
+          "enterprise_tip": "企业代码规范：SparkSession 全局唯一，用 getOrCreate 幂等创建；多个作业各用独立 appName 方便监控区分。"
+        },
+        {
+          "task_id": "s07c02t02",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：read.csv 的返回类型",
+          "question": "`spark.read.csv('data.csv')` 的返回值类型是 ____（英文，带 schema 的分布式表）。",
+          "answer": [
+            "DataFrame",
+            "dataframe",
+            "dataFrame"
+          ],
+          "hint": "先想 spark.read 读出的数据是什么形态（像关系表、带列名与类型），再回忆它在 Spark SQL 中的英文名。",
+          "analysis": "**标准解题思路**\n1. spark.read 的所有 reader（csv / parquet / json）返回的都是 DataFrame。\n2. DataFrame 带 schema（列名 + 类型），是 Spark SQL 的基础。\n3. 填 `DataFrame`（比对时忽略大小写）。"
+        },
+        {
+          "task_id": "s07c02t03",
+          "type": "python",
+          "difficulty": 2,
+          "title": "模拟加载数据并逐行处理",
+          "question": "用**纯 Python** 模拟『加载数据 → 处理』流程：下面的代码已创建订单文件 `orders.txt`（每行格式：`订单ID,日期,金额`）。请读取该文件并逐行解析，打印出**金额 ≥ 100** 的订单，输出格式为 `订单ID:金额`（一行一个）。",
+          "code_context": "# 创建模拟订单文件（模拟 Spark 加载的数据源）\nwith open('orders.txt', 'w', encoding='utf-8') as f:\n    f.write('1001,2024-01-05,58\\n')\n    f.write('1002,2024-01-05,199\\n')\n    f.write('1003,2024-01-06,88\\n')\n    f.write('1004,2024-01-06,320\\n')\n\n# ===== 在这里编写代码 =====\n# 逐行读取 orders.txt，金额 >= 100 的订单按 '订单ID:金额' 格式打印\n",
+          "expected_output": "1002:199\n1004:320",
+          "reference": "with open('orders.txt', 'w', encoding='utf-8') as f:\n    f.write('1001,2024-01-05,58\\n')\n    f.write('1002,2024-01-05,199\\n')\n    f.write('1003,2024-01-06,88\\n')\n    f.write('1004,2024-01-06,320\\n')\n\nwith open('orders.txt', encoding='utf-8') as f:\n    for line in f:\n        parts = line.strip().split(',')\n        oid = parts[0]\n        amount = int(parts[2])\n        if amount >= 100:\n            print('%s:%d' % (oid, amount))",
+          "hint": "回忆文件读取与字符串处理：怎么按行读文件？每行用什么方法按逗号拆成字段？金额在哪个位置、要不要转类型？最后再想过滤条件。",
+          "analysis": "**标准解题思路**\n1. 第一段代码负责『造数据』：写入 4 行订单。\n2. 用 `with open('orders.txt', encoding='utf-8') as f` 打开文件，for line in f 逐行读取。\n3. 每行 `strip()` 去掉换行后 `split(',')`，得到 [订单ID, 日期, 金额]。\n4. `int(parts[2])` 把金额转成整数，判断 `>= 100`。\n5. 满足条件的按 `订单ID:金额` 格式打印。\n**验证**：金额 58 与 88 被过滤掉，输出 1002:199 和 1004:320。\n**为什么**：这就是 spark.read.csv + filter 的微缩版——加载 → 解析 → 过滤 → 输出。",
+          "enterprise_tip": "真实场景等价于 `spark.read.csv(...).filter(col('amount') >= 100)`，Spark 只是把它并行化到集群上执行。"
+        },
+        {
+          "task_id": "s07c02t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "spark.read.csv 常用参数",
+          "question": "用 `spark.read.csv('orders.csv', header=True, inferSchema=True)` 读取 CSV，其中 **header=True** 的作用是？",
+          "options": [
+            {
+              "text": "把第一行当作列名（表头）",
+              "correct": true,
+              "explain": "正确。header=True 表示首行是列名，其余行是数据。"
+            },
+            {
+              "text": "自动推断每列的数据类型",
+              "correct": false,
+              "explain": "自动推断类型是 inferSchema=True 的作用，不是 header。"
+            },
+            {
+              "text": "只读取前 100 行数据",
+              "correct": false,
+              "explain": "header 与读取行数无关，它只决定首行如何解析。"
+            },
+            {
+              "text": "指定文件编码为 UTF-8",
+              "correct": false,
+              "explain": "编码由 encoding 等参数控制，与 header 无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 拆解 `spark.read.csv` 的两个常用参数：header 与 inferSchema。\n2. header=True：第一行是列名；inferSchema=True：自动推断字段类型。\n3. 题目只问 header 的作用，故排除 B（那是 inferSchema）。\n4. 排除 C、D：与读取行数、编码无关。\n5. 选 A。\n**为什么**：企业里生产表建议用 `schema` 参数显式声明类型，而不是依赖 inferSchema，避免脏数据导致推断错误。",
+          "enterprise_tip": "面试题：『read.csv 时如何避免类型推断错误？』答：用 schema 显式声明列名与类型，如 `StructType([...])`，保证 schema 稳定。"
+        },
+        {
+          "task_id": "s07c02t05",
+          "type": "python",
+          "difficulty": 2,
+          "title": "模拟读取 CSV 并跳过表头统计行数",
+          "question": "用**纯 Python** 模拟『Spark 读取 CSV 统计行数』：下面的代码已创建一个小 CSV 文件 `data.csv`（第一行是表头 `name,age,city`，后面是 3 条数据）。请读取该文件，**跳过表头**，统计数据行数并输出，输出格式：`数据行数: N`。",
+          "code_context": "# 创建模拟 CSV（第一行是表头）\nwith open('data.csv', 'w', encoding='utf-8') as f:\n    f.write('name,age,city\\n')\n    f.write('alice,25,beijing\\n')\n    f.write('bob,30,shanghai\\n')\n    f.write('carol,28,guangzhou\\n')\n\n# ===== 在这里编写代码 =====\n# 读取 data.csv，跳过表头，统计数据行数并输出 '数据行数: N'\n",
+          "expected_output": "数据行数: 3",
+          "reference": "with open('data.csv', 'w', encoding='utf-8') as f:\n    f.write('name,age,city\\n')\n    f.write('alice,25,beijing\\n')\n    f.write('bob,30,shanghai\\n')\n    f.write('carol,28,guangzhou\\n')\n\nwith open('data.csv', encoding='utf-8') as f:\n    lines = f.readlines()\ncount = len(lines) - 1  # 跳过表头\nprint('数据行数: %d' % count)",
+          "hint": "读取文件有哪几种方式？读出的行列表里第一行是什么？题目要求的数据行数与总行数差多少？先想清楚再动手。",
+          "analysis": "**标准解题思路**\n1. 第一段代码负责『造数据』：写入表头 + 3 行数据。\n2. 用 `with open('data.csv', encoding='utf-8') as f` 打开文件，`f.readlines()` 读出全部 4 行。\n3. 跳过表头：`len(lines) - 1`，得到 3 条数据。\n4. `print('数据行数: %d' % count)` 输出 `数据行数: 3`。\n**为什么**：这等价于 `spark.read.csv(header=True)` 后 `df.count()` 的微缩版——Spark 靠 header 参数跳过表头，这里我们用『总行数减 1』手动实现。\n**易错点**：不能直接输出 4（那是包含表头的行数），题目明确要求跳过表头。",
+          "enterprise_tip": "真实场景：`df.count()` 返回的就是去掉表头后的数据行数；数据量大时 Spark 会并行统计，无需把所有行读回 Driver。"
+        },
+        {
+          "task_id": "s07c02t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "SparkSession 的作用",
+          "question": "关于 SparkSession 的作用，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Spark 2.0 起它是统一入口，整合 SQL、流、DataFrame 等能力，替代了 SparkContext + SQLContext 的组合",
+              "correct": true,
+              "explain": "正确。一个 SparkSession 包揽批、流、SQL。"
+            },
+            {
+              "text": "SparkSession 只能用于流处理，不能做离线批处理",
+              "correct": false,
+              "explain": "批、流、SQL 都是它的能力范围。"
+            },
+            {
+              "text": "每个 DataFrame 操作都必须新建一个 SparkSession",
+              "correct": false,
+              "explain": "应用内应全局复用同一个 SparkSession（getOrCreate 保证幂等）。"
+            },
+            {
+              "text": "SparkSession 是 HDFS 的客户端，与计算引擎无关",
+              "correct": false,
+              "explain": "它是 Spark 计算的统一入口，内部包含 SparkContext。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Spark 2.0 起 SparkSession 成为统一入口。\n2. 它整合 SQL、流、DataFrame，内部含 SparkContext。\n3. 选 A。\n**面试延伸**：getOrCreate 保证同一应用内会话复用，避免重复创建浪费资源。"
+        },
+        {
+          "task_id": "s07c02t07",
+          "type": "python",
+          "difficulty": 2,
+          "title": "模拟按列分组求和（groupBy sum）",
+          "question": "用**纯 Python** 模拟 Spark 的『groupBy + sum 聚合』：下面的代码已创建销售文件 `sales.csv`（第一行是表头 `region,amount`，后面是 4 条数据）。请读取该文件，**跳过表头**，用**字典**按 `region` 分组累加 `amount`，最后按**总金额从大到小**每行输出 `地区:总金额`。",
+          "code_context": "with open('sales.csv', 'w', encoding='utf-8') as f:\n    f.write('region,amount\\n')\n    f.write('华东,100\\n')\n    f.write('华南,150\\n')\n    f.write('华东,200\\n')\n    f.write('华北,80\\n')\n\n# ===== 在这里编写代码 =====\n# 读 sales.csv，跳过表头，用字典按 region 累加 amount\n# 按总金额降序输出 '地区:总金额'\n",
+          "expected_output": "华东:300\n华南:150\n华北:80",
+          "reference": "with open('sales.csv', 'w', encoding='utf-8') as f:\n    f.write('region,amount\\n')\n    f.write('华东,100\\n')\n    f.write('华南,150\\n')\n    f.write('华东,200\\n')\n    f.write('华北,80\\n')\n\ntotals = {}\nwith open('sales.csv', encoding='utf-8') as f:\n    f.readline()  # 跳过表头\n    for line in f:\n        parts = line.strip().split(',')\n        region = parts[0]\n        amount = int(parts[1])\n        totals[region] = totals.get(region, 0) + amount\n\nfor region in sorted(totals, key=lambda r: totals[r], reverse=True):\n    print('%s:%d' % (region, totals[region]))",
+          "hint": "分组求和用什么结构存？key 放什么、value 放什么？首次遇到某地区时初始值从几开始？最后按什么排序？",
+          "analysis": "**标准解题思路**\n1. 打开文件后先 f.readline() 跳过表头。\n2. 逐行 split(',') 解析出 region 与 amount。\n3. 字典累加：totals[region] = totals.get(region, 0) + amount → 华东=100+200=300、华南=150、华北=80。\n4. 按金额降序输出：sorted(totals, key=lambda r: totals[r], reverse=True)。\n**验证**：华东:300 / 华南:150 / 华北:80。\n**为什么**：这正是 Spark `df.groupBy('region').sum('amount')` 的纯 Python 等价物——字典的 key 对应分组维度，累加对应 sum 聚合。",
+          "enterprise_tip": "真实场景等价于 spark.read.csv(header=True).groupBy('region').sum('amount')；Spark 只是把它并行化到集群上执行。"
+        },
+        {
+          "task_id": "s07c02t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "提交作业到集群",
+          "question": "生产环境要把 Spark 作业提交到 YARN 集群运行，应使用哪个命令？",
+          "options": [
+            {
+              "text": "python job.py",
+              "correct": false,
+              "explain": "这只是在本地跑脚本，不会提交到集群。"
+            },
+            {
+              "text": "spark-submit --master yarn --executor-memory 4g job.py",
+              "correct": true,
+              "explain": "正确。spark-submit 是标准提交工具，可配 master、内存、核数等。"
+            },
+            {
+              "text": "hadoop jar job.jar",
+              "correct": false,
+              "explain": "这是 MapReduce 作业的提交命令。"
+            },
+            {
+              "text": "pyspark job.py",
+              "correct": false,
+              "explain": "pyspark 是交互式 Shell 入口，不适合提交正式作业。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 正式作业用 spark-submit 提交。\n2. 常用参数：--master（yarn / k8s / local）、--executor-memory、--num-executors、--executor-cores、--conf。\n3. 选 B。\n**面试延伸**：面试题『spark-submit 常用参数有哪些』——--master、--executor-memory、--num-executors、--executor-cores、--conf。"
+        },
+        {
+          "task_id": "s07c02t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "spark-submit 提交的底层流程",
+          "question": "在 YARN 集群上用 `spark-submit` 提交作业，从**底层流程**看，作业启动的顺序是？",
+          "options": [
+            {
+              "text": "提交后集群先为作业启动 Driver，Driver 再向资源管理器申请资源、拉起 Executor，Executor 注册完成后接收 Task 执行",
+              "correct": true,
+              "explain": "正确。Driver 先起，再申请 Executor，先规划后执行。"
+            },
+            {
+              "text": "先启动所有 Executor，再由 Executor 共同推举一个 Driver",
+              "correct": false,
+              "explain": "Driver 是启动入口，不是 Executor 推举出来的。"
+            },
+            {
+              "text": "spark-submit 把代码拷贝到每台机器，各 Executor 独立运行互不通信",
+              "correct": false,
+              "explain": "Executor 必须向 Driver 注册并接收调度，不是独立运行。"
+            },
+            {
+              "text": "计算资源由 HDFS 的 NameNode 分配，与资源管理器无关",
+              "correct": false,
+              "explain": "资源由 YARN 的 ResourceManager（或 Standalone Master / K8s）分配。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. spark-submit 把应用提交给集群（YARN / Standalone / K8s）。\n2. 集群为作业启动 Driver（cluster 模式下 Driver 跑在集群容器里）。\n3. Driver 启动后向资源管理器申请 Executor 资源，Executor 逐个启动。\n4. Executor 启动后向 Driver 注册，Driver 把 Task 分发下去执行。\n5. A 正确。\n6. 排除 B（Driver 不是推举的）、C（Executor 受 Driver 调度）、D（资源由 ResourceManager 分配）。\n7. 选 A。\n**面试延伸**：client 模式下 Driver 在提交端运行，cluster 模式在集群内运行；生产集群作业用 cluster 模式，避免客户端退出导致任务失败。",
+          "enterprise_tip": "面试题'spark-submit 后发生了什么'：提交 → 启动 Driver → 申请 Executor → Executor 注册 → 调度执行；能答出'Driver 先于 Executor 存在'就是核心。"
+        },
+        {
+          "task_id": "s07c02t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Spark on YARN 与 K8s",
+          "question": "关于 Spark 运行在 **YARN** 与 **Kubernetes（K8s）** 两种集群模式，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "两者都是 Spark 的集群管理器：YARN 是 Hadoop 生态成熟稳定的资源调度方案，K8s 以容器化方式提供更细粒度的资源弹性与隔离，是 Spark 容器化部署的主流方向",
+              "correct": true,
+              "explain": "正确。YARN 成熟、K8s 容器化弹性好，生产两者都在用。"
+            },
+            {
+              "text": "Spark 只能运行在 YARN 上，K8s 官方不支持",
+              "correct": false,
+              "explain": "Spark 官方原生支持 Kubernetes（spark-submit --master k8s://...）。"
+            },
+            {
+              "text": "K8s 模式提交作业不需要指定 --master 参数",
+              "correct": false,
+              "explain": "K8s 模式同样要指定 --master k8s://<集群地址>。"
+            },
+            {
+              "text": "YARN 模式一定比 K8s 模式运行更快",
+              "correct": false,
+              "explain": "性能取决于资源与调度配置，没有『一定更快』的说法。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 集群管理器（Cluster Manager）负责给 Spark 应用分配资源：YARN / K8s / Standalone。\n2. YARN：Hadoop 生态标准，成熟稳定、运维经验多，支持动态资源分配；\n3. K8s：以容器方式管理 Executor，弹性伸缩与资源隔离更细，镜像化部署便于统一发布；\n4. A 正确。\n5. 排除 B（官方支持 K8s）、C（要 --master）、D（无绝对快慢）。\n6. 选 A。\n**为什么**：两种模式选型看公司基础设施——已有 Hadoop 集群选 YARN，全面容器化的公司选 K8s。",
+          "enterprise_tip": "面试题『Spark on K8s 和 YARN 怎么选』：存量 Hadoop 生态、运维成熟选 YARN；云原生、要弹性伸缩与镜像化发布选 K8s，二者都通过 spark-submit --master 指定。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "spark.read.csv 有哪些常用参数？",
+          "a": "header（首行是否表头）、inferSchema（是否自动推断类型）、sep（分隔符）、schema（显式声明列类型）。生产环境建议显式 schema，避免推断错误。"
+        },
+        {
+          "q": "SparkSession 和 SparkContext 是什么关系？",
+          "a": "Spark 2.0 起 SparkSession 是统一入口，内部包含 SparkContext，并整合 SQL、流、DataFrame 能力；SparkContext 是更底层的 RDD 编程入口。"
+        },
+        {
+          "q": "local[2] 是什么意思？",
+          "a": "本地模式，用 2 个线程（模拟 2 个核）运行 Spark，用于开发调试；生产环境用 spark-submit --master yarn/k8s 提交到集群。"
+        },
+        {
+          "q": "为什么本平台用纯 Python 模拟而不是直接跑 pyspark？",
+          "a": "pyspark 需要安装 JDK + Spark 环境，门槛高；Spark 的算子逻辑（map/filter/聚合）用纯 Python 列表/字典就能模拟，先理解计算模型，有条件再搭真实环境。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "SparkSession",
+          "desc": "Spark 2.0 起的统一入口对象，builder 模式创建，整合 SQL、流、DataFrame 能力。"
+        },
+        {
+          "term": "spark.read",
+          "desc": "统一读入口，csv / parquet / json / table 等方法返回 DataFrame。"
+        },
+        {
+          "term": "header",
+          "desc": "read.csv 参数，True 表示第一行作为列名。"
+        },
+        {
+          "term": "inferSchema",
+          "desc": "read.csv 参数，True 时自动推断字段类型。"
+        },
+        {
+          "term": "local[N]",
+          "desc": "Spark 本地模式，用 N 个线程模拟分布式执行，用于开发调试。"
+        },
+        {
+          "term": "spark-submit",
+          "desc": "提交 Spark 作业的命令行工具，可配置 --master、--executor-memory 等。"
+        }
+      ],
+      "kps": [
+        "Spark 运行模式：本地 local[N] 与集群 spark-submit",
+        "SparkSession 统一入口（builder 链式 / getOrCreate）",
+        "spark.read 统一读入口与 DataFrame",
+        "read.csv 参数：header / inferSchema / 显式 schema",
+        "纯 Python 模拟 Spark 加载与逐行处理",
+        "用字典模拟按列分组求和"
+      ]
+    },
+    {
+      "chapter_id": "s07c03",
+      "title": "7.3 RDD 编程",
+      "goal": "掌握 transformation（map/filter/flatMap/distinct/reduceByKey/sortBy）与 action（collect/count/take）、懒加载机制",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "RDD 算子分两大类，这是 Spark 最重要的概念分界线：\n- **transformation（转换算子）**：`map`、`filter`、`flatMap`、`distinct`、`reduceByKey`、`sortBy`……返回**新的 RDD**，**惰性执行**；\n- **action（行动算子）**：`collect`、`count`、`take`、`saveAsTextFile`……**触发真正的计算**并返回结果。\n\n记忆口诀：**transformation 造新 RDD 不干活，action 一喊才开始干活**。"
+        },
+        {
+          "type": "text",
+          "content": "以『日志词频统计』为例逐个拆解常用转换算子：\n- `map(f)`：对每条数据应用函数，1 进 1 出；\n- `filter(f)`：保留满足条件的数据，1 进 0 或 1 出；\n- `flatMap(f)`：每条数据展开成 0 到多条（如一行文本拆成多个单词）；\n- `distinct()`：去重；\n- `reduceByKey(f)`：按 key 归并，相同 key 的数据在**分区内先聚合再 shuffle**，比 groupByKey 高效；\n- `sortBy(f)`：排序。\n\n一条转换链 `flatMap → map → reduceByKey → sortBy` 就是 WordCount 的完整骨架。"
+        },
+        {
+          "type": "code",
+          "lang": "python",
+          "content": "from pyspark.sql import SparkSession\n\nspark = SparkSession.builder.appName('RddDemo').master('local[2]').getOrCreate()\nsc = spark.sparkContext\n\n# 创建 RDD\nrdd = sc.parallelize(['spark hadoop', 'spark flink', 'hadoop hive'])\n\n# transformation 链（此刻都不执行，只是记录）\nwords = rdd.flatMap(lambda line: line.split(' '))                 # 拆词\npairs = words.map(lambda w: (w, 1))                               # 计数对\ncounts = pairs.reduceByKey(lambda a, b: a + b)                    # 相同词归并\nsorted_counts = counts.sortBy(lambda kv: kv[1], ascending=False)  # 按次数降序\n\n# action：触发计算\nprint(sorted_counts.collect())\n# 输出: [('spark', 2), ('hadoop', 2), ('hive', 1), ('flink', 1)]\n\nprint('单词总数:', words.count())   # 5\nprint('前 2 条:', rdd.take(2))      # ['spark hadoop', 'spark flink']",
+          "caption": "transformation 链 + action 触发"
+        },
+        {
+          "type": "warning",
+          "content": "**不要重复触发 action**：`rdd.count()` 之后又 `rdd.collect()`，Spark 会**从头重算**整条血缘链。同一份数据要多次使用，先 `rdd.cache()` 缓存——这是调优第一步。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**面试题**：`reduceByKey` 和 `groupByKey` 的区别？标准答法：两者都按 key 分组，但 `reduceByKey` 在 shuffle **之前**先在每个分区内做一次聚合（map 端预聚合），网络传输的数据量小得多；`groupByKey` 把全部原始数据传过去再聚合。数据量大时两者性能差距可达数量级。这个『能先聚合就先聚合』的思想贯穿整个大数据调优。"
+        }
+      ],
+      "hands_on": "1. 在本地（纯 Python 即可）用列表模拟：写出 flatMap(拆词) → map(成对) → reduceByKey(用字典聚合) → sortBy(排序) 的完整逻辑。\n2. 用一句话向同学解释 transformation 与 action 的区别。\n3. 思考：Spark 为什么要把算子设计成懒加载？写出两点好处。",
+      "tasks": [
+        {
+          "task_id": "s07c03t01",
+          "type": "python",
+          "difficulty": 2,
+          "title": "模拟 map 与 filter 链式处理",
+          "question": "用**纯 Python** 模拟 RDD 的转换链。给定列表 `nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]`，先模拟 `map`（每个数 ×2），再模拟 `filter`（保留 > 10 的结果），打印最终列表。",
+          "code_context": "nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n\n# ===== 在这里编写代码 =====\n# 模拟 RDD 转换链：先 map（每个数 ×2），再 filter（保留 > 10 的结果）\n# 提示：可以用列表推导式，也可以自己写两个模拟函数\n",
+          "expected_output": "[12, 14, 16, 18, 20]",
+          "reference": "nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n\n# 模拟 Spark transformation：map 与 filter\nmapped = [x * 2 for x in nums]\nfiltered = [x for x in mapped if x > 10]\nprint(filtered)",
+          "hint": "题目有两个步骤，想一想它们能换顺序吗？第一步对每个数做什么变换？第二步保留满足什么条件的数？",
+          "analysis": "**标准解题思路**\n1. 第一步模拟 map：`mapped = [x * 2 for x in nums]` → [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]。\n2. 第二步模拟 filter：`filtered = [x for x in mapped if x > 10]` → [12, 14, 16, 18, 20]。\n3. print(filtered) 输出列表，与 expected_output 一致。\n**易错点**：① 顺序不能反——先 filter 再 map 会得到完全不同的结果；② 输出必须是列表格式，不能打印每个元素。\n**为什么**：这就是 Spark 里 `rdd.map(...).filter(...)` 的纯 Python 等价物，只是 Spark 把同样的逻辑并行化到集群。",
+          "enterprise_tip": "map → filter 链在 Spark 中惰性定义、action 触发；纯 Python 模拟时『先整体变换、再整体过滤』的顺序与 Spark 的 DAG 执行顺序一致。"
+        },
+        {
+          "task_id": "s07c03t02",
+          "type": "order",
+          "difficulty": 3,
+          "title": "RDD 转换链的执行流程排序",
+          "question": "把『RDD 转换链从定义到出结果』的步骤按正确顺序排列。",
+          "steps": [
+            "用 sc.parallelize / textFile 创建初始 RDD",
+            "链式调用 transformation（map、filter 等），此时并不真正执行",
+            "调用 action（如 collect / count）触发计算",
+            "Spark 回溯血缘，按 DAG 真正执行各阶段",
+            "Driver 收到结果，输出到屏幕或保存"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "创建 → 懒定义转换 → action 触发 → 按血缘执行 → 返回结果。懒加载让 Spark 在执行前能看到整条链，统一优化。",
+          "analysis": "**标准解题思路**\n1. 第一步创建 RDD：parallelize 或 textFile，这是数据的起点。\n2. 第二步链式定义 transformation：此时只记录不执行。\n3. 第三步调用 action：按下执行按钮，触发整条血缘链。\n4. 第四步 Spark 回溯血缘（Lineage）按 DAG 真正计算。\n5. 第五步 Driver 汇总结果输出。\n**为什么**：如果 transformation 立即执行，Spark 就看不到后续算子、无法做整体优化——懒加载是 DAG 优化的前提。",
+          "enterprise_tip": "面试题『懒加载有什么好处』：① 整体优化执行计划；② 避免中间结果落盘；③ 失败时按血缘重算恢复。"
+        },
+        {
+          "task_id": "s07c03t03",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "reduceByKey 属于哪类算子",
+          "question": "在 PySpark 中，`rdd.reduceByKey(lambda a, b: a + b)` 属于哪一类算子？",
+          "options": [
+            {
+              "text": "action（行动算子）",
+              "correct": false,
+              "explain": "reduceByKey 返回的是新的 RDD，不是最终结果值，所以不是 action。"
+            },
+            {
+              "text": "transformation（转换算子）",
+              "correct": true,
+              "explain": "正确。reduceByKey 是 transformation，惰性执行，返回新 RDD。"
+            },
+            {
+              "text": "既不是 transformation 也不是 action",
+              "correct": false,
+              "explain": "Spark 的算子非此即彼，必属于其中一类。"
+            },
+            {
+              "text": "它会立即执行一次 shuffle 并返回结果",
+              "correct": false,
+              "explain": "shuffle 发生在真正执行时（被 action 触发后），且返回的是 RDD。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 判断标准：返回新 RDD 的是 transformation，返回结果值的是 action。\n2. reduceByKey 的返回值是一个 RDD（pair RDD），不是求和结果，所以是 transformation。\n3. 排除 D：shuffle 只在实际执行时发生，且 reduceByKey 不会『立即』执行。\n4. 选 B。\n**延伸**：`rdd.reduce(...)`（无 By）才是 action，它把整个 RDD 规约成一个值。",
+          "enterprise_tip": "面试题『reduceByKey 和 groupByKey 的区别』：reduceByKey 有 map 端预聚合、网络开销小，是推荐写法。"
+        },
+        {
+          "task_id": "s07c03t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "懒加载机制的含义",
+          "question": "关于 Spark 的**懒加载（lazy evaluation）**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "transformation 会立即执行并返回计算结果",
+              "correct": false,
+              "explain": "transformation 只是记录转换关系，惰性执行，不立即计算。"
+            },
+            {
+              "text": "只有遇到 action（如 collect、count）时，整条转换链才会真正执行",
+              "correct": true,
+              "explain": "正确。懒加载让 Spark 先看到整条计算链，统一优化后再执行。"
+            },
+            {
+              "text": "懒加载会导致每个算子分别执行一次，性能更差",
+              "correct": false,
+              "explain": "恰恰相反，懒加载便于整体优化、减少中间结果落盘，性能更好。"
+            },
+            {
+              "text": "RDD 在创建时就会立即读取全部数据到内存",
+              "correct": false,
+              "explain": "创建 RDD（parallelize / textFile）也是惰性的，真正读取发生在 action 触发后。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 懒加载的核心：transformation 只『记下要做的事』，不执行。\n2. 触发点：只有 action（collect / count / take / save）才让整条血缘链真正执行。\n3. 排除 A（transformation 立即执行）、C（懒加载反而利于优化）、D（创建 RDD 也是惰性的）。\n4. 选 B。\n**为什么**：懒加载是 DAG 优化的前提——先看到整条计算链，才能合并窄依赖、减少 shuffle、避免中间结果落盘。",
+          "enterprise_tip": "面试答『懒加载的好处』三要点：① 整体优化执行计划；② 避免中间结果落盘；③ 失败时按血缘重算恢复。"
+        },
+        {
+          "task_id": "s07c03t05",
+          "type": "python",
+          "difficulty": 3,
+          "title": "模拟 flatMap 拆词并按单词计数",
+          "question": "用**纯 Python** 模拟 Spark 的 `flatMap` + `reduceByKey`：给定句子列表 `sentences = ['spark hadoop', 'spark flink', 'hadoop hive']`，先把每句按空格拆成单词并**拍平**，再统计每个单词出现的次数，最后按**单词字典序**每行输出 `单词 次数`。",
+          "code_context": "sentences = ['spark hadoop', 'spark flink', 'hadoop hive']\n\n# ===== 在这里编写代码 =====\n# 1. 模拟 flatMap：每句拆词后拍平（可用 extend）\n# 2. 统计每个单词出现次数（模拟 reduceByKey）\n# 3. 按字典序输出 '单词 次数'\n",
+          "expected_output": "flink 1\nhadoop 2\nhive 1\nspark 2",
+          "reference": "sentences = ['spark hadoop', 'spark flink', 'hadoop hive']\n\nwords = []\nfor s in sentences:\n    words.extend(s.split(' '))          # 模拟 flatMap：拆词并拍平\n\ncounts = {}\nfor w in words:\n    counts[w] = counts.get(w, 0) + 1    # 模拟 reduceByKey：按单词聚合\n\nfor w in sorted(counts):                # 字典序输出\n    print('%s %d' % (w, counts[w]))",
+          "hint": "先想 flatMap『拆词后合并』和直接 append 有何不同；统计次数用什么结构、首次遇到某词初始值是多少？",
+          "analysis": "**标准解题思路**\n1. 模拟 flatMap：对每个句子 `s.split(' ')` 拆出单词列表，用 `words.extend(...)` 拍平到同一个列表。\n2. 展开结果：['spark','hadoop','spark','flink','hadoop','hive']。\n3. 模拟 reduceByKey：遍历 words，用字典 `counts[w] = counts.get(w, 0) + 1` 统计次数。\n4. 结果：spark=2, hadoop=2, flink=1, hive=1。\n5. 按字典序 `for w in sorted(counts)` 每行打印 `单词 次数`。\n**验证**：flink 1 / hadoop 2 / hive 1 / spark 2，与 expected_output 一致。\n**为什么**：`s.split(' ')` + `extend` 正是 Spark `flatMap(lambda line: line.split(' '))` 的纯 Python 等价物；字典聚合对应 `reduceByKey(lambda a, b: a + b)`。",
+          "enterprise_tip": "WordCount 是大数据入门『Hello World』：真实 PySpark 用 `rdd.flatMap(...).map(lambda w: (w, 1)).reduceByKey(...)`，本模拟题就是它的微型映射。"
+        },
+        {
+          "task_id": "s07c03t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "宽依赖与窄依赖",
+          "question": "关于 RDD 的宽依赖（wide dependency）与窄依赖（narrow dependency），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "map / filter 属于窄依赖：每个父分区最多被一个子分区使用，可流水线执行、无需 shuffle",
+              "correct": true,
+              "explain": "正确。窄依赖无 shuffle，还能在同一个 Executor 上流水线执行。"
+            },
+            {
+              "text": "reduceByKey / groupByKey 属于窄依赖",
+              "correct": false,
+              "explain": "按 key 汇聚必然跨分区，属于宽依赖（有 shuffle）。"
+            },
+            {
+              "text": "窄依赖必须产生 shuffle，性能更差",
+              "correct": false,
+              "explain": "恰恰相反，窄依赖没有 shuffle，性能更好。"
+            },
+            {
+              "text": "宽依赖的故障恢复成本低于窄依赖",
+              "correct": false,
+              "explain": "宽依赖恢复需要重算多个父分区，成本更高。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 窄依赖：父 RDD 每个分区最多被一个子分区使用（map / filter / union），无 shuffle、可流水线。\n2. 宽依赖：父分区被多个子分区使用（reduceByKey / groupByKey / join），产生 shuffle。\n3. 选 A。\n**面试延伸**：DAG 按宽依赖（shuffle 边界）切分 Stage；窄依赖故障恢复只需重算单个父分区，成本低。",
+          "enterprise_tip": "面试答『Stage 怎么划分』：按宽依赖（shuffle）切分；窄依赖的算子合并进同一个 Stage 流水线执行。"
+        },
+        {
+          "task_id": "s07c03t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "reduceByKey 与 groupByKey",
+          "question": "大数据量下，`reduceByKey` 通常比 `groupByKey` 快得多，主要原因是？",
+          "options": [
+            {
+              "text": "reduceByKey 不需要 shuffle",
+              "correct": false,
+              "explain": "两者都要 shuffle，区别在 shuffle 的数据量。"
+            },
+            {
+              "text": "reduceByKey 在 shuffle 前先在每个分区内做 map 端预聚合，网络传输的数据量小得多",
+              "correct": true,
+              "explain": "正确。先局部聚合再传输，数据量可能差数量级。"
+            },
+            {
+              "text": "groupByKey 只能处理小数据，大数据会直接报错",
+              "correct": false,
+              "explain": "groupByKey 也能跑大数据，只是把全部原始数据传过去再聚合，效率低。"
+            },
+            {
+              "text": "reduceByKey 只能用于求和",
+              "correct": false,
+              "explain": "reduceByKey 接受任意二元合并函数，不限于求和。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 两个算子都会 shuffle。\n2. reduceByKey 先在分区内局部聚合（map 端预聚合），再传输合并结果。\n3. groupByKey 把全部原始键值对传过去再聚合。\n4. 选 B。\n**延伸**：『能先聚合就先聚合』是贯穿整个大数据调优的思想，Spark SQL 也会自动做类似优化。",
+          "enterprise_tip": "这是面试必考题：答出『map 端预聚合 + 网络传输量差异』即满分，最好再补一句 groupByKey 只适合小数据量。"
+        },
+        {
+          "task_id": "s07c03t08",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：缓存避免重复计算",
+          "question": "同一份 RDD / DataFrame 要被多个 action 反复使用，为避免每次都从源头重算整条血缘链，应先用 ____ 方法缓存（填英文方法名，可带括号）。",
+          "answer": [
+            "cache",
+            "cache()",
+            "persist",
+            "persist()"
+          ],
+          "hint": "回忆『同一份数据被多个 action 反复使用』一节：为了避免重复计算，书里讲的方法叫什么？方法名与它的中文含义对应。",
+          "analysis": "**标准解题思路**\n1. 每次 action 都会沿血缘从头重算。\n2. 同一份数据多次使用 → 先 rdd.cache()（或 persist）缓存。\n3. 填 cache / cache()（persist 也可接受）。\n**延伸**：默认 cache() 只存内存（MEMORY_ONLY），数据大用 persist(MEMORY_AND_DISK)；用完 unpersist() 释放。"
+        },
+        {
+          "task_id": "s07c03t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "map 端预聚合省掉了什么",
+          "question": "从 **shuffle 底层**看，`reduceByKey` 的'map 端预聚合'具体省掉了什么？",
+          "options": [
+            {
+              "text": "相同 key 的数据先在各自分区内局部合并，再写入 shuffle 文件并跨节点传输，网络与磁盘传输的字节数大幅减少",
+              "correct": true,
+              "explain": "正确。先局部聚合再传输，传输的是合并结果而不是全部原始数据。"
+            },
+            {
+              "text": "省掉了 shuffle 本身，reduceByKey 不需要跨节点传数据",
+              "correct": false,
+              "explain": "reduceByKey 仍有 shuffle，只是传输量小。"
+            },
+            {
+              "text": "省掉了序列化，数据以对象形式直接传输",
+              "correct": false,
+              "explain": "跨节点传输必然序列化，预聚合不改变这一点。"
+            },
+            {
+              "text": "省掉了 reduce 端的所有计算，结果由 map 端直接算好",
+              "correct": false,
+              "explain": "reduce 端仍需跨分区汇总，只是汇总对象变小了。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 两者都要 shuffle：相同 key 的数据要跨分区汇聚。\n2. reduceByKey 在 map 端先把每个分区内相同 key 合并（局部聚合），写 shuffle 文件时已经是合并结果。\n3. groupByKey 不做预聚合，把全部原始键值对写进 shuffle 文件再传输。\n4. 结果：网络传输与磁盘写入的字节数大幅减少，可能差一个数量级。\n5. A 正确。\n6. 排除 B（仍有 shuffle）、C（仍要序列化）、D（reduce 端仍要汇总）。\n7. 选 A。\n**面试延伸**：'能先聚合就先聚合'是贯穿 Spark 调优的核心思想，Spark SQL 的聚合也会自动做类似优化。",
+          "enterprise_tip": "数据量大时把 groupByKey 改成 reduceByKey 是性价比最高的优化之一；Spark UI 的 Shuffle Read/Write 数据量对比能直接看到差距。"
+        },
+        {
+          "task_id": "s07c03t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "RDD 持久化级别",
+          "question": "关于 RDD 的**持久化级别（StorageLevel）**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "MEMORY_AND_DISK_SER：优先存内存，放不下溢写磁盘，且以序列化（SER）形式存储，更省内存但增加序列化/反序列化开销",
+              "correct": true,
+              "explain": "正确。序列化省内存、费 CPU，是大数据集缓存的常用级别。"
+            },
+            {
+              "text": "MEMORY_ONLY 会把数据同时保存一份在内存、一份在磁盘",
+              "correct": false,
+              "explain": "MEMORY_ONLY 只存内存，放不下会直接丢弃该分区（之后重算）。"
+            },
+            {
+              "text": "DISK_ONLY 只适合小数据，大数据会 OOM",
+              "correct": false,
+              "explain": "DISK_ONLY 只落盘不占内存，恰恰适合内存放不下的大数据。"
+            },
+            {
+              "text": "持久化级别缓存后无法再修改",
+              "correct": false,
+              "explain": "可以先 unpersist 释放，再用新的 StorageLevel 重新 persist。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. StorageLevel 由『存储介质（内存/磁盘）』与『是否序列化（SER）』两个维度组合。\n2. MEMORY_AND_DISK_SER：内存优先、放不下落盘，且以序列化字节存储——省内存但每次读取要反序列化（A 正确）。\n3. MEMORY_ONLY 只存内存（B 错）；DISK_ONLY 只落盘、不占内存（C 错）；缓存级别可更换（D 错）。\n4. 选 A。\n**面试延伸**：还有带副本的级别（如 MEMORY_ONLY_2）用于防节点故障，代价是双倍存储；选择级别 = 空间/CPU/容错三者的权衡。",
+          "enterprise_tip": "生产口诀：小数据用 MEMORY_ONLY，大数据反复复用用 MEMORY_AND_DISK_SER；对读写性能敏感的纯内存场景才考虑不带 SER 的级别。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "map、filter、flatMap 有什么区别？",
+          "a": "map 一对一（1 进 1 出）；filter 过滤（1 进 0 或 1 出）；flatMap 一对多（1 进 0~N 出），如一行文本拆成多个单词。"
+        },
+        {
+          "q": "reduceByKey 和 groupByKey 的区别？",
+          "a": "都按 key 分组，但 reduceByKey 在 shuffle 前先做 map 端预聚合，网络传输量小得多；groupByKey 把全部原始数据传过去再聚合，大数据量下性能差距可达数量级。"
+        },
+        {
+          "q": "常见的 action 算子有哪些？",
+          "a": "collect、count、take、saveAsTextFile、foreach 等，它们触发真正的计算并返回结果。"
+        },
+        {
+          "q": "为什么不要重复触发 action？",
+          "a": "每次 action 都会沿血缘从头重算整条链；同一份数据要多次使用时，应先 cache()/persist() 缓存，避免重复计算。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "transformation",
+          "desc": "转换算子，惰性执行、返回新 RDD：map / filter / flatMap / distinct / reduceByKey / sortBy。"
+        },
+        {
+          "term": "action",
+          "desc": "行动算子，触发计算并返回结果：collect / count / take / saveAsTextFile。"
+        },
+        {
+          "term": "map",
+          "desc": "一对一转换，对每条数据应用函数。"
+        },
+        {
+          "term": "flatMap",
+          "desc": "一对多转换，每条数据展开成 0~N 条，常用于拆词。"
+        },
+        {
+          "term": "reduceByKey",
+          "desc": "按 key 聚合，shuffle 前先做 map 端预聚合，比 groupByKey 高效。"
+        },
+        {
+          "term": "groupByKey",
+          "desc": "按 key 分组，无预聚合，大数据量下性能差。"
+        },
+        {
+          "term": "collect",
+          "desc": "把分布式结果收集到 Driver 的 action 算子，慎用于大数据。"
+        }
+      ],
+      "kps": [
+        "transformation 与 action 的分类",
+        "map / filter：一对一与过滤",
+        "flatMap：一对多拆词",
+        "reduceByKey：map 端预聚合",
+        "groupByKey 与 reduceByKey 的性能对比",
+        "宽依赖与窄依赖（shuffle 边界）",
+        "懒加载与 action 触发机制",
+        "重复 action 与缓存（cache 避免重算）"
+      ]
+    },
+    {
+      "chapter_id": "s07c04",
+      "title": "7.4 DataFrame 与 Spark SQL",
+      "goal": "掌握 DataFrame 概念、DSL（select/filter/groupBy/agg）、Spark SQL 与 Hive 集成",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**DataFrame** 是带 schema 的分布式表：有列名、有类型、像关系表。相比 RDD，DataFrame 自带**类型信息**，Spark 的 **Catalyst 优化器**可以根据 schema 自动优化执行计划（谓词下推、列裁剪等），所以**同样的逻辑 DataFrame 通常比 RDD 快**。\n\n对比：RDD 是『一堆对象』，DataFrame 是『一张表』。企业里 90% 的 Spark 开发用 DataFrame / SQL，很少直接写 RDD。"
+        },
+        {
+          "type": "text",
+          "content": "操作 DataFrame 有两种主流方式：\n- **DSL（领域特定语言）**：`df.select('user_id', 'amount')`、`df.filter(df.amount > 100)`、`df.groupBy('user_id').agg({'amount': 'sum'})`、`df.orderBy('amount', ascending=False)`；\n- **Spark SQL**：`spark.sql('SELECT user_id, SUM(amount) FROM orders GROUP BY user_id')`，与 Hive SQL 兼容。\n\n**与 Hive 集成**：配置 `hive-site.xml` 并开启 `enableHiveSupport()` 后，Spark SQL 直接读写 Hive 表、共用 metastore，实现『数仓一套 SQL 跑遍离线』。"
+        },
+        {
+          "type": "code",
+          "lang": "python",
+          "content": "from pyspark.sql import SparkSession\nfrom pyspark.sql import functions as F\n\nspark = SparkSession.builder \\\n    .appName('SqlDemo') \\\n    .enableHiveSupport() \\\n    .getOrCreate()\n\ndf = spark.read.csv('orders.csv', header=True, inferSchema=True)\n\n# DSL 方式\ndf.select('user_id', 'amount') \\\n  .filter(df.status == 'completed') \\\n  .groupBy('user_id') \\\n  .agg(F.sum('amount').alias('total_gmv')) \\\n  .orderBy('total_gmv', ascending=False) \\\n  .show()\n\n# 注册临时视图后用 Spark SQL\n# df.createOrReplaceTempView('orders')\n# spark.sql('''\n#     SELECT user_id, SUM(amount) AS total_gmv, COUNT(*) AS order_cnt\n#     FROM orders\n#     WHERE status = 'completed'\n#     GROUP BY user_id\n#     ORDER BY total_gmv DESC\n# ''').show()",
+          "caption": "同一逻辑的 DSL 与 Spark SQL 两种写法"
+        },
+        {
+          "type": "tip",
+          "content": "`createOrReplaceTempView` 创建的只是当前会话内的临时视图；要跨会话共享需用 `saveAsTable` 写入 Hive 表。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：数仓工程师每天写的 Hive SQL，跑批引擎基本都是 Spark SQL。Spark 兼容 Hive 语法意味着**学习成本低、迁移成本低**——这也是 Spark 取代 Tez / MapReduce 成为离线数仓标配的原因。面试常问：**『DataFrame 和 RDD 有什么区别？』**答：DataFrame 带 schema、有 Catalyst 优化、API 更友好，性能通常更好。"
+        }
+      ],
+      "hands_on": "1. 把上一章的 WordCount 改写成 DataFrame / SQL 两种写法（数据可用本地文件）。\n2. 用 SQL 完成：统计每类商品（category）的销售总金额和订单数。\n3. 思考：为什么 DataFrame 自带 schema 就能让执行计划更优？",
+      "tasks": [
+        {
+          "task_id": "s07c04t01",
+          "type": "sql",
+          "difficulty": 2,
+          "title": "Spark SQL：统计各用户已完成订单 GMV",
+          "question": "电商订单表 `orders(order_id, user_id, amount, status, dt)`，`status` 取值 `completed`（已完成）/ `pending`（待支付）/ `cancelled`（已取消）。请用 SQL 统计**每个用户已完成订单**的总金额（GMV）和订单数，按总金额**降序**、用户 ID **升序**排列，输出列：`user_id, total_amount, order_cnt`。\n\n> 本题在 SQLite 环境作答，与 Spark SQL 语法一致（SELECT / WHERE / GROUP BY / ORDER BY 通用）。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount INTEGER, status TEXT, dt TEXT);\nINSERT INTO orders VALUES\n(1, 101, 59, 'completed', '2024-01-05'),\n(2, 102, 199, 'completed', '2024-01-05'),\n(3, 101, 88, 'pending', '2024-01-05'),\n(4, 103, 320, 'completed', '2024-01-06'),\n(5, 101, 45, 'completed', '2024-01-06'),\n(6, 102, 12, 'cancelled', '2024-01-06');",
+          "expected_sql": "SELECT user_id, SUM(amount) AS total_amount, COUNT(*) AS order_cnt\nFROM orders\nWHERE status = 'completed'\nGROUP BY user_id\nORDER BY total_amount DESC, user_id ASC;",
+          "analysis": "**标准解题思路**\n1. 先过滤：只要已完成订单，`WHERE status = 'completed'`（排除 pending 和 cancelled）。\n2. 再分组：按用户聚合，`GROUP BY user_id`。\n3. 聚合计算：`SUM(amount)` 求该用户已完成订单总金额，`COUNT(*)` 求订单数。\n4. 排序：按总金额降序 `ORDER BY total_amount DESC`，金额相同再按用户 ID 升序，保证结果确定。\n**验证**：user 103 → 320 / 1 单；user 102 → 199 / 1 单；user 101 → 59+45=104 / 2 单；user 101 的 pending 88 元不计入。\n**为什么**：WHERE 在 GROUP BY 之前过滤，这是 SQL 执行顺序，也是本题最关键的坑。",
+          "enterprise_tip": "企业里这就是每天跑在 Spark SQL 上的用户 GMV 报表口径：先过滤状态 → 按用户聚合 → 排序取 TopN。注意『过滤必须在聚合前』，否则口径会错。"
+        },
+        {
+          "task_id": "s07c04t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "DataFrame 相比 RDD 的优势",
+          "question": "关于 DataFrame 与 RDD 的对比，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "DataFrame 没有类型信息，无法优化",
+              "correct": false,
+              "explain": "恰恰相反，DataFrame 自带 schema，Catalyst 优化器正依赖它。"
+            },
+            {
+              "text": "DataFrame 带 schema（列名与类型），Spark 可据此生成更优执行计划",
+              "correct": true,
+              "explain": "正确。列裁剪、谓词下推都依赖 schema 信息。"
+            },
+            {
+              "text": "DataFrame 只能用 SQL 操作，不能用 DSL",
+              "correct": false,
+              "explain": "DataFrame 同时支持 DSL 与 SQL 两种方式。"
+            },
+            {
+              "text": "RDD 一定比 DataFrame 快",
+              "correct": false,
+              "explain": "多数场景 DataFrame 更快；RDD 的优势在灵活度而非性能。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 回忆 DataFrame 特性：带 schema、面向表结构。\n2. schema 让 Catalyst 优化器能做列裁剪、谓词下推、代码生成，所以执行计划更优。\n3. 排除 A（说反了）、C（DSL 和 SQL 都支持）、D（性能看场景，通常 DataFrame 更快）。\n4. 选 B。\n**为什么**：RDD 对 Spark 而言只是『一堆对象』，无法预知结构，优化空间小。",
+          "enterprise_tip": "面试题『DataFrame 为什么比 RDD 快』：schema + Catalyst 优化器（列裁剪 / 谓词下推 / 代码生成）。"
+        },
+        {
+          "task_id": "s07c04t04",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "Spark SQL：统计用户订单金额并取前 3",
+          "question": "电商订单表 `orders(order_id, user_id, amount, dt)`。请统计**每个用户**的订单总金额，只返回总金额**最高的前 3 个用户**，输出列：`user_id, total_amount`，按总金额**降序**、用户 ID **升序**排列。\n\n> 本题在 SQLite 环境作答，与 Spark SQL 语法一致（SELECT / GROUP BY / ORDER BY / LIMIT 通用）。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount INTEGER, dt TEXT);\nINSERT INTO orders VALUES\n(1, 101, 59, '2024-01-05'),\n(2, 102, 199, '2024-01-05'),\n(3, 101, 88, '2024-01-06'),\n(4, 103, 320, '2024-01-06'),\n(5, 101, 45, '2024-01-07'),\n(6, 102, 12, '2024-01-07'),\n(7, 104, 150, '2024-01-07'),\n(8, 104, 60, '2024-01-08');",
+          "expected_sql": "SELECT user_id, SUM(amount) AS total_amount\nFROM orders\nGROUP BY user_id\nORDER BY total_amount DESC, user_id ASC\nLIMIT 3;",
+          "analysis": "**标准解题思路**\n1. 需求拆解：按用户聚合 → 求总金额 → 取前 3 → 排序确定。\n2. 分组聚合：`GROUP BY user_id` + `SUM(amount)`，得到每个用户的总金额。\n3. 排序：`ORDER BY total_amount DESC`（金额降序），金额相同时再按 `user_id ASC` 保证结果唯一确定。\n4. 取前 3：`LIMIT 3`。\n**验证**：user 103=320、102=211、104=210、101=192，前 3 名为 103 / 102 / 104。\n**为什么**：TopN 是数仓最常用的报表场景，Spark SQL 写法与 SQLite 完全一致；注意 LIMIT 前必须有确定排序，否则结果行序随机，判定会失败。",
+          "enterprise_tip": "企业里这就是『GMV TopN 用户榜』：先聚合、再排序、后 LIMIT。数据量大时 Spark 会自动并行聚合，写法不变。"
+        },
+        {
+          "task_id": "s07c04t05",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "DataFrame 与 RDD 的相互转换",
+          "question": "关于 DataFrame 与 RDD 的关系，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "DataFrame 和 RDD 之间不能相互转换",
+              "correct": false,
+              "explain": "可以互转：df.rdd 转 RDD，rdd.toDF() 转 DataFrame。"
+            },
+            {
+              "text": "DataFrame 可以通过 .rdd 转为 RDD，RDD 可以通过 toDF() 转为 DataFrame",
+              "correct": true,
+              "explain": "正确。两者互相转换是开发中常见的操作。"
+            },
+            {
+              "text": "DataFrame 只能由 RDD 转换而来，不能转回去",
+              "correct": false,
+              "explain": "转换是双向的，DataFrame 也可用 .rdd 转回 RDD。"
+            },
+            {
+              "text": "DataFrame 转 RDD 会丢失所有数据",
+              "correct": false,
+              "explain": "转换不丢数据，只是改变了数据抽象形式（表 → 对象集合）。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. DataFrame 与 RDD 是同一份数据的两种抽象：一个像表（带 schema），一个是对象集合。\n2. 转换是双向的：RDD → DataFrame 用 `toDF()`；DataFrame → RDD 用 `.rdd`。\n3. 排除 A（不能转换）、C（只能单向）、D（丢数据）。\n4. 选 B。\n**为什么**：开发中常『RDD 做灵活处理 → toDF 转表 → 用 SQL 做聚合分析』，转换是数据链路的粘合剂。",
+          "enterprise_tip": "面试题：『什么时候用 RDD，什么时候用 DataFrame？』答：RDD 适合无结构、需极致灵活的底层操作；DataFrame 有 schema + Catalyst 优化，企业 90% 场景用它。"
+        },
+        {
+          "task_id": "s07c04t06",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "Spark SQL：多表 JOIN 统计各城市销售",
+          "question": "电商有两张表：`users(user_id, user_name, city)` 用户表和 `orders(order_id, user_id, amount, dt)` 订单表。请统计**每个城市**的订单总金额和订单数，输出列：`city, total_amount, order_cnt`，按总金额**降序**、城市名**升序**排列。\n\n> 本题在 SQLite 环境作答，与 Spark SQL 语法一致（JOIN / GROUP BY / ORDER BY 通用）。",
+          "setup": "CREATE TABLE users (user_id INTEGER, user_name TEXT, city TEXT);\nINSERT INTO users VALUES\n(1, '张三', '上海'),\n(2, '李四', '北京'),\n(3, '王五', '北京'),\n(4, '赵六', '深圳');\nCREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount INTEGER, dt TEXT);\nINSERT INTO orders VALUES\n(101, 1, 59, '2024-01-05'),\n(102, 1, 88, '2024-01-06'),\n(103, 2, 199, '2024-01-05'),\n(104, 3, 320, '2024-01-06'),\n(105, 2, 45, '2024-01-07'),\n(106, 4, 150, '2024-01-07');",
+          "expected_sql": "SELECT u.city, SUM(o.amount) AS total_amount, COUNT(*) AS order_cnt\nFROM users u\nJOIN orders o ON u.user_id = o.user_id\nGROUP BY u.city\nORDER BY total_amount DESC, u.city ASC;",
+          "analysis": "**标准解题思路**\n1. 需求拆解：用户表与订单表 JOIN → 按城市分组 → 聚合金额与订单数。\n2. JOIN 条件：ON u.user_id = o.user_id（订单属于哪个用户）。\n3. 分组聚合：GROUP BY u.city + SUM(o.amount) + COUNT(*)。\n4. 排序：ORDER BY total_amount DESC, city ASC 保证结果确定。\n**验证**：北京（李四 244 + 王五 320 = 564 / 3 单）、深圳（150 / 1 单）、上海（张三 147 / 2 单）。\n**为什么**：多表 JOIN 是数仓最常用的分析，Spark SQL 与 SQLite 语法一致；注意 JOIN 条件写错会导致数据翻倍或丢失。",
+          "enterprise_tip": "企业里这就是『城市维度 GMV 报表』：维度表（users）与事实表（orders）按外键关联聚合；数仓建模中 JOIN 键要加索引、过滤条件前置。"
+        },
+        {
+          "task_id": "s07c04t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "DSL 与 Spark SQL 的关系",
+          "question": "同一逻辑既可以用 DSL 写，也可以用 Spark SQL 写。下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "DSL 和 SQL 是两套独立引擎，跑出来的结果可能不一致",
+              "correct": false,
+              "explain": "两者最终进入同一个 Catalyst 优化器，结果一致。"
+            },
+            {
+              "text": "两者最终都会进入 Catalyst 优化器生成执行计划；DSL 适合程序化拼装，SQL 适合复杂查询",
+              "correct": true,
+              "explain": "正确。写法不同，执行引擎与结果相同。"
+            },
+            {
+              "text": "SQL 写法只能在 Hive 中使用，DataFrame 不支持",
+              "correct": false,
+              "explain": "DataFrame 可注册临时视图后用 spark.sql 查询。"
+            },
+            {
+              "text": "DSL 一定比 SQL 快，所以企业禁用 SQL",
+              "correct": false,
+              "explain": "性能由优化器决定，与写法无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. DSL（df.select / filter / groupBy / agg）与 Spark SQL（spark.sql）是同一引擎的两种语法。\n2. 都会经过 Catalyst 优化器，结果一致。\n3. 选 B。\n**面试延伸**：DSL 便于动态拼装过滤条件；SQL 便于复用 Hive 经验与复杂 join，按场景选择。"
+        },
+        {
+          "task_id": "s07c04t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Spark SQL 与 Hive 集成",
+          "question": "关于 Spark SQL 与 Hive 的集成，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "开启 enableHiveSupport() 后，Spark SQL 可直接读写 Hive 表并共用 metastore",
+              "correct": true,
+              "explain": "正确。共用元数据，实现『一套 SQL 跑遍离线数仓』。"
+            },
+            {
+              "text": "Spark SQL 与 Hive 语法完全不兼容，无法互操作",
+              "correct": false,
+              "explain": "Spark SQL 兼容 Hive 语法，可无缝读写 Hive 表。"
+            },
+            {
+              "text": "Hive 表只能由 Hive 引擎查询，Spark 无法访问",
+              "correct": false,
+              "explain": "配置 enableHiveSupport 后 Spark 可直接访问。"
+            },
+            {
+              "text": "启用 Hive 支持会拖慢 Spark，生产环境不建议开启",
+              "correct": false,
+              "explain": "启用只是接入 metastore，不影响计算性能。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. SparkSession.builder.enableHiveSupport() 开启 Hive 集成。\n2. 效果：读写 Hive 表、共用 metastore、兼容 Hive 语法。\n3. 选 A。\n**面试延伸**：离线数仓的 SQL 跑批引擎大多已是 Spark SQL——学习成本低、迁移成本低，是 Spark 取代 Tez / MapReduce 成为数仓标配的原因。"
+        },
+        {
+          "task_id": "s07c04t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "DataFrame 查询的底层执行",
+          "question": "从**底层**看，一条 DataFrame / SQL 查询在 Spark 中是如何被执行出来的？",
+          "options": [
+            {
+              "text": "解析为逻辑计划 → Catalyst 优化器优化（谓词下推、列裁剪等）→ 生成物理计划 → 转成 RDD 执行",
+              "correct": true,
+              "explain": "正确。这是 Catalyst 优化器的标准执行链路。"
+            },
+            {
+              "text": "直接翻译成 Java 代码执行，不经过任何优化器",
+              "correct": false,
+              "explain": "所有查询都先经 Catalyst 生成执行计划。"
+            },
+            {
+              "text": "先在 MySQL 中执行查询，再把结果加载到 Spark",
+              "correct": false,
+              "explain": "查询在 Spark 内执行，不依赖外部数据库。"
+            },
+            {
+              "text": "Catalyst 只负责解析语法，不做任何优化",
+              "correct": false,
+              "explain": "Catalyst 的核心价值就是优化执行计划。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. DataFrame / SQL 先被解析成逻辑计划（Logical Plan），描述'要算什么'。\n2. Catalyst 优化器对逻辑计划做优化：谓词下推（过滤提前）、列裁剪（只留需要的列）、常量折叠等。\n3. 优化后生成物理计划（Physical Plan），决定用什么算子、怎么 join。\n4. 最终把物理计划转成 RDD 在集群上执行。\n5. A 正确。\n6. 排除 B（必经优化器）、C（不依赖 MySQL）、D（优化是核心）。\n7. 选 A。\n**面试延伸**：`spark.sql('EXPLAIN SELECT ...')` 可以查看逻辑计划与物理计划，是排查 SQL 性能的利器。",
+          "enterprise_tip": "面试题'DataFrame 为什么比 RDD 快'的完整答案：schema + Catalyst 优化（谓词下推、列裁剪）+ 代码生成，而 RDD 对优化器而言是黑盒。"
+        },
+        {
+          "task_id": "s07c04t10",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "AQE 自适应查询执行",
+          "question": "关于 Spark 3.0 的**自适应查询执行**（AQE，Adaptive Query Execution），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "AQE 在运行时根据 shuffle 阶段的实际输出动态合并/拆分 shuffle 分区、动态切换 join 策略（如 SortMergeJoin 与 BroadcastHashJoin 互切）、并动态优化数据倾斜的 join，三项都发生在运行期",
+              "correct": true,
+              "explain": "正确。运行时自适应是 AQE 的灵魂，能根据真实数据分布补救静态计划。"
+            },
+            {
+              "text": "AQE 只在编译期做一次静态优化，运行期不再调整",
+              "correct": false,
+              "explain": "恰恰相反，AQE 的核心就是在运行期根据中间结果调整执行计划。"
+            },
+            {
+              "text": "AQE 只能用于 RDD 算子，对 Spark SQL 无效",
+              "correct": false,
+              "explain": "AQE 主要作用于 SQL / DataFrame 的 shuffle 与 join 执行计划。"
+            },
+            {
+              "text": "AQE 会强制所有任务使用广播 join，导致内存溢出",
+              "correct": false,
+              "explain": "AQE 是『按需切换』，只有小表才切广播 join，大表仍用 SortMergeJoin。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 背景：Catalyst 静态优化看不到真实数据分布，可能做出错误假设（如 join 小表大小）。\n2. AQE 三大优化：\n   - 动态合并 shuffle 分区：根据输出大小调整分区数，避免过多空/小分区；\n   - 动态切换 join 策略：运行期发现某侧表实际很小，把 SortMergeJoin 切换成 BroadcastHashJoin；\n   - 动态优化倾斜 join：自动把倾斜的大 key 拆分成多份参与 join。\n3. 三者都在运行期发生（A 正确）。\n4. 排除 B（编译期）、C（SQL 专属）、D（按需切换非强制）。\n5. 选 A。\n**面试延伸**：AQE 通过 spark.sql.adaptive.enabled 控制（Spark 3.2 起默认开启），是『计划跟不上变化』场景的救星。",
+          "enterprise_tip": "生产上数据分布随业务波动的表（如大促 join）强烈建议开启 AQE；Spark UI 的 SQL 页面能展开每个 Stage 看 AQE 实际做了什么调整。"
+        },
+        {
+          "task_id": "s07c04t11",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "Tungsten 整段代码生成",
+          "question": "Spark Tungsten 项目的**整段代码生成**（Whole-stage Code Generation）为什么能显著提速？",
+          "options": [
+            {
+              "text": "把一条 SQL/DataFrame 链上的多个算子融合编译成一段紧密的 Java 代码，消除算子间的虚函数调用与中间对象的序列化/反序列化开销，让中间数据尽量留在寄存器与 CPU 缓存中",
+              "correct": true,
+              "explain": "正确。融合 + 去虚调用 + 数据留在寄存器/缓存，是提速的三大来源。"
+            },
+            {
+              "text": "它把所有数据缓存进内存，因此完全不需要落盘",
+              "correct": false,
+              "explain": "缓存是 cache/persist 的职责，且数据量大时仍会落盘。"
+            },
+            {
+              "text": "它用 GPU 并行计算替代 CPU 执行",
+              "correct": false,
+              "explain": "Tungsten 面向 CPU 优化（寄存器、SIMD 风格），不依赖 GPU。"
+            },
+            {
+              "text": "它把 SQL 编译成机器码直接执行，绕过 JVM",
+              "correct": false,
+              "explain": "整段代码生成生成的是 Java 字节码，仍运行在 JVM 上。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 没有 WSCG 时：每个算子独立执行，行数据在算子间以对象形式传递，产生大量虚函数调用与中间对象。\n2. WSCG：把相邻算子（filter → project → agg 等）融合成一段代码，一次循环内完成整条链。\n3. 收益：\n   - 消除虚函数调用（直接内联逻辑）；\n   - 消除中间对象的创建与序列化/反序列化；\n   - 局部变量尽量放寄存器与 CPU 缓存，内存访问更高效。\n4. A 正确。\n5. 排除 B（缓存不是它的职责）、C（不依赖 GPU）、D（仍是 JVM 字节码）。\n6. 选 A。\n**面试延伸**：WSCG 与 Catalyst 优化配合，是 DataFrame/SQL 快于 RDD 的两大底层原因之一（另一个是 schema 带来的优化空间）。",
+          "enterprise_tip": "面试题『DataFrame 为什么比 RDD 快』的完整答案：schema + Catalyst 优化 + Tungsten 整段代码生成（WSCG）+ 二进制内存管理（Unsafe），四层合起来才是完整闭环。"
+        },
+        {
+          "task_id": "s07c04t12",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "UDF 的注册方式",
+          "question": "在 Spark SQL 中使用自定义函数（UDF），正确的做法是？",
+          "options": [
+            {
+              "text": "先用 spark.udf.register('func_name', python_func, returnType) 注册（或用 @udf 装饰器定义），再在 SQL / DSL 中按函数名调用",
+              "correct": true,
+              "explain": "正确。注册后才能被 SQL 引擎识别并调用。"
+            },
+            {
+              "text": "直接定义 Python 函数即可在 SQL 中使用，无需注册",
+              "correct": false,
+              "explain": "SQL 引擎不认识普通 Python 函数，必须先注册。"
+            },
+            {
+              "text": "PySpark 不支持 UDF，只能写 Java UDF",
+              "correct": false,
+              "explain": "PySpark 完全支持 UDF（Python 函数 + 注册），只是性能上建议优先用内置函数。"
+            },
+            {
+              "text": "UDF 注册后只能在创建它的 Executor 上生效",
+              "correct": false,
+              "explain": "UDF 会随作业分发到所有 Executor，全集群可用。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. UDF = 用户自定义函数，把业务逻辑扩展进 SQL。\n2. 注册步骤：定义 Python 函数 → spark.udf.register('函数名', 函数, 返回类型)（或 @F.udf 装饰器）→ SQL/DSL 中按函数名调用（A 正确）。\n3. 排除 B（必须注册）、C（Python 支持）、D（全集群生效）。\n4. 选 A。\n**为什么**：注册的本质是『告诉 Spark 这个函数的名字、输入输出类型、可序列化分发』，注册后函数随作业分发到各 Executor 并行执行。",
+          "enterprise_tip": "生产注意：Python UDF 在 PySpark 里走进程间通信，性能远低于内置函数，能用内置函数/高阶函数就优先用；UDF 只用于内置能力覆盖不到的逻辑。"
+        },
+        {
+          "task_id": "s07c04t13",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：DataFrame 与 Dataset",
+          "question": "在 Spark 的类型体系中，DataFrame 可以看作每行类型为 ____ 的 Dataset（即 Dataset[Row]），填英文单词（三个字母）。",
+          "answer": [
+            "Row",
+            "row",
+            "ROW"
+          ],
+          "hint": "题目括号里已提示答案形态（Dataset[____]），回忆 DataFrame 每行在类型上对应什么对象。",
+          "analysis": "**标准解题思路**\n1. Dataset 是强类型 API，泛型参数是元素类型。\n2. DataFrame 在 Scala 类型层面 = Dataset[Row]，即每一行的类型是 Row（行对象）。\n3. 填 `Row`（比对忽略大小写）。\n**面试延伸**：Dataset 有编译期类型检查，DataFrame（Dataset[Row]）只有运行期检查；PySpark 中不区分 Dataset，统一叫 DataFrame。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "DataFrame 和 RDD 有什么区别？",
+          "a": "DataFrame 带 schema（列名+类型）、像关系表，Catalyst 优化器可据此做列裁剪/谓词下推/代码生成，性能通常更好；RDD 灵活但缺少类型信息、优化空间小。企业 90% 的开发用 DataFrame/SQL。"
+        },
+        {
+          "q": "DSL 和 Spark SQL 怎么选？",
+          "a": "两者等价：DSL（df.select/filter/groupBy/agg）适合程序化拼装；spark.sql 适合复杂 join 与复用 SQL 经验，且兼容 Hive。最终都进入同一执行引擎。"
+        },
+        {
+          "q": "createOrReplaceTempView 有什么用？",
+          "a": "把 DataFrame 注册为当前会话的临时视图，之后可用 spark.sql 查询；会话结束即失效，跨会话共享需用 saveAsTable 写入 Hive 表。"
+        },
+        {
+          "q": "Spark SQL 为什么能和 Hive 无缝衔接？",
+          "a": "Spark SQL 兼容 Hive 语法并共用 metastore（enableHiveSupport），可直接读写 Hive 表，实现『一套 SQL 跑遍离线数仓』。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "DataFrame",
+          "desc": "带 schema 的分布式表，Spark SQL 的核心数据结构，支持 DSL 与 SQL 两种操作。"
+        },
+        {
+          "term": "schema",
+          "desc": "列名与类型的描述，DataFrame 优化（列裁剪、谓词下推）的基础。"
+        },
+        {
+          "term": "Catalyst",
+          "desc": "Spark 查询优化器，基于 schema 生成更优执行计划。"
+        },
+        {
+          "term": "DSL",
+          "desc": "DataFrame 的编程式 API：select / filter / groupBy / agg / orderBy。"
+        },
+        {
+          "term": "Spark SQL",
+          "desc": "用标准 SQL 操作 DataFrame，兼容 Hive 语法。"
+        },
+        {
+          "term": "createOrReplaceTempView",
+          "desc": "把 DataFrame 注册为会话级临时视图，供 spark.sql 使用。"
+        },
+        {
+          "term": "enableHiveSupport",
+          "desc": "SparkSession 配置项，开启后支持读写 Hive 表并共享 metastore。"
+        }
+      ],
+      "kps": [
+        "DataFrame：带 schema 的分布式表",
+        "Catalyst 优化器（列裁剪、谓词下推、代码生成）",
+        "DSL 操作：select / filter / groupBy / agg / orderBy",
+        "Spark SQL 与临时视图",
+        "多表 JOIN 与分组聚合",
+        "DataFrame 与 RDD 互转",
+        "与 Hive 集成（enableHiveSupport / metastore）"
+      ]
+    },
+    {
+      "chapter_id": "s07c05",
+      "title": "7.5 数据读写与数据源",
+      "goal": "掌握 parquet/csv/jdbc 读写、分区写与小文件问题",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "Spark 支持丰富的数据源：**parquet**（列式存储，Spark 默认）、**csv / json / text**（文件类）、**jdbc**（关系库）、**Kafka**（流）等。\n\n**Parquet** 是列式二进制格式，优势明显：\n- 压缩比高（列内类型相同，编码效率高）；\n- 支持**列裁剪**（只读需要的列）与谓词下推，IO 少；\n- 自带 schema，跨组件通用（Hive / Spark / Impala 都能读）。\n\n企业离线表 90% 以上用 parquet 存储。"
+        },
+        {
+          "type": "text",
+          "content": "`df.write` 是统一的写入口：\n- `df.write.parquet('路径')`、`df.write.csv('路径')`、`df.write.format('jdbc').option(...)`；\n- **分区写**：`df.write.partitionBy('dt', 'region')` 按字段把数据拆成 `dt=2024-01-05/region=cn/xxx.parquet` 的目录结构，查询时**分区裁剪**只扫需要的目录，大幅提速；\n- `mode('overwrite')` 覆盖写、`mode('append')` 追加写。\n\n**小文件问题**：分区过多或每次写少量数据，会生成海量小文件（几十 KB 一个），导致：\n- NameNode 元数据膨胀（每个文件一条元数据，占内存）；\n- 每个小文件对应一个 task，调度与启动开销巨大；\n- 读取时随机寻道增多，IO 效率降低。\n\n治理手段：写入前 `repartition / coalesce` 控制文件数，写入后跑小文件合并任务。"
+        },
+        {
+          "type": "code",
+          "lang": "python",
+          "content": "from pyspark.sql import SparkSession\n\nspark = SparkSession.builder.appName('IoDemo').getOrCreate()\n\ndf = spark.read.csv('orders.csv', header=True, inferSchema=True)\n\n# parquet 读写\ndf.write.mode('overwrite').parquet('hdfs:///dw/orders.parquet')\ndf2 = spark.read.parquet('hdfs:///dw/orders.parquet')\n\n# 分区写：按日期分区\ndf.write.mode('overwrite') \\\n  .partitionBy('dt') \\\n  .parquet('hdfs:///dw/orders_part')\n\n# JDBC 读写\n# df.write.format('jdbc') \\\n#   .option('url', 'jdbc:mysql://10.0.0.1:3306/dw') \\\n#   .option('dbtable', 'orders') \\\n#   .option('user', 'root').option('password', '****') \\\n#   .save()\n\n# 控制输出文件数，减少小文件\ndf.repartition(4).write.mode('overwrite').csv('hdfs:///tmp/orders_out')",
+          "caption": "多数据源读写 + 分区写 + 控制文件数"
+        },
+        {
+          "type": "warning",
+          "content": "**分区写 ≠ 分区粒度合适**：`partitionBy('dt')` 写出的目录结构可被 Hive / Spark 识别为分区表，但必须配合合理的分区粒度（如按天 / 按小时）。**分区过细**（如按分钟）同样会产生小文件问题。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：数仓『小文件治理』是平台组的日常 KPI：定时合并、控制写入并行度、按天分区。面试题：『一个表有 10 万个小文件，查询为什么慢？』答：元数据膨胀 + 任务数爆炸 + 随机 IO，应 repartition 合并或定期 OPTIMIZE。"
+        }
+      ],
+      "hands_on": "1. 用 DataFrame 读一个 CSV，repartition(1) 后写成 parquet，观察生成的文件数与大小。\n2. 用 partitionBy('dt') 分区写出，用命令行查看目录结构（dt=.../ 前缀）。\n3. 用 Python 模拟『小文件合并』：把 10 个小文件的内容合并成 2 个文件。",
+      "tasks": [
+        {
+          "task_id": "s07c05t01",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "parquet 格式的特点",
+          "question": "关于 parquet 文件格式，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "它是行式存储格式",
+              "correct": false,
+              "explain": "parquet 是列式存储（按列连续存放），不是行式。"
+            },
+            {
+              "text": "列式存储、压缩率高，支持列裁剪减少读取 IO",
+              "correct": true,
+              "explain": "正确。这是它成为 Spark 默认格式的原因。"
+            },
+            {
+              "text": "它是纯文本格式，可直接用记事本查看",
+              "correct": false,
+              "explain": "parquet 是二进制格式，无法直接查看。"
+            },
+            {
+              "text": "只有 Spark 能读写 parquet",
+              "correct": false,
+              "explain": "Hive、Impala、Presto 等主流引擎都支持。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. parquet 是**列式**二进制格式——先排除 A（行式）和 C（纯文本）。\n2. 列式存储天然压缩率高，且只读需要的列（列裁剪），IO 少。\n3. parquet 是开源通用格式，主流引擎都支持——排除 D。\n4. 选 B。\n**为什么**：列式存储是数仓优化的基石，压缩与裁剪都源于『按列组织』。",
+          "enterprise_tip": "面试题『数仓表为什么用 parquet』：压缩率高、列裁剪、谓词下推、跨引擎通用。"
+        },
+        {
+          "task_id": "s07c05t02",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "小文件问题的危害（多选）",
+          "question": "数据写入时产生大量小文件，会带来哪些危害？（多选）",
+          "options": [
+            {
+              "text": "NameNode 元数据膨胀，占用大量内存",
+              "correct": true,
+              "explain": "每个文件一条元数据，百万级小文件会压垮 NameNode。"
+            },
+            {
+              "text": "每个小文件对应一个 Task，调度与启动开销巨大",
+              "correct": true,
+              "explain": "Task 数量爆炸，集群资源浪费在调度上。"
+            },
+            {
+              "text": "读取时随机寻道增多，IO 效率降低",
+              "correct": true,
+              "explain": "小文件破坏顺序读，磁盘 IO 性能骤降。"
+            },
+            {
+              "text": "Spark 会自动把多个小文件合并成大文件",
+              "correct": false,
+              "explain": "Spark 不会自动合并，需要人工治理。"
+            },
+            {
+              "text": "没有任何影响，可以忽略",
+              "correct": false,
+              "explain": "小文件问题是数仓性能杀手，必须治理。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 从『文件数量爆炸』推导后果：元数据膨胀（A）、Task 数爆炸（B）、随机 IO 增多（C）。\n2. 排除 D：Spark 不会自动合并，需要 repartition 或合并任务。\n3. 排除 E：危害明确存在。\n4. 选 A、B、C。\n**为什么**：小文件问题本质是『文件粒度与计算粒度不匹配』——一个文件一个 task，文件太多，调度成本超过计算本身。",
+          "enterprise_tip": "回答治理手段能加分：写入前 repartition / coalesce 控制文件数，写入后定时合并，控制分区粒度（按天而非按小时）。"
+        },
+        {
+          "task_id": "s07c05t03",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：分区写 API",
+          "question": "在 PySpark 中，按 `dt` 字段分区写出数据的 API 是：`df.write.____('dt').parquet('路径')`（填英文方法名）。",
+          "answer": [
+            "partitionBy",
+            "partitionby",
+            "partitionBy()"
+          ],
+          "hint": "回忆『分区写』一节的 API：按字段值把数据拆成目录的方法叫什么？注意它和『调整分区数量』的方法是两回事。",
+          "analysis": "**标准解题思路**\n1. 分区写出 → partitionBy。\n2. 写法：`df.write.partitionBy('dt').parquet('路径')`，输出目录形如 `dt=2024-01-05/...`。\n3. 填 `partitionBy`（比对忽略大小写）。\n**延伸**：与 repartition 不同，partitionBy 是按字段的值拆目录，repartition 是控制分区数量。"
+        },
+        {
+          "task_id": "s07c05t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "分区裁剪的原理",
+          "question": "订单表按 `dt` 字段分区存储（目录形如 `dt=2024-01-05/`），执行 `WHERE dt = '2024-01-05'` 查询时，Spark 会怎么做？",
+          "options": [
+            {
+              "text": "读取全部分区再逐行过滤",
+              "correct": false,
+              "explain": "有分区信息时 Spark 会做分区裁剪，不会全表扫描。"
+            },
+            {
+              "text": "只读取 dt=2024-01-05 对应目录下的数据（分区裁剪）",
+              "correct": true,
+              "explain": "正确。分区裁剪让查询只扫需要的分区目录，大幅减少 IO。"
+            },
+            {
+              "text": "把数据全部加载到内存后再判断",
+              "correct": false,
+              "explain": "分区裁剪发生在读取阶段，远早于内存计算。"
+            },
+            {
+              "text": "直接报错，因为分区字段不能用于过滤",
+              "correct": false,
+              "explain": "分区字段恰恰最适合放在 WHERE 里做过滤。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 分区表按字段（如 dt）把数据拆成 `dt=xxx/` 目录。\n2. 查询 WHERE 含分区字段时，Spark 会做**分区裁剪**：只打开匹配的目录。\n3. 排除 A（全表扫描）、C（先全加载）、D（报错）。\n4. 选 B。\n**为什么**：分区裁剪与谓词下推配合，能把『扫 30 天数据』变成『扫 1 天数据』，是大表查询提速的第一手段。",
+          "enterprise_tip": "数仓规范：所有大表按天分区，查询必须带分区条件，否则 Spark 扫全表——这是平台组检查 SQL 的第一条红线。"
+        },
+        {
+          "task_id": "s07c05t05",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "Spark 支持的数据源（多选）",
+          "question": "Spark 可以读写以下哪些**数据源**？（多选）",
+          "options": [
+            {
+              "text": "Parquet 列式文件",
+              "correct": true,
+              "explain": "Spark 默认且最常用的存储格式。"
+            },
+            {
+              "text": "CSV / JSON 文本文件",
+              "correct": true,
+              "explain": "文件类数据源，spark.read.csv / json 直接读取。"
+            },
+            {
+              "text": "JDBC 关系型数据库（如 MySQL）",
+              "correct": true,
+              "explain": "通过 format('jdbc') + option 读写关系库。"
+            },
+            {
+              "text": "Kafka 消息队列",
+              "correct": true,
+              "explain": "流式数据源，配合 readStream / writeStream 使用。"
+            },
+            {
+              "text": "只能读取 HDFS 上的文本文件",
+              "correct": false,
+              "explain": "Spark 支持多种数据源，远不止文本文件。"
+            },
+            {
+              "text": "只能读取本地磁盘文件",
+              "correct": false,
+              "explain": "本地、HDFS、S3、JDBC、Kafka 等都能读。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 回忆 spark.read / spark.readStream 支持的数据源。\n2. 文件类：parquet、csv、json、text —— A、B 正确。\n3. 数据库类：JDBC（MySQL/Oracle 等）—— C 正确。\n4. 流式：Kafka —— D 正确。\n5. 排除 E、F：Spark 数据源非常丰富，『只能读 HDFS 文本』『只能读本地』都是错误说法。\n6. 选 A、B、C、D。\n**为什么**：统一的数据源 API 是 Spark 生态的重要优势——同一套代码可以批处理读 HDFS，也可以流式读 Kafka。",
+          "enterprise_tip": "面试题：『Spark 和 Hive 的数据源 API 有什么不同？』答：Spark 统一了批与流的数据源接口（read / readStream），Hive 以文件表为主；这是 Spark 流批一体的基础。"
+        },
+        {
+          "task_id": "s07c05t06",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "分区写 parquet 的好处",
+          "question": "相比把所有数据写进同一个目录，用 `df.write.partitionBy('dt')` 按日期分区写出 parquet，有哪些好处？（多选）",
+          "options": [
+            {
+              "text": "查询带分区条件时做分区裁剪，只读需要的目录，大幅减少 IO",
+              "correct": true,
+              "explain": "如 WHERE dt='2024-01-05' 只扫当天目录。"
+            },
+            {
+              "text": "按天管理数据更方便：可单独删除、归档或重算某一天的数据",
+              "correct": true,
+              "explain": "分区让数据生命周期管理的粒度更细。"
+            },
+            {
+              "text": "Hive / Spark 会把目录结构识别为分区表，配合分区字段过滤",
+              "correct": true,
+              "explain": "dt=xxx/ 目录天然对成分区表的语义。"
+            },
+            {
+              "text": "分区越多越好，永远不会产生小文件问题",
+              "correct": false,
+              "explain": "分区过细（如按分钟）反而会产生海量小文件。"
+            },
+            {
+              "text": "分区写会让 parquet 变成明文文本，方便直接查看",
+              "correct": false,
+              "explain": "parquet 仍是二进制列式格式。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 分区写的本质：按字段值拆目录（dt=2024-01-05/...）。\n2. 好处：分区裁剪（A）、按天管理（B）、分区表语义（C）。\n3. 排除 D：分区粒度要合理，过细反而加剧小文件问题；排除 E：格式不变。\n4. 选 A、B、C。",
+          "enterprise_tip": "数仓规范：大表按天分区 + 查询必带分区条件；但分区粒度要匹配查询习惯（按天而不是按小时/分钟）。"
+        },
+        {
+          "task_id": "s07c05t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "JDBC 读写的注意点",
+          "question": "用 Spark 通过 JDBC 读写 MySQL 等关系型数据库时，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "通过 format('jdbc') + option 配置 url / dbtable / user / password；大表可用 partitionColumn 等参数并行读取",
+              "correct": true,
+              "explain": "正确。连接信息全靠 option 配置，大表并行读要指定分区列。"
+            },
+            {
+              "text": "JDBC 读写不需要数据库连接，Spark 自动直连",
+              "correct": false,
+              "explain": "必须提供 JDBC url 与账号密码等连接信息。"
+            },
+            {
+              "text": "JDBC 只能读不能写",
+              "correct": false,
+              "explain": "既能读（jdbc reader）也能写（jdbc writer）。"
+            },
+            {
+              "text": "JDBC 读取永远比读 parquet 快",
+              "correct": false,
+              "explain": "JDBC 有网络与数据库压力，通常比本地列式文件慢。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. JDBC 读写：format('jdbc') + option（url / dbtable / user / password）。\n2. 大表读取：配置 partitionColumn / lowerBound / upperBound / numPartitions 并行拉取，避免单连接拖垮数据库。\n3. 选 A。\n**易错点**：不要用 Spark 全量扫 MySQL 大表，会给业务库带来巨大压力；一般只同步增量。",
+          "enterprise_tip": "生产红线：Spark 直连业务库只做增量小批同步，禁止全表扫描；大表同步先落 parquet 再入仓。"
+        },
+        {
+          "task_id": "s07c05t08",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：覆盖写 mode",
+          "question": "PySpark 中 `df.write.____('overwrite').parquet('路径')` 表示以**覆盖写**方式写出数据（填英文方法名）。",
+          "answer": [
+            "mode",
+            "Mode",
+            "mode()"
+          ],
+          "hint": "先想『覆盖写、追加写』是写出时的什么属性，再回忆 df.write 链式调用中决定『怎么写』的方法叫什么。",
+          "analysis": "**标准解题思路**\n1. df.write.mode(...) 指定写出模式。\n2. overwrite 覆盖、append 追加、error 存在即报错（默认）。\n3. 填 mode。\n**延伸**：生产上误用 overwrite 会覆盖历史数据，写库/写文件前要确认目标路径与口径。"
+        },
+        {
+          "task_id": "s07c05t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "parquet 谓词下推的底层",
+          "question": "parquet 的**谓词下推**在底层是怎么减少读取量的？",
+          "options": [
+            {
+              "text": "parquet 文件按行组（row group）组织并带列统计信息（min/max 等），Spark 读文件前先看统计，把不满足过滤条件的行组整个跳过，只读需要的数据",
+              "correct": true,
+              "explain": "正确。行组统计 + 字典过滤是 parquet 谓词下推的底层实现。"
+            },
+            {
+              "text": "谓词下推是把 WHERE 条件下推到 MySQL 等数据库执行，Spark 不参与",
+              "correct": false,
+              "explain": "谓词下推发生在 Spark 的 parquet 读取器内部，不依赖外部数据库。"
+            },
+            {
+              "text": "parquet 把过滤条件写进文件名，靠文件名过滤",
+              "correct": false,
+              "explain": "文件名过滤是分区裁剪，不是 parquet 的谓词下推。"
+            },
+            {
+              "text": "谓词下推只对 CSV 生效，parquet 不支持",
+              "correct": false,
+              "explain": "恰恰相反，列式 parquet 的谓词下推效果远好于 CSV。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. parquet 是列式存储，文件内部按行组（row group）组织，每列在每个行组带统计信息（min/max、null 计数等）。\n2. 谓词下推：Spark 把 WHERE 条件传给 parquet 读取器，读取器在**读文件前**检查行组统计——整个行组都不满足条件就整体跳过（还可在页级别用字典过滤）。\n3. 效果：只读满足条件的行组，扫描量大幅下降。\n4. A 正确。\n5. 排除 B（下推到读取器而非数据库）、C（那是分区裁剪）、D（parquet 支持且效果好）。\n6. 选 A。\n**面试延伸**：谓词下推 + 列裁剪 + 分区裁剪三者配合，是 Spark 读大表快的三件套。",
+          "enterprise_tip": "数仓规范：过滤条件尽量写成可下推的形式（如 dt 分区条件 + 普通列过滤），让 Spark 在存储层就砍掉大部分数据。"
+        },
+        {
+          "task_id": "s07c05t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "JDBC 并行读取大表",
+          "question": "用 Spark 通过 JDBC 读取 MySQL **大表**时，要让多个 Executor 并行拉取数据而不是单连接全表扫描，正确的做法是？",
+          "options": [
+            {
+              "text": "配置 partitionColumn（分区列）+ lowerBound + upperBound + numPartitions，Spark 会按分区列的范围把查询拆成多个并行子查询，由多个 Executor 同时拉取",
+              "correct": true,
+              "explain": "正确。这四个参数是 JDBC 并行读的标准配置。"
+            },
+            {
+              "text": "JDBC 读取只能单线程串行，无法并行",
+              "correct": false,
+              "explain": "配置分区列后 Spark 会拆分多个连接并行读。"
+            },
+            {
+              "text": "调大 spark.sql.shuffle.partitions 就能让 JDBC 并行读",
+              "correct": false,
+              "explain": "该参数控制 shuffle 分区数，与 JDBC 读的并行度无关。"
+            },
+            {
+              "text": "在 option 中设置 numExecutors 参数即可",
+              "correct": false,
+              "explain": "JDBC option 里没有 numExecutors，并行读靠分区列四个参数。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 痛点：不配置分区参数时，Spark 用单个连接把整表拉回，慢且压垮数据库。\n2. 并行读四件套：partitionColumn（数值型分区列，如 id）+ lowerBound（下界）+ upperBound（上界）+ numPartitions（分区数）。\n3. 原理：Spark 把 [lowerBound, upperBound] 均匀切成 numPartitions 段，每个 Executor 用一段 WHERE 条件（如 id BETWEEN ... AND ...）并行查询（A 正确）。\n4. 排除 B（可并行）、C（shuffle 分区无关）、D（无此 option）。\n5. 选 A。\n**为什么**：并行度来自『把一条大查询拆成多条小查询并发执行』，分区列要选数值型、分布均匀的列，否则分区倾斜。",
+          "enterprise_tip": "生产红线：Spark 直连业务库只做增量小批同步；确需全量时用 partitionColumn 并行读，但建议限流（如 numPartitions 合理设置）避免打爆线上数据库。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "为什么数仓表普遍用 parquet？",
+          "a": "列式存储：① 压缩率高（列内类型相同，编码效率高）；② 列裁剪只读所需列，IO 少；③ 支持谓词下推；④ 自带 schema、跨引擎通用（Hive / Spark / Impala 都能读）。"
+        },
+        {
+          "q": "什么是分区裁剪？",
+          "a": "按分区字段（如 dt）过滤时，Spark 只读取匹配的分区目录、跳过无关数据，大幅减少扫描量。与谓词下推配合是大表查询提速的关键。"
+        },
+        {
+          "q": "小文件问题怎么产生、怎么治理？",
+          "a": "产生：分区过细、写入并行度过高、每次少量写入。危害：元数据膨胀、Task 数爆炸、随机 IO 增多。治理：写入前 repartition/coalesce 控制文件数、定期合并、合理分区粒度。"
+        },
+        {
+          "q": "df.write 有哪些常用 mode？",
+          "a": "mode('overwrite') 覆盖写、mode('append') 追加写、mode('error') 存在即报错（默认）。生产上按业务选择，避免误覆盖。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "parquet",
+          "desc": "列式二进制存储格式，Spark 默认格式，压缩率高、支持列裁剪与谓词下推。"
+        },
+        {
+          "term": "列裁剪",
+          "desc": "只读取查询需要的列，减少 IO。"
+        },
+        {
+          "term": "谓词下推",
+          "desc": "把过滤条件下推到存储层，提前过滤减少读取量。"
+        },
+        {
+          "term": "partitionBy",
+          "desc": "分区写出 API，按字段值生成 dt=xxx/ 目录结构。"
+        },
+        {
+          "term": "分区裁剪",
+          "desc": "按分区字段过滤时只读对应目录，减少扫描量。"
+        },
+        {
+          "term": "repartition",
+          "desc": "重分区算子，可增可减分区数，代价是全量 shuffle。"
+        },
+        {
+          "term": "coalesce",
+          "desc": "合并分区算子，通常只减分区数、尽量不 shuffle，常用于减少输出文件数。"
+        }
+      ],
+      "kps": [
+        "Spark 支持的数据源（parquet / csv / json / jdbc / Kafka）",
+        "parquet 列式存储优势（压缩、列裁剪、谓词下推）",
+        "df.write 写入口与 mode（overwrite / append）",
+        "分区写 partitionBy 与分区裁剪",
+        "分区写的好处与合理分区粒度",
+        "小文件问题与治理（repartition / coalesce）",
+        "JDBC 读写关系型数据库"
+      ]
+    },
+    {
+      "chapter_id": "s07c06",
+      "title": "7.6 Spark 调优",
+      "goal": "理解 shuffle 原理、缓存 cache/persist、广播变量、数据倾斜与内存参数",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**shuffle** 是 Spark 中最昂贵、最易出问题的环节：它需要把**相同 key 的数据从不同分区汇聚到同一个分区**，涉及落盘、网络传输、序列化。典型的 shuffle 算子：`reduceByKey`、`groupByKey`、`join`、`distinct`、`repartition`。\n\nshuffle 过程：map 端把结果按 key 分区并**溢写到本地磁盘** → reduce 端**拉取**对应分区数据 → 合并计算。数据倾斜、OOM、GC 频繁，80% 都发生在 shuffle 环节。"
+        },
+        {
+          "type": "text",
+          "content": "**缓存（cache / persist）**：同一份数据被多次 action 使用时，`df.cache()` 或 `df.persist(StorageLevel.MEMORY_AND_DISK)` 把中间结果留在内存 / 磁盘，避免每次从源头重算。适合：反复迭代的数据、被多次 join 的中间结果。注意**用完 unpersist()** 释放。\n\n**广播变量（broadcast）**：大表 join 小表时，把小表（几 MB ~ 几十 MB）**广播到每个 Executor 只存一份**，join 时直接在本地内存匹配，**避免 shuffle**。PySpark 中 `df.join(F.broadcast(small_df), ...)` 一行搞定。\n\n**内存参数**：`spark.executor.memory`（Executor 内存）、`spark.sql.shuffle.partitions`（shuffle 分区数，默认 200）、`spark.default.parallelism`（默认并行度）。"
+        },
+        {
+          "type": "code",
+          "lang": "python",
+          "content": "from pyspark.sql import SparkSession\nfrom pyspark.sql import functions as F\n\nspark = SparkSession.builder \\\n    .appName('TuningDemo') \\\n    .config('spark.executor.memory', '4g') \\\n    .config('spark.sql.shuffle.partitions', '100') \\\n    .getOrCreate()\n\n# 1. 缓存复用：同一份数据多次使用\ndf = spark.read.parquet('orders.parquet').cache()\nprint(df.count())\nprint(df.filter(df.amount > 100).count())\ndf.unpersist()   # 用完释放\n\n# 2. 广播小表，避免 join shuffle\nusers = spark.read.parquet('users.parquet')    # 小表\norders = spark.read.parquet('orders.parquet')  # 大表\nresult = orders.join(F.broadcast(users), 'user_id', 'left') \\\n                .select('order_id', 'user_name', 'amount')\nresult.show()\n\n# 3. 缓解数据倾斜：加盐两阶段聚合（示意）\ndf2 = df.withColumn('salt', F.floor(F.rand() * 10))  # 加 0-9 随机盐\nstep1 = df2.groupBy('user_id', 'salt').agg(F.sum('amount').alias('part'))\nstep2 = step1.groupBy('user_id').agg(F.sum('part').alias('total'))",
+          "caption": "cache / broadcast / 加盐两阶段聚合"
+        },
+        {
+          "type": "warning",
+          "content": "**缓存不是银弹**：小数据缓存反而浪费序列化开销；`cache()` 默认只存内存，内存不足会丢弃再重算——大数据集用 `persist(MEMORY_AND_DISK)`。而且缓存解决的是『重复计算』，**不是**『数据倾斜』。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：数据倾斜是面试必问 + 实战必踩：现象是『其他 task 秒完，个别 task 跑几小时』。排查三板斧：Spark UI 看长尾 Task → countByKey 确认热点 key → 对症下药（热点 key 加盐两阶段聚合 / 广播小表 / 调大 shuffle 分区）。回答时能说出『先定位再优化、不同算子不同方案』，面试官就觉得你有真实调优经验。"
+        }
+      ],
+      "hands_on": "1. 用纯 Python 模拟加盐两阶段聚合：给重复 key 加随机后缀 → 第一阶段聚合 → 去掉后缀 → 第二阶段聚合。\n2. 向同学解释：为什么广播变量能避免 join 的 shuffle？\n3. 用 Spark UI（如有环境）观察一个任务的 Stage 划分与各 Task 耗时。",
+      "tasks": [
+        {
+          "task_id": "s07c06t01",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "缓解数据倾斜的手段（多选）",
+          "question": "处理数据倾斜，以下哪些是**常用且有效**的手段？（多选）",
+          "options": [
+            {
+              "text": "对热点 key 加随机前缀（加盐），再做两阶段聚合",
+              "correct": true,
+              "explain": "经典方案：先按盐分组聚合，再去盐二次聚合，把热点打散。"
+            },
+            {
+              "text": "大表 join 小表时把小表广播到每个 Executor",
+              "correct": true,
+              "explain": "广播消除 join 的 shuffle，从根上避免倾斜。"
+            },
+            {
+              "text": "调大 spark.sql.shuffle.partitions，让数据分散到更多分区",
+              "correct": true,
+              "explain": "增大分区数可缓解单个分区过大，常配合其他手段使用。"
+            },
+            {
+              "text": "什么都不做，重跑一次碰运气",
+              "correct": false,
+              "explain": "倾斜是确定性问题，重跑没有意义。"
+            },
+            {
+              "text": "直接删掉热点 key 的数据",
+              "correct": false,
+              "explain": "删除数据会破坏业务结果，绝不可取。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 明确目标：让热点 key 的数据不再堆积在同一个分区。\n2. 加盐两阶段聚合（A）：先按『key+盐』分散聚合，再去盐汇总——groupBy 倾斜首选。\n3. 广播小表（B）：join 场景直接消除 shuffle——join 倾斜首选。\n4. 调大分区数（C）：把每个分区数据量降下来，缓解但通常需配合 A/B。\n5. 排除 D（重跑无效）、E（删数据破坏业务）。\n6. 选 A、B、C。\n**为什么**：倾斜的本质是『数据分布不均』，所有有效手段都在『分散数据』或『消除 shuffle』上做文章。",
+          "enterprise_tip": "面试答『数据倾斜怎么解决』：先定位（UI 长尾 Task + countByKey），再分类——groupBy 倾斜用加盐两阶段，join 倾斜用广播或拆分热点 key。"
+        },
+        {
+          "task_id": "s07c06t02",
+          "type": "order",
+          "difficulty": 3,
+          "title": "数据倾斜排查流程排序",
+          "question": "把『数据倾斜排查与优化』的流程按正确顺序排列。",
+          "steps": [
+            "在 Spark UI 上定位运行时间异常长或 GC 频繁的 Task",
+            "用 countByKey 或 SQL 统计确认热点 key 与倾斜程度",
+            "分析倾斜发生在哪个算子（groupBy / join / distinct）",
+            "针对性选择方案：广播小表 / 加盐两阶段聚合 / 调整并行度",
+            "重跑任务，观察各 Task 耗时是否恢复均衡"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "先定位现象 → 确认根因 → 判断算子类型 → 对症下药 → 验证效果。『先定位再优化』避免瞎调参。",
+          "analysis": "**标准解题思路**\n1. 第一步定位现象：Spark UI 上找到长尾 Task（其他都完成，个别还在跑）。\n2. 第二步确认根因：countByKey 统计各 key 的数据量，找出热点 key。\n3. 第三步判断场景：倾斜发生在 groupBy 还是 join，方案完全不同。\n4. 第四步对症下药：join 用广播小表，groupBy 用加盐两阶段聚合，必要时调大分区数。\n5. 第五步验证：重跑观察各 Task 耗时是否均衡，确认问题解决。\n**为什么**：不定位就调参等于盲人摸象——方案必须匹配倾斜发生的算子。",
+          "enterprise_tip": "面试能按『UI 定位 → countByKey → 分类方案 → 验证』讲出完整闭环，说明你真的调过优。"
+        },
+        {
+          "task_id": "s07c06t03",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "广播变量的存储方式",
+          "question": "关于 Spark 广播变量（broadcast variable），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "每个 Executor 只保存一份，该 Executor 上的所有 Task 共享",
+              "correct": true,
+              "explain": "正确。广播数据按 Executor 粒度存放，Task 本地读取，避免重复传输。"
+            },
+            {
+              "text": "每个 Task 都复制一份完整数据",
+              "correct": false,
+              "explain": "若按 Task 复制，内存会爆炸，广播就失去意义。"
+            },
+            {
+              "text": "广播变量无法跨 Stage 使用",
+              "correct": false,
+              "explain": "广播变量正是为跨 Stage / 跨 Task 复用设计的。"
+            },
+            {
+              "text": "广播变量只能广播 RDD，不能广播 DataFrame",
+              "correct": false,
+              "explain": "PySpark 中 join 时可直接广播 DataFrame，如 F.broadcast(df)。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 广播的核心目的：一份数据只传一次、多处复用。\n2. 粒度是 Executor：每个 Executor 内存中存一份，其上的所有 Task 直接读本地。\n3. 排除 B（按 Task 复制是错误理解）、C（恰恰相反）、D（DataFrame 也可广播）。\n4. 选 A。\n**为什么**：广播把『网络传输 N 次』变成『传输 1 次 + 本地读取 N 次』，大幅降低 join 开销。",
+          "enterprise_tip": "面试题『广播变量的原理』：Driver 序列化 → 分发到各 Executor 内存一次 → Task 本地读取。适合几 MB ~ 几十 MB 的小表。"
+        },
+        {
+          "task_id": "s07c06t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "广播变量的适用场景",
+          "question": "以下哪种场景**最适合**使用广播变量（broadcast）？",
+          "options": [
+            {
+              "text": "大表 join 小表：把小表广播到每个 Executor，避免 shuffle",
+              "correct": true,
+              "explain": "正确。小表（几 MB~几十 MB）广播后 join 在本地完成，省去网络传输。"
+            },
+            {
+              "text": "两个超大表 join：把两张表都广播",
+              "correct": false,
+              "explain": "大表广播会撑爆 Executor 内存，应使用普通 shuffle join。"
+            },
+            {
+              "text": "对超大 RDD 做 groupByKey 聚合",
+              "correct": false,
+              "explain": "聚合是 shuffle 算子，广播无法替代，且大表不适合广播。"
+            },
+            {
+              "text": "把小文件合并成一个大文件",
+              "correct": false,
+              "explain": "文件合并用 repartition / coalesce，与广播变量无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 广播变量的设计目的：把只读小数据分发到每个 Executor 只存一份。\n2. 经典场景：大表 join 小表时广播小表，join 变成本地内存匹配，避免 shuffle。\n3. 排除 B（大表广播内存爆炸）、C（聚合不是广播的场景）、D（文件合并与广播无关）。\n4. 选 A。\n**为什么**：广播把『网络传输 N 次』变成『传输 1 次 + 本地读取 N 次』，代价是每台机器多占一份内存，所以只适合小数据。",
+          "enterprise_tip": "PySpark 一行实现：`df.join(F.broadcast(small_df), 'user_id', 'left')`。判断标准：小表小于几十 MB 就值得广播。"
+        },
+        {
+          "task_id": "s07c06t05",
+          "type": "order",
+          "difficulty": 3,
+          "title": "Spark 任务变慢的排查流程",
+          "question": "把『Spark 作业整体变慢时的排查流程』按正确顺序排列。",
+          "steps": [
+            "打开 Spark UI，定位耗时最长的 Stage 与 Task",
+            "检查资源与并行度：Executor 数量、内存、分区数是否合理",
+            "分析瓶颈：是否 shuffle 过大、GC 频繁、存在数据倾斜",
+            "针对性调优：缓存复用、广播小表、调整分区数或加盐聚合",
+            "重跑任务并对比优化前后的耗时"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "先定位现象（UI 看慢 Stage/Task）→ 排查资源配置 → 分析瓶颈类型 → 对症调优 → 重跑验证。『先定位再优化』避免瞎调参。",
+          "analysis": "**标准解题思路**\n1. 第一步：Spark UI 是最直观的入口，先找到耗时最长的 Stage 与 Task。\n2. 第二步：检查资源配置——Executor 数量、内存、分区数不足会导致整体并行度低。\n3. 第三步：分析瓶颈类型——shuffle 数据量、GC 频率、数据倾斜是三大常见元凶。\n4. 第四步：对症调优——缓存复用解决重复计算、广播解决 join shuffle、调分区数解决并行度、加盐解决倾斜。\n5. 第五步：重跑并对比耗时，验证优化是否生效。\n**为什么**：不定位就调参等于盲人摸象；只有先量化瓶颈，才能选对优化手段。",
+          "enterprise_tip": "生产排查口诀：『UI 定位 → 资源检查 → 瓶颈分类 → 对症下药 → 前后对比』。能讲出完整闭环，面试官就认为你有真实调优经验。"
+        },
+        {
+          "task_id": "s07c06t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "缓存级别的选择",
+          "question": "一份较大的 DataFrame 会被多个 action 反复使用，内存可能放不下全部数据，最合适的缓存方式是？",
+          "options": [
+            {
+              "text": "cache()，内存放不下就丢弃重算",
+              "correct": false,
+              "explain": "cache() 等价 MEMORY_ONLY，放不下会丢弃并重算，反复复用场景不划算。"
+            },
+            {
+              "text": "persist(StorageLevel.MEMORY_AND_DISK)：内存放不下的部分溢写到磁盘，避免重算",
+              "correct": true,
+              "explain": "正确。内存+磁盘兜底，既能提速又不丢数据。"
+            },
+            {
+              "text": "不缓存，每次重新从源头读取",
+              "correct": false,
+              "explain": "反复复用时不缓存会重复计算，浪费资源。"
+            },
+            {
+              "text": "用广播变量缓存所有数据",
+              "correct": false,
+              "explain": "广播适合几 MB~几十 MB 的小表，大表广播会撑爆 Executor 内存。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 缓存的目的是避免重复计算。\n2. 大数据集 → persist(MEMORY_AND_DISK)，内存不足落盘。\n3. 小数据集用 cache() 即可；数据极小甚至不值得缓存（序列化开销）。\n4. 选 B。\n**注意**：缓存解决『重复计算』，不解决『数据倾斜』；用完 unpersist() 释放。",
+          "enterprise_tip": "面试题『cache 和 persist 的区别』：cache 等价 MEMORY_ONLY，persist 可指定 StorageLevel；大数据用 MEMORY_AND_DISK。"
+        },
+        {
+          "task_id": "s07c06t07",
+          "type": "order",
+          "difficulty": 3,
+          "title": "加盐两阶段聚合解决倾斜",
+          "question": "把『用加盐两阶段聚合解决数据倾斜』的步骤按正确顺序排列。",
+          "steps": [
+            "定位：Spark UI 找到长尾 Task，用 countByKey 确认热点 key",
+            "给热点 key 加随机前缀（盐），打散数据分布",
+            "按『key + 盐』分组做第一阶段的局部聚合",
+            "去掉盐前缀，按原始 key 做第二阶段的汇总聚合",
+            "重跑任务，对比各 Task 耗时是否恢复均衡"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "先定位热点 → 加盐打散 → 第一阶段按『key+盐』局部聚合 → 去盐后第二阶段汇总 → 验证效果。",
+          "analysis": "**标准解题思路**\n1. 第一步定位：UI 长尾 Task + countByKey 找热点 key——不定位就优化等于盲调。\n2. 第二步加盐：给热点 key 拼随机前缀，把数据打散到多个分区。\n3. 第三步第一阶段聚合：按『key+盐』分组聚合，热点被分散处理。\n4. 第四步第二阶段聚合：去掉盐前缀，按原始 key 汇总，结果与直接聚合一致。\n5. 第五步验证：重跑观察各 Task 耗时是否均衡。\n**为什么**：加盐只影响中间分组的分布，去掉盐后结果不变，所以正确性不受影响。",
+          "enterprise_tip": "面试答『数据倾斜怎么解决』先讲定位（UI 长尾 + countByKey），再讲加盐两阶段聚合的正确性保证（去盐后结果一致）。"
+        },
+        {
+          "task_id": "s07c06t08",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：shuffle 分区数默认值",
+          "question": "Spark 的 `spark.sql.shuffle.partitions` 参数控制 shuffle 阶段的分区数，其默认值是 ____（填数字）。",
+          "answer": [
+            "200",
+            "200 个",
+            "200个"
+          ],
+          "hint": "回忆调优一节：spark.sql.shuffle.partitions 的默认值是多少？它是针对大数据量的保守取值。",
+          "analysis": "**标准解题思路**\n1. spark.sql.shuffle.partitions 默认 200。\n2. 分区数过少 → 单分区数据量大、倾斜更明显；过大 → 调度开销大。\n3. 填 200。\n**延伸**：小数据任务建议调小（如 20~50）减少调度开销，大数据量可调大缓解倾斜。"
+        },
+        {
+          "task_id": "s07c06t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "加盐解决倾斜的底层原理",
+          "question": "加盐两阶段聚合为什么能解决 groupBy 的**数据倾斜**？从分区角度看，正确的是？",
+          "options": [
+            {
+              "text": "给热点 key 拼接随机前缀后，同一个 key 的数据被哈希到不同分区，第一阶段在各分区局部聚合，去盐后第二阶段再汇总——热点被打散到多个 Task 并行处理",
+              "correct": true,
+              "explain": "正确。加盐改变了 key 的哈希结果，把热点数据分散到多个分区。"
+            },
+            {
+              "text": "加盐后数据总量变少，所以变快",
+              "correct": false,
+              "explain": "加盐不改变数据总量，只是改变分布。"
+            },
+            {
+              "text": "加盐让 shuffle 不再发生，从根上消除倾斜",
+              "correct": false,
+              "explain": "两阶段聚合仍要 shuffle，只是每阶段的数据分布更均匀。"
+            },
+            {
+              "text": "加盐后只保留热点 key 的数据，非热点数据被过滤",
+              "correct": false,
+              "explain": "加盐不丢弃任何数据，两阶段结果与原聚合完全一致。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 倾斜根源：热点 key 哈希后总落进同一个分区，该分区 Task 要处理海量数据。\n2. 加盐：给 key 拼接随机前缀（盐），key 变了，哈希结果就散到多个分区。\n3. 第一阶段：按'key + 盐'分组做局部聚合，热点数据被分散到多个 Task 并行处理。\n4. 第二阶段：去掉盐前缀，按原始 key 汇总，结果与不加盐一致。\n5. A 正确。\n6. 排除 B（总量不变）、C（仍有 shuffle，只是分布均匀）、D（不丢数据）。\n7. 选 A。\n**面试延伸**：正确性保证在于'去盐后二次聚合结果不变'，加盐只改变中间分布。",
+          "enterprise_tip": "生产做法：先 countByKey 确认热点 key 再决定是否加盐；加盐只对热点 key 加、普通 key 不动，避免所有 key 都多一轮聚合。"
+        },
+        {
+          "task_id": "s07c06t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "广播阈值参数",
+          "question": "Spark SQL 参数 `spark.sql.autoBroadcastJoinThreshold`（默认 10MB）的作用是？",
+          "options": [
+            {
+              "text": "当参与 join 的表小于该阈值时自动采用广播 join（BroadcastHashJoin），把表广播到每个 Executor 避免 shuffle；超过阈值则回退 SortMergeJoin",
+              "correct": true,
+              "explain": "正确。阈值以内的 join 自动广播，是避免 shuffle 的开关。"
+            },
+            {
+              "text": "控制 RDD 缓存数据的最大大小",
+              "correct": false,
+              "explain": "缓存大小与 StorageLevel 和内存参数相关，与广播阈值无关。"
+            },
+            {
+              "text": "控制 shuffle 阶段的分区数量",
+              "correct": false,
+              "explain": "分区数由 spark.sql.shuffle.partitions 控制。"
+            },
+            {
+              "text": "决定 Task 的最大重试次数",
+              "correct": false,
+              "explain": "重试次数由 spark.task.maxFailures 等参数控制。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 广播 join 的适用条件：小表大小低于阈值（默认 10MB）。\n2. 触发后：小表广播到每个 Executor，join 在本地内存完成，无 shuffle（A 正确）。\n3. 超过阈值：回退 SortMergeJoin（带 shuffle）。\n4. 排除 B（缓存）、C（shuffle 分区）、D（重试）。\n5. 选 A。\n**为什么**：阈值是『shuffle 还是广播』的自动分界线，生产上可根据实际小表大小调大（如 100MB），但过大会导致广播数据占满 Executor 内存。",
+          "enterprise_tip": "调优小技巧：大表 join 中等小表（几十 MB）时，把阈值临时调大（spark.conf.set('spark.sql.autoBroadcastJoinThreshold', 100*1024*1024)）能显著提速；注意广播表要能放进 Executor 内存。"
+        },
+        {
+          "task_id": "s07c06t11",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "GC 调优概念",
+          "question": "Spark Executor 出现**频繁 Full GC**、任务停顿明显，从内存调优的角度看，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "堆内存中驻留了大量长生命周期对象（如大缓存、shuffle 大缓冲）会引发频繁 Full GC；可及时 unpersist 缓存、改用 Kryo 序列化减小对象体积、合理设置内存比例、必要时增大 Executor 内存来缓解",
+              "correct": true,
+              "explain": "正确。减少驻留对象 + 缩小对象体积 + 加大内存是 GC 调优三板斧。"
+            },
+            {
+              "text": "GC 频繁与内存配置无关，只能重启作业",
+              "correct": false,
+              "explain": "GC 正是内存问题的表现，可通过调优缓解，无需重启。"
+            },
+            {
+              "text": "只要调大 shuffle 分区数就能根治 GC",
+              "correct": false,
+              "explain": "分区数影响并行度，与堆内对象驻留问题没有直接关系。"
+            },
+            {
+              "text": "开启广播变量可以彻底解决 GC 问题",
+              "correct": false,
+              "explain": "广播只是避免 shuffle，无法解决堆内对象过多的问题。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 现象定位：Full GC 频繁 = 老年代对象过多、频繁触发回收与停顿。\n2. 常见根因：大缓存（cache 未及时 unpersist）、shuffle 大缓冲、大对象数组等长生命周期数据驻留堆内。\n3. 优化手段：\n   - 及时 unpersist 释放缓存；\n   - Kryo 序列化减小对象体积（省内存、少 GC）；\n   - 调整 spark.memory.fraction / storageFraction 平衡执行与存储内存；\n   - 增大 spark.executor.memory 或改用 off-heap 减少堆压力。\n4. A 正确。\n5. 排除 B（可调优）、C（无关）、D（不解决）。\n6. 选 A。\n**面试延伸**：GC 日志（-XX:+PrintGCDetails）能看出是年轻代还是老年代压力，对症下药。",
+          "enterprise_tip": "生产排查口诀：先看 Spark UI 各 Task 的 GC Time → 确认是否大面积偏高 → 检查缓存与 shuffle 缓冲 → 用 Kryo + unpersist + 调内存参数，三步走完 GC 基本可控。"
+        },
+        {
+          "task_id": "s07c06t12",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "shuffle 分区数的设置",
+          "question": "一个数据量只有几 GB 的**小型聚合任务**，使用默认的 200 个 shuffle 分区，最可能出现的问题是？",
+          "options": [
+            {
+              "text": "每个分区数据量太小、Task 数量过多，调度与启动开销占比高，作业反而变慢；应调小 spark.sql.shuffle.partitions（如 20~50）",
+              "correct": true,
+              "explain": "正确。小数据配大分区数是典型的『调度开销超过计算本身』。"
+            },
+            {
+              "text": "分区太少导致每个分区数据过大、直接内存溢出",
+              "correct": false,
+              "explain": "200 个分区对几 GB 数据是『过多』而不是『过少』。"
+            },
+            {
+              "text": "会产生大量小文件，导致 HDFS 被写满",
+              "correct": false,
+              "explain": "小文件与写出分区数有关，不是本场景的主要问题。"
+            },
+            {
+              "text": "没有任何影响，Spark 会自动优化",
+              "correct": false,
+              "explain": "Spark 不会自动调整 shuffle 分区数，需要手动配置。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 默认 200 个 shuffle 分区是针对大数据量的保守值。\n2. 数据只有几 GB 时：每个分区只有几十 MB，却要启动 200 个 Task，Task 的调度、序列化、启动开销占比高，作业慢（A 正确）。\n3. 正确做法：调小 spark.sql.shuffle.partitions（如 20~50），让每个分区有足够数据量。\n4. 排除 B（方向反了）、C（非主要问题）、D（不会自动优化）。\n5. 选 A。\n**为什么**：分区数 = 并行度，过大过小都浪费——『每个分区数据量约 128MB~1GB』是经验参考值。",
+          "enterprise_tip": "面试题『shuffle 分区数怎么定』：小数据调小（20~50）、大数据按『数据量/目标分区大小』估算；数据倾斜时还要配合加盐等手段，而不是一味调大分区数。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "什么是 shuffle？为什么慢？",
+          "a": "把相同 key 的数据从不同分区汇聚到同一分区，涉及落盘、网络传输、序列化，是 Spark 最昂贵、最易出问题的环节；数据倾斜、OOM、GC 频繁 80% 都发生在 shuffle 阶段。"
+        },
+        {
+          "q": "广播变量解决什么问题？",
+          "a": "大表 join 小表时，把小表广播到每个 Executor 只存一份，join 时直接在本地内存匹配，避免 shuffle；把『网络传 N 次』变成『传 1 次 + 本地读 N 次』。"
+        },
+        {
+          "q": "cache 和 persist 的区别？",
+          "a": "cache() 等价于 persist(MEMORY_ONLY)（只存内存）；persist 可指定 StorageLevel，如 MEMORY_AND_DISK（内存不足落盘）。都用完要 unpersist() 释放。"
+        },
+        {
+          "q": "数据倾斜怎么定位和解决？",
+          "a": "定位：Spark UI 看长尾 Task + countByKey 确认热点 key。解决：groupBy 倾斜用加盐两阶段聚合；join 倾斜用小表广播或拆分热点 key；配合调大 shuffle 分区数。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "shuffle",
+          "desc": "相同 key 跨分区汇聚的过程，涉及落盘与网络传输，是调优重点。"
+        },
+        {
+          "term": "广播变量（broadcast）",
+          "desc": "把小数据分发到每个 Executor 存一份，避免 join 的 shuffle。"
+        },
+        {
+          "term": "cache",
+          "desc": "缓存 RDD/DataFrame 到内存，等价 persist(MEMORY_ONLY)，用完 unpersist。"
+        },
+        {
+          "term": "persist",
+          "desc": "按指定 StorageLevel 缓存，如 MEMORY_AND_DISK（内存不足落盘）。"
+        },
+        {
+          "term": "StorageLevel",
+          "desc": "存储级别，决定数据放内存 / 磁盘 / 副本。"
+        },
+        {
+          "term": "数据倾斜",
+          "desc": "数据分布不均，个别 Task 处理量远大于其他 Task，形成长尾。"
+        },
+        {
+          "term": "加盐两阶段聚合",
+          "desc": "热点 key 加随机前缀打散聚合，再去盐二次汇总，缓解 groupBy 倾斜。"
+        },
+        {
+          "term": "spark.sql.shuffle.partitions",
+          "desc": "shuffle 分区数参数，默认 200，调大可缓解单分区过大。"
+        }
+      ],
+      "kps": [
+        "shuffle 的原理与代价",
+        "缓存 cache / persist 与 StorageLevel",
+        "广播变量：大表 join 小表避免 shuffle",
+        "内存与并行度参数（executor.memory / shuffle.partitions）",
+        "数据倾斜的现象与定位（UI 长尾 Task / countByKey）",
+        "数据倾斜的解决方案（加盐两阶段聚合 / 广播 / 调分区数）",
+        "调优流程：先定位再优化、前后验证"
+      ]
+    },
+    {
+      "chapter_id": "s07c07",
+      "title": "7.7 Structured Streaming 与流批一体",
+      "goal": "理解微批处理、event-time、与 Kafka 集成流程及流批一体趋势",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**流式计算**：数据**持续产生、持续处理**（点击日志、订单、埋点），特点是『数据无边界、实时到达、延迟要求低』。批处理是『今天处理昨天的数据』，流处理是『这一秒处理这一秒的数据』。\n\n**Structured Streaming** 是 Spark 的流处理引擎，核心思想是**微批（Micro-batch）**：把不断到达的流切成一个个小批次，每个批次当批处理算，享受 Spark 的全部优化。默认微批延迟约 100ms 级；另有实验性的 Continuous 模式（逐条处理，延迟更低）。"
+        },
+        {
+          "type": "text",
+          "content": "**event-time（事件时间）**：事件真正发生的时间（日志里带的字段），区别于 processing-time（数据到达处理引擎的时间）。统计『每小时的成交额』应该按 event-time 聚合，否则网络延迟会导致数据串窗。\n\n**Watermark（水位线）**：容忍乱序的机制——声明『迟到不超过 5 分钟的数据我都等』，Watermark = 当前最大 event-time - 5min，Watermark 之前的窗口允许触发并关闭。\n\n**与 Kafka 集成**（生产环境流的源头几乎都是 Kafka）：\n1. `spark.readStream.format('kafka').option('kafka.bootstrap.servers', ...).option('subscribe', 'topic')` 读流；\n2. 解析 value（JSON）成列；\n3. 窗口聚合；\n4. `writeStream.outputMode('append').format('console' / 'parquet').start()` 启动，`.awaitTermination()` 常驻。"
+        },
+        {
+          "type": "code",
+          "lang": "python",
+          "content": "from pyspark.sql import SparkSession\nfrom pyspark.sql import functions as F\nfrom pyspark.sql.types import StructType, StructField, StringType, LongType\n\nspark = SparkSession.builder.appName('StreamDemo').getOrCreate()\n\n# 1. 读 Kafka 流\nraw = spark.readStream \\\n    .format('kafka') \\\n    .option('kafka.bootstrap.servers', 'kafka01:9092') \\\n    .option('subscribe', 'user_click') \\\n    .load()\n\n# 2. 解析 value 中的 JSON\nschema = StructType([\n    StructField('user_id', StringType()),\n    StructField('click_time', StringType()),   # event-time\n])\nclicks = raw.selectExpr('CAST(value AS STRING) AS json') \\\n            .select(F.from_json('json', schema).alias('data')) \\\n            .select('data.*')\n\n# 3. event-time + watermark 窗口聚合（容忍 5 分钟乱序）\nagg = clicks.withWatermark('click_time', '5 minutes') \\\n    .groupBy(F.window('click_time', '1 minute')) \\\n    .agg(F.count('user_id').alias('clicks'))\n\n# 4. 输出到控制台并启动\nquery = agg.writeStream \\\n    .outputMode('append') \\\n    .format('console') \\\n    .option('truncate', 'false') \\\n    .start()\nquery.awaitTermination()",
+          "caption": "Kafka 接入 → JSON 解析 → 窗口聚合 → 输出"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：『流批一体』是当前实时数仓的主流方向：同一套 DataFrame / SQL API 同时跑批和流，数据口径统一，避免维护两套代码。行业里还有 Lambda（批 + 流两套）与 Kappa（纯流）架构之争。面试高频题：**『Spark Streaming 和 Structured Streaming 区别？』**答：前者基于 RDD 微批、难保证精确一次；后者基于 DataFrame / SQL、自带 watermark 与 exactly-once，是 Spark 官方推荐。"
+        }
+      ],
+      "hands_on": "1. 用纯 Python 模拟一个『日志流』：循环 10 次追加日志行，每次打印当前累计条数。\n2. 用自己的话解释：event-time 和 processing-time 的区别，各举一个例子。\n3. 调研：Flink 和 Spark Structured Streaming 各自适合什么场景？",
+      "tasks": [
+        {
+          "task_id": "s07c07t01",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Structured Streaming 的处理模型",
+          "question": "Spark Structured Streaming **默认**采用的流处理模型是？",
+          "options": [
+            {
+              "text": "微批处理（Micro-batch）",
+              "correct": true,
+              "explain": "正确。流被切成小批次，每个批次按批处理执行，稳定可靠。"
+            },
+            {
+              "text": "逐条记录处理（Continuous）",
+              "correct": false,
+              "explain": "Continuous 是实验性模式，不是默认。"
+            },
+            {
+              "text": "完全离线的批处理",
+              "correct": false,
+              "explain": "批处理不是流处理模型，两者并列。"
+            },
+            {
+              "text": "事件驱动的无界处理，无需切分批次",
+              "correct": false,
+              "explain": "Spark 的默认模型就是微批；该描述更接近 Flink 的原生流式模型。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Structured Streaming 的核心设计就是微批：流 → 一批批小数据 → 每批当批处理。\n2. Continuous 模式虽存在，但标注为实验性，不是默认。\n3. 排除 C（离线批处理不是流模型）、D（Spark 需要切分批次）。\n4. 选 A。\n**为什么**：微批让 Spark 复用成熟的批优化能力，换取稳定与高吞吐，代价是比纯流式略高的延迟。",
+          "enterprise_tip": "选型时记住：对延迟要求苛刻（毫秒级）选 Flink，能接受百毫秒级延迟且想复用 Spark 生态选 Structured Streaming。"
+        },
+        {
+          "task_id": "s07c07t02",
+          "type": "order",
+          "difficulty": 3,
+          "title": "实时流任务开发流程排序",
+          "question": "把『用 Structured Streaming 开发实时统计任务』的流程按正确顺序排列。",
+          "steps": [
+            "接入数据源：readStream 读取 Kafka topic",
+            "定义 schema 并解析 value 中的 JSON 数据",
+            "编写转换逻辑：watermark + 窗口聚合",
+            "指定输出 sink（控制台 / Parquet / Kafka）并启动流",
+            "提交运行，监控延迟、checkpoint 与数据质量"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "读流 → 解析 → 计算 → 输出 → 运维监控，这是所有实时任务的通用五步。",
+          "analysis": "**标准解题思路**\n1. 第一步接数据：readStream 从 Kafka 读流，指明 topic。\n2. 第二步解析：value 是二进制 JSON，先转字符串、from_json 解析成结构化列。\n3. 第三步计算：声明 event-time 与 watermark，做窗口聚合。\n4. 第四步输出：writeStream 指定 sink（console 调试 / parquet 落盘），start() 启动。\n5. 第五步运维：监控处理延迟、checkpoint 状态与数据质量。\n**为什么**：顺序就是数据流动的方向，也是 debug 时『从哪一环查起』的依据。",
+          "enterprise_tip": "实时任务上线前必须确认三件事：sink 是否幂等、checkpoint 目录是否持久化、重启恢复策略（failover）。"
+        },
+        {
+          "task_id": "s07c07t03",
+          "type": "python",
+          "difficulty": 3,
+          "title": "模拟日志流的滑动计数",
+          "question": "用**纯 Python** 模拟一个不断到达的日志流并做**滑动窗口计数**：日志依次到达 `['info', 'error', 'info', 'error', 'error', 'info']`，每来一条，统计**最近 3 条**日志中 `'error'` 出现的次数并打印（模拟大小为 3 的滑动窗口）。",
+          "code_context": "logs = ['info', 'error', 'info', 'error', 'error', 'info']\nwindow_size = 3\n\n# ===== 在这里编写代码 =====\n# 每条日志到达时：入窗口 -> 超长则移除最旧 -> 打印当前窗口内 error 数量\n",
+          "expected_output": "0\n1\n1\n2\n2\n2",
+          "reference": "logs = ['info', 'error', 'info', 'error', 'error', 'info']\nwindow_size = 3\nwindow = []\nfor log in logs:\n    window.append(log)\n    if len(window) > window_size:\n        window.pop(0)\n    print(window.count('error'))",
+          "hint": "先想滑动窗口的本质：始终只保留最近 N 条。新数据进来先放进去，窗口超长时要做什么？统计出现次数用哪个方法？",
+          "analysis": "**标准解题思路**\n1. 初始化空窗口 window 与窗口大小 3。\n2. 逐条处理：append 新日志 → 检查长度，超过 3 移除最旧（pop(0)）→ 打印 window.count('error')。\n3. 逐轮演算：\n   - 第 1 条 info → [info] → 0\n   - 第 2 条 error → [info, error] → 1\n   - 第 3 条 info → [info, error, info] → 1\n   - 第 4 条 error → 移除 info → [error, info, error] → 2\n   - 第 5 条 error → 移除 error → [info, error, error] → 2\n   - 第 6 条 info → 移除 info → [error, error, info] → 2\n4. 输出：0 / 1 / 1 / 2 / 2 / 2。\n**为什么**：这就是实时监控『最近 3 分钟内的错误数』的滑动窗口语义；窗口滑出旧数据、滑入新数据，始终只统计最近的 N 条。",
+          "enterprise_tip": "Spark Structured Streaming 中同样的语义写作 window('time', '3 minutes')；本模拟题的『pop(0) 移除最旧』对应窗口向前滑动。"
+        },
+        {
+          "task_id": "s07c07t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "微批处理的原理",
+          "question": "关于 Structured Streaming 的**微批处理（Micro-batch）**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "把不断到达的流切成一个个小批次，每个批次按批处理执行",
+              "correct": true,
+              "explain": "正确。微批把流切成小批，复用 Spark 的批优化，稳定可靠。"
+            },
+            {
+              "text": "每条数据到达后立即单独计算，延迟最低",
+              "correct": false,
+              "explain": "逐条处理是 Continuous 模式的特点，不是默认的微批。"
+            },
+            {
+              "text": "微批处理无法使用 Spark 的任何优化",
+              "correct": false,
+              "explain": "恰恰相反，微批让每个批次享受完整的批处理优化。"
+            },
+            {
+              "text": "微批处理只能处理离线数据",
+              "correct": false,
+              "explain": "微批面向无界流，只是把流按小批切分处理。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 微批的核心思想：把不断到达的流切成一个个小批次，每批当批处理算。\n2. 收益：复用 Spark 成熟批优化，稳定、高吞吐、容错好。\n3. 排除 B（逐条是 Continuous 模式）、C（微批恰恰能用批优化）、D（微批就是处理流的）。\n4. 选 A。\n**为什么**：微批的代价是比纯流式（Flink）延迟略高（百毫秒级），换来的是与批处理统一的 API 与语义。",
+          "enterprise_tip": "选型判断：延迟要求毫秒级选 Flink；能接受百毫秒级且想复用 Spark 生态选 Structured Streaming 微批。"
+        },
+        {
+          "task_id": "s07c07t05",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：event-time 的含义",
+          "question": "在流处理中，事件**真正发生的时间**（区别于数据到达处理引擎的时间）被称为 ______（英文术语，可带连字符）。",
+          "answer": [
+            "event-time",
+            "event time",
+            "eventtime",
+            "事件时间",
+            "event_time"
+          ],
+          "hint": "先区分流处理里的两种时间：事件『真正发生』的时间和『到达引擎』的时间。题目问的是前者，回忆它的英文术语。",
+          "analysis": "**标准解题思路**\n1. 流处理有两种时间：processing-time（到达引擎的时间）与 event-time（事件真正发生的时间）。\n2. 题目问『事件真正发生的时间』→ event-time。\n3. 填 `event-time`（可接受 event time / eventtime / 事件时间 等变体，比对忽略大小写与空白）。\n**为什么**：统计『每小时的成交额』必须按 event-time 聚合，否则网络延迟会导致数据串窗——这是实时计算的经典坑。"
+        },
+        {
+          "task_id": "s07c07t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "event-time 与 processing-time",
+          "question": "电商大促实时统计『每小时的成交额』，部分日志因网络延迟会晚到几分钟。为保证统计口径准确，应使用哪种时间进行窗口聚合？",
+          "options": [
+            {
+              "text": "processing-time（数据到达处理引擎的时间）",
+              "correct": false,
+              "explain": "网络延迟会导致数据串窗：本该算在上一小时的数据落到了下一小时。"
+            },
+            {
+              "text": "event-time（事件真正发生的时间）",
+              "correct": true,
+              "explain": "正确。按事件发生时间聚合，晚到的数据仍归入正确的窗口。"
+            },
+            {
+              "text": "两种时间任选一个，结果都一样",
+              "correct": false,
+              "explain": "有乱序/延迟时两者结果明显不同。"
+            },
+            {
+              "text": "Kafka 写入分区的时间",
+              "correct": false,
+              "explain": "写入时间属于到达侧时间，与 processing-time 同类问题。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. event-time：事件真正发生的时间（日志里带的字段）。\n2. processing-time：数据到达引擎的时间。\n3. 统计『每小时成交额』按业务发生时间聚合 → event-time。\n4. 选 B。\n**延伸**：配合 Watermark 容忍乱序，Watermark 之前的事件允许触发并关闭窗口。",
+          "enterprise_tip": "实时指标口径事故的第一排查项就是『是不是用了 processing-time 导致串窗』——大促报表必须用 event-time。"
+        },
+        {
+          "task_id": "s07c07t07",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：输出模式 append",
+          "question": "Structured Streaming 的 `writeStream.outputMode(...)` 中，只向 sink **追加输出新增的结果行**、不重发旧结果的输出模式是 ____（英文，小写）。",
+          "answer": [
+            "append",
+            "Append",
+            "APPEND"
+          ],
+          "hint": "回忆输出模式一节：三种模式各自输出什么（新增行/变化行/全量）？题目描述的是『只追加新增结果』的那一种，回忆它的英文。",
+          "analysis": "**标准解题思路**\n1. outputMode 三种：append（只追加新结果行）、update（更新变化行）、complete（每次输出全量结果）。\n2. 只输出新增行 → append。\n3. 填 append。\n**易错点**：append 模式对查询有约束（一般要求带 watermark 的聚合或纯过滤），选择输出模式前先确认查询类型。"
+        },
+        {
+          "task_id": "s07c07t08",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "Watermark 与流批一体（综合）",
+          "question": "关于 Watermark（水位线）与流批一体，下列说法**正确**的有？（多选）",
+          "options": [
+            {
+              "text": "Watermark 用于容忍乱序：声明『迟到不超过 5 分钟的数据我都等』，Watermark 之前的窗口允许关闭",
+              "correct": true,
+              "explain": "正确。Watermark = 当前最大 event-time - 容忍时间。"
+            },
+            {
+              "text": "流批一体指用同一套 DataFrame / SQL API 同时处理批与流，保证数据口径统一",
+              "correct": true,
+              "explain": "正确。一套代码、一套口径，避免两套系统对不上。"
+            },
+            {
+              "text": "设置 Watermark 后，所有晚到的数据都会被立即丢弃，无法参与计算",
+              "correct": false,
+              "explain": "Watermark 只『容忍到一定程度』，超过容忍窗口的迟到数据才可能被丢弃。"
+            },
+            {
+              "text": "Lambda 架构是『批 + 流』两套代码，Kappa 架构是纯流式一套链路",
+              "correct": true,
+              "explain": "正确。Kappa 用一条流式链路同时满足实时与近实时需求。"
+            },
+            {
+              "text": "Watermark 只能用于离线批处理，流处理无法使用",
+              "correct": false,
+              "explain": "Watermark 正是流处理容忍乱序的机制。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Watermark：容忍乱序、决定窗口何时触发关闭——A 对，C 以偏概全，E 说反。\n2. 流批一体：同一套 API 处理批与流——B 对。\n3. 架构之争：Lambda（批+流两套）vs Kappa（纯流）——D 对。\n4. 选 A、B、D。\n**面试延伸**：实时数仓主流方向是流批一体；能讲清 Lambda / Kappa 的取舍是加分项。",
+          "enterprise_tip": "选型判断：延迟要求毫秒级选 Flink；能接受百毫秒级且想复用 Spark 生态选 Structured Streaming。"
+        },
+        {
+          "task_id": "s07c07t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "微批的延迟与吞吐权衡",
+          "question": "Structured Streaming 的**微批模型**在底层是怎么工作的？为什么存在'延迟与吞吐的权衡'？",
+          "options": [
+            {
+              "text": "流按触发间隔切分为一个个小批次，每批统一调度执行；间隔短→延迟低但批次数多、调度开销占比高，间隔长→吞吐高但延迟大",
+              "correct": true,
+              "explain": "正确。触发间隔就是延迟与吞吐的调节旋钮。"
+            },
+            {
+              "text": "每条数据到达立即单独执行一个 Task，延迟最低",
+              "correct": false,
+              "explain": "逐条执行是 Continuous 模式，不是默认微批。"
+            },
+            {
+              "text": "数据先攒满 1GB 才处理一批，与时间无关",
+              "correct": false,
+              "explain": "微批按触发间隔（时间）切分，不是按数据量。"
+            },
+            {
+              "text": "微批把流数据全部落 HDFS 后按离线批处理执行",
+              "correct": false,
+              "explain": "微批是流式增量处理，不是攒全量再离线跑。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 微批工作方式：每隔一个触发间隔（如 1 秒），把这段时间到达的流数据切成一个 batch，Spark 把 batch 当普通批处理调度执行。\n2. 权衡：间隔越短，延迟越低，但单位时间批次数越多，每批的调度/启动/提交开销占比越高，吞吐下降；间隔越长，每批数据越多、吞吐越高，但延迟越大。\n3. A 正确。\n4. 排除 B（逐条是 Continuous）、C（按时间切分）、D（增量处理不是攒全量）。\n5. 选 A。\n**面试延伸**：默认约百毫秒级延迟；对延迟苛刻的毫秒级场景选 Flink，能接受百毫秒级且想复用 Spark 生态选 Structured Streaming。",
+          "enterprise_tip": "生产配置 trigger(processingTime='5 seconds') 调间隔：监控类任务要低延迟用短间隔，大吞吐聚合任务用长间隔。"
+        },
+        {
+          "task_id": "s07c07t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "流式去重",
+          "question": "Structured Streaming 中对实时数据流做**去重**（如对同一订单 ID 只保留第一条），最常用的方式是？",
+          "options": [
+            {
+              "text": "使用 dropDuplicates('order_id') 基于状态去重，并配合 withWatermark 声明状态清理水位，让引擎定期清理过期 key，防止状态无限增长",
+              "correct": true,
+              "explain": "正确。dropDuplicates + watermark 是流式去重的标准组合。"
+            },
+            {
+              "text": "流式 distinct 不需要任何状态，天然全局去重",
+              "correct": false,
+              "explain": "流式去重必须记录『见过的 key』，本质上就是状态。"
+            },
+            {
+              "text": "流处理无法去重，只能离线做",
+              "correct": false,
+              "explain": "Structured Streaming 的 dropDuplicates 正是为流式去重设计的。"
+            },
+            {
+              "text": "把数据先写 HDFS 再离线去重，实时性更好",
+              "correct": false,
+              "explain": "先落盘再离线去重延迟高，违背实时语义。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 去重语义：同一 key（如 order_id）只输出第一条，之后重复到达的丢弃。\n2. 实现：dropDuplicates('order_id')，引擎在状态中记录已见过的 key（A 正确）。\n3. 状态清理：无界流下去重状态会无限增长，必须 withWatermark('event_time', '...') 声明水位，引擎定期清除过期 key。\n4. 排除 B（需要状态）、C（能做）、D（实时性差）。\n5. 选 A。\n**面试延伸**：dropDuplicates 与离线 distinct 的区别就是『持续输出 + 状态 + 水位清理』，回答时点出状态管理即显功力。",
+          "enterprise_tip": "生产场景：订单流、曝光流按业务主键去重（防重放、防重复计费）非常常见；记住去重状态也要配 watermark，否则状态膨胀会导致 OOM。"
+        },
+        {
+          "task_id": "s07c07t11",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：水印配置 API",
+          "question": "PySpark 中为流式聚合声明水位线（Watermark）以容忍乱序的 API 是：`ds.____('event_time', '5 minutes')`（填英文方法名）。",
+          "answer": [
+            "withWatermark",
+            "withwatermark",
+            "withWatermark()"
+          ],
+          "hint": "回忆为流式聚合声明水位线的 API 名字，它由『动作词＋水位线英文』拼成；先想这个方法要放在聚合之前还是之后。",
+          "analysis": "**标准解题思路**\n1. 流式聚合前的乱序处理：先声明 event-time 与水位线。\n2. API：ds.withWatermark('event_time', '5 minutes')，表示容忍最多 5 分钟的乱序/迟到。\n3. 填 `withWatermark`（比对忽略大小写）。\n**为什么**：withWatermark 必须放在聚合（groupBy/window）之前，且与 dropDuplicates 等有状态算子配合时还能帮助清理状态。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "Structured Streaming 默认的处理模型是什么？",
+          "a": "微批（Micro-batch）：把不断到达的流切成小批次，每批按批处理执行，延迟约百毫秒级；另有实验性的 Continuous 模式逐条处理、延迟更低。"
+        },
+        {
+          "q": "event-time 和 processing-time 的区别？",
+          "a": "event-time 是事件真正发生的时间（日志里带的字段）；processing-time 是数据到达处理引擎的时间。统计『每小时成交额』应按 event-time 聚合，否则网络延迟会导致数据串窗。"
+        },
+        {
+          "q": "Watermark 是什么？",
+          "a": "水位线，容忍乱序的机制：声明『迟到不超过 5 分钟的数据我都等』，Watermark = 当前最大 event-time - 5min，Watermark 之前的窗口允许触发并关闭。"
+        },
+        {
+          "q": "如何与 Kafka 集成？",
+          "a": "readStream.format('kafka') 订阅 topic → 解析 value 的 JSON → watermark + 窗口聚合 → writeStream 输出（console / parquet / kafka）→ start() + awaitTermination() 常驻运行。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Structured Streaming",
+          "desc": "Spark 的流处理引擎，基于 DataFrame/SQL 的微批模型。"
+        },
+        {
+          "term": "微批（Micro-batch）",
+          "desc": "把流切成小批次逐个处理，默认延迟约百毫秒级。"
+        },
+        {
+          "term": "event-time",
+          "desc": "事件真正发生的时间，用于正确的窗口聚合。"
+        },
+        {
+          "term": "processing-time",
+          "desc": "数据到达处理引擎的时间，区别于 event-time。"
+        },
+        {
+          "term": "Watermark（水位线）",
+          "desc": "容忍乱序、决定窗口何时关闭的机制。"
+        },
+        {
+          "term": "readStream",
+          "desc": "读取流数据的入口，常配合 Kafka 使用。"
+        },
+        {
+          "term": "writeStream",
+          "desc": "写出流结果的入口，支持 console / parquet / kafka 等 sink。"
+        },
+        {
+          "term": "checkpoint",
+          "desc": "流任务状态存储位置，用于故障恢复与精确一次语义。"
+        }
+      ],
+      "kps": [
+        "流式计算的特点（无界数据、持续到达）",
+        "微批 Micro-batch 处理模型（默认）",
+        "event-time 与 processing-time 的区别",
+        "Watermark 水位线：容忍乱序、决定窗口关闭",
+        "与 Kafka 集成：readStream → 解析 → 窗口聚合 → writeStream",
+        "输出模式 outputMode（append / update / complete）",
+        "流批一体与 Lambda / Kappa 架构"
+      ]
+    },
+    {
+      "chapter_id": "s07c08",
+      "title": "7.8 Spark 内存与调度原理",
+      "goal": "讲透统一内存管理、DAG/Stage/Task 调度、Shuffle、序列化、广播与 checkpoint 的底层机制",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**Executor 内存怎么分：统一内存管理。**\n\nSpark 的 Executor 内存不是随便用的，而是按'统一内存管理'划分成两大区域：\n- **执行内存（execution memory）**：shuffle、join、聚合、排序等计算过程使用的临时内存（比如 shuffle 溢写前的缓冲）；\n- **存储内存（storage memory）**：缓存 RDD/DataFrame（cache/persist）和广播变量占用的内存。\n\n两者的关系：\n- 默认在扣除约 300MB 预留内存后，执行内存与存储内存**初始各占约 50%**（由 `spark.memory.storageFraction` 控制）；\n- 关键设计：**可以动态互相借用**——执行内存不够时向存储内存借用，存储内存需要时也能占用执行内存的空闲部分，空闲优先让给对方，保证内存不被浪费；\n- **on-heap 与 off-heap**：默认所有内存都在 JVM 堆内（on-heap）；开启 `spark.memory.offHeap.enabled=true` 后可以在**堆外（off-heap）**分配一部分内存，减少 GC 压力、避免大对象在堆内来回拷贝，常用于大 shuffle 和大缓存场景。"
+        },
+        {
+          "type": "text",
+          "content": "**分区、Task 与调度。**\n\n- 一个 RDD/DataFrame 按分区（partition）切分成多块，**每个分区对应一个 Task**，Task 是调度的最小单位；\n- 一次 action 触发后，Driver 回溯血缘构建 **DAG**；\n- **Stage 怎么切**：DAG 调度器从后往前扫描，遇到**宽依赖（shuffle）**就切一刀——shuffle 要跨节点传输数据，必须等上游全部算完，所以宽依赖是天然的 Stage 边界；窄依赖（map/filter/union）的算子**合并进同一个 Stage**，在同一个 Task 里流水线执行，不落盘、不传输；\n- **TaskScheduler** 把每个 Stage 的 Task 分发给 Executor，尽量满足**数据本地性（locality）**：计算调度到数据所在的节点（PROCESS_LOCAL 最优，其次 NODE_LOCAL、RACK_LOCAL），把网络传输降到最低。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "一次 action 触发的完整执行链路：\n\n  action（collect / count ...）\n    → 回溯血缘构建 DAG\n    → 按宽依赖边界切分 Stage（Stage0: 窄依赖流水线）\n    → 每个 Stage 按分区数生成一批 Task\n    → TaskScheduler 按数据本地性分发 Task 到 Executor\n    → Executor 并行执行；遇到 shuffle 则跨节点传输\n    → 各 Stage 依次完成，结果汇总回 Driver",
+          "caption": "从 Action 到 Task 执行的调度链路"
+        },
+        {
+          "type": "text",
+          "content": "**Shuffle 的底层：Shuffle Write → Shuffle Read。**\n\nshuffle 是'把相同 key 的数据从不同分区汇聚到同一分区'的过程，分两半：\n\n- **Shuffle Write（上游/map 端）**：每个上游 Task 把结果按 key 分区（默认哈希到 N 个下游分区），**先在本地排序/聚合**，然后写到本地磁盘的 shuffle 文件；现在默认实现会合并成**一个大文件 + 一个索引文件**，索引记录每个下游分区数据在文件里的位置；\n- **Shuffle Read（下游/reduce 端）**：每个下游 Task 根据索引文件，**从所有上游节点的 shuffle 文件里拉取**属于自己那份分区的数据，在内存中**归并（merge）**、聚合。\n\n为什么 shuffle 慢：落盘 + 网络传输 + 序列化 + 内存缓冲，四件事叠加；如果某个 key 的数据特别多（**数据倾斜**），对应下游 Task 要拉取海量数据，形成'其他任务秒完、个别任务跑几小时'的长尾。"
+        },
+        {
+          "type": "text",
+          "content": "**序列化：Java vs Kryo。**\n\n数据跨节点传输（shuffle）、落盘、缓存，都要先把对象变成字节（序列化），用的时候再变回来（反序列化）。\n\n- **Java 序列化**（默认）：开箱即用、无需配置，但速度慢、生成的字节体积大；\n- **Kryo 序列化**：速度更快、字节更紧凑，网络传输量与磁盘占用都更小；代价是需要**提前注册类**（`spark.kryo.registrator` 或 registerKryoClasses），否则会退化为低效的默认路径。\n\n配置方式：`spark.serializer=org.apache.spark.serializer.KryoSerializer`。数据量大时，序列化是隐藏的性能杀手——shuffle 和 cache 越重，Kryo 的收益越明显。"
+        },
+        {
+          "type": "text",
+          "content": "**广播变量的底层与 checkpoint/cache 的区别。**\n\n**广播变量（broadcast）**：Driver 把数据**序列化后分发到每个 Executor 的内存**（不是每个 Task），Executor 上的所有 Task 只读共享同一份。它必须**只读**：多个 Task 并发读同一份数据，如果可写，并发修改会破坏一致性；只读也让 Driver 只需发送一次，避免重复传输。\n\n**cache 与 checkpoint 的区别**（面试高频陷阱）：\n- `cache()/persist()`：缓存的是**计算结果**，数据放内存/磁盘，但**血缘（Lineage）仍然保留**——缓存被淘汰（如内存不足）时，可以沿血缘**重新计算**恢复；\n- `checkpoint()`：把中间结果**落盘**到可靠存储，并**切断血缘**——之后不再依赖上游重算，代价是写盘开销大。\n\n选择：血缘链很长、重算代价高时用 checkpoint；只是反复复用同一份数据用 cache。"
+        },
+        {
+          "type": "warning",
+          "content": "**易错点**：① 缓存（cache）不是 checkpoint：cache 保留血缘、数据主要在内存、被淘汰会重算；checkpoint 切断血缘、数据落盘。② 执行内存和存储内存可以互相借用，不是物理隔离。③ 广播变量只读，别在 Executor 端尝试修改它。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：调度类面试题必考：①'一个 Job 怎么变成 Task'→ Action 触发 DAG → 按宽依赖切 Stage → 按分区生成 Task → TaskScheduler 按本地性分发；②'shuffle 为什么慢'→ 落盘 + 网络 + 序列化 + 内存；③'cache 和 checkpoint 的区别'→ 血缘保留 vs 切断。能画清楚 DAG/Stage/Task/Executor 的关系，并解释清楚为什么宽依赖要切 Stage，基本就过了 Spark 原理关。生产上：大作业开 Kryo 序列化、对反复使用的中间结果 cache、对超长血缘链 checkpoint，是三类最常见的调优动作。"
+        }
+      ],
+      "hands_on": "1. 用文字画出一个 action 触发的 DAG → Stage → Task → Executor 执行链路，标注宽依赖切分的位置。\n2. 对比 cache 与 checkpoint：各自的数据放哪、血缘还在不在、丢了之后能不能恢复。\n3. 用纯 Python 模拟'按 key 哈希分区'，观察热点 key 造成的分区倾斜（参考本章 python 任务）。",
+      "qa": [
+        {
+          "q": "执行内存和存储内存是什么关系？",
+          "a": "执行内存用于 shuffle/join/聚合等计算，存储内存用于缓存和广播变量，默认各占约 50%（扣除约 300MB 预留后），但可以动态互相借用，空闲一方向另一方让出空间，避免内存浪费。"
+        },
+        {
+          "q": "Stage 是怎么切分的？",
+          "a": "DAG 调度器从后往前扫描，遇到宽依赖（shuffle）就切一刀，因为 shuffle 必须等上游全部算完；窄依赖算子合并进同一 Stage 流水线执行。"
+        },
+        {
+          "q": "shuffle 底层做了什么？",
+          "a": "Shuffle Write：上游 Task 把结果按 key 分区、排序/聚合后写本地磁盘 shuffle 文件（大文件 + 索引文件）；Shuffle Read：下游 Task 按索引从所有上游拉取自己那份数据并归并聚合。落盘 + 网络 + 序列化让它成为性能瓶颈。"
+        },
+        {
+          "q": "Kryo 和 Java 序列化怎么选？",
+          "a": "Kryo 更快、字节更紧凑，适合大 shuffle/大缓存，但需要提前注册类；Java 序列化开箱即用但慢且体积大。大数据作业通常配置 Kryo。"
+        },
+        {
+          "q": "cache 和 checkpoint 的区别？",
+          "a": "cache/persist 缓存计算结果、数据放内存/磁盘、血缘保留（被淘汰可重算）；checkpoint 落盘到可靠存储并切断血缘。血缘链超长用 checkpoint，反复复用用 cache。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "执行内存",
+          "desc": "execution memory，shuffle/join/聚合/排序使用的临时内存。"
+        },
+        {
+          "term": "存储内存",
+          "desc": "storage memory，缓存 RDD/DataFrame 与广播变量使用的内存。"
+        },
+        {
+          "term": "on-heap / off-heap",
+          "desc": "JVM 堆内内存 / 堆外内存，off-heap 可减少 GC 压力。"
+        },
+        {
+          "term": "宽依赖",
+          "desc": "父分区被多个子分区使用（shuffle），是 Stage 切分的边界。"
+        },
+        {
+          "term": "窄依赖",
+          "desc": "父分区最多被一个子分区使用（map/filter），无 shuffle。"
+        },
+        {
+          "term": "locality（数据本地性）",
+          "desc": "把计算调度到数据所在节点，减少网络传输。"
+        },
+        {
+          "term": "Kryo",
+          "desc": "高性能序列化库，比 Java 序列化快且紧凑，需注册类。"
+        },
+        {
+          "term": "checkpoint",
+          "desc": "中间结果落盘并切断血缘，防超长血缘链重算。"
+        }
+      ],
+      "kps": [
+        "统一内存管理：执行内存与存储内存（动态借用、on-heap/off-heap）",
+        "DAG 切分 Stage：宽依赖边界（shuffle）",
+        "Task 调度与数据本地性（locality）",
+        "序列化：Java vs Kryo",
+        "从 Action 到执行的调度流程（DAG → Stage → Task → Executor）",
+        "广播变量底层：Driver 分发、Executor 只读共享",
+        "Shuffle Write/Read 与分区数据倾斜"
+      ],
+      "tasks": [
+        {
+          "task_id": "s07c08t01",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "执行内存与存储内存的关系",
+          "question": "关于 Spark 统一内存管理中**执行内存**与**存储内存**的关系，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "两者各有初始比例（默认各约 50%），但可以动态互相借用，空闲一方向另一方让出空间，保证内存不浪费",
+              "correct": true,
+              "explain": "正确。统一内存管理的核心就是按需借用，让内存利用率最大化。"
+            },
+            {
+              "text": "两者物理隔离，永远不能互相占用",
+              "correct": false,
+              "explain": "恰恰相反，统一内存管理允许动态互相借用。"
+            },
+            {
+              "text": "执行内存用于缓存数据，存储内存用于 shuffle 排序",
+              "correct": false,
+              "explain": "说反了：执行内存管 shuffle/join/聚合，存储内存管缓存与广播。"
+            },
+            {
+              "text": "所有内存都必须分配在 JVM 堆外，堆内内存没有作用",
+              "correct": false,
+              "explain": "默认在堆内（on-heap），off-heap 是可选配置。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 执行内存：shuffle/join/聚合/排序的临时内存；存储内存：cache/persist 与广播变量。\n2. 默认各约 50%（扣除约 300MB 预留后）。\n3. 关键机制：动态互相借用，空闲优先给对方。\n4. A 正确。\n5. 排除 B（可互相借用）、C（职责说反）、D（默认堆内）。\n6. 选 A。\n**面试延伸**：借用规则——存储内存被借走后，缓存需要收回时会通过淘汰部分缓存块（LRU）回收；执行内存用完会释放给存储。",
+          "enterprise_tip": "调优时用 spark.executor.memory 与 spark.memory.fraction 调整总量与分配比例；出现 OOM 先看是执行内存还是存储内存不够，再对症调参。"
+        },
+        {
+          "task_id": "s07c08t02",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "Stage 怎么切分",
+          "question": "Spark 把 DAG 切分成多个 Stage 的依据是什么？",
+          "options": [
+            {
+              "text": "遇到宽依赖（shuffle）就切一刀：shuffle 要跨节点传输数据，必须等上游全部算完；窄依赖算子合并进同一 Stage",
+              "correct": true,
+              "explain": "正确。宽依赖是天然的 Stage 边界，窄依赖合并流水线执行。"
+            },
+            {
+              "text": "每遇到一个 transformation 就切一个 Stage",
+              "correct": false,
+              "explain": "窄依赖的 transformation 会合并进同一个 Stage，不会逐个切分。"
+            },
+            {
+              "text": "按 Executor 数量切分，每个 Executor 一个 Stage",
+              "correct": false,
+              "explain": "Stage 按依赖关系切分，与 Executor 数量无关。"
+            },
+            {
+              "text": "按数据量大小切分，数据超过 1GB 就切一个 Stage",
+              "correct": false,
+              "explain": "Stage 是逻辑切分，不按数据量。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Stage 切分的核心是依赖类型：宽依赖（shuffle）必须等上游全部完成才能开始下游。\n2. 所以 DAG 调度器在宽依赖处切 Stage；窄依赖（map/filter）合并进同一 Stage 流水线执行，不落盘不传输。\n3. A 正确。\n4. 排除 B（窄依赖合并）、C（与 Executor 无关）、D（与数据量无关）。\n5. 选 A。\n**面试延伸**：这也是'Stage 数 = shuffle 次数 + 1'的原因，减少 shuffle 就能减少 Stage、减少等待。",
+          "enterprise_tip": "面试画图题：给出 map → filter → reduceByKey → map → collect 的算子链，能正确画出 2 个 Stage（reduceByKey 处切分）就说明理解了。"
+        },
+        {
+          "task_id": "s07c08t03",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：数据本地性",
+          "question": "Spark 调度 Task 时优先把计算调度到数据所在的节点，减少网络传输，这种机制称为数据 ____（英文，8 个字母）。",
+          "answer": [
+            "locality",
+            "Locality",
+            "LOCALITY",
+            "本地性"
+          ],
+          "hint": "回忆调度一节：把计算调度到数据所在节点以减少网络传输，这种机制叫什么？先想它和『本地的』这个英文形容词的关系。",
+          "analysis": "**标准解题思路**\n1. 移动计算比移动数据便宜：数据不动，把计算调度过去。\n2. 这个机制叫数据本地性（locality）。\n3. 填 locality。\n**延伸**：优先级从高到低 PROCESS_LOCAL → NODE_LOCAL → RACK_LOCAL → ANY；本地性越差，网络传输越多，Task 越慢。"
+        },
+        {
+          "task_id": "s07c08t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Kryo 为什么比 Java 序列化快",
+          "question": "相比 Spark 默认的 **Java 序列化**，**Kryo 序列化**快在哪里？",
+          "options": [
+            {
+              "text": "序列化/反序列化速度更快、生成的字节更紧凑，网络与磁盘开销更小；代价是需要提前注册类",
+              "correct": true,
+              "explain": "正确。Kryo 更快更省空间，但要注册类才能发挥全部性能。"
+            },
+            {
+              "text": "Kryo 不需要把对象变成字节，直接传输对象引用",
+              "correct": false,
+              "explain": "任何序列化都要把对象变成字节，Kryo 只是更高效。"
+            },
+            {
+              "text": "Kryo 只能用于 RDD，不能用于 DataFrame",
+              "correct": false,
+              "explain": "Kryo 对 RDD 与 DataFrame 都适用。"
+            },
+            {
+              "text": "Kryo 序列化的数据不需要反序列化就能直接使用",
+              "correct": false,
+              "explain": "使用前必须反序列化，Kryo 只是这个过程更快。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Java 序列化：慢、字节体积大（含大量类元数据）。\n2. Kryo：基于类型注册，序列化结果紧凑、速度快。\n3. 前提：提前注册类（registerKryoClasses），否则退回低效路径。\n4. A 正确。\n5. 排除 B（都要序列化）、C（都适用）、D（都要反序列化）。\n6. 选 A。\n**面试延伸**：shuffle 和 cache 越重，Kryo 收益越大；配置 spark.serializer=KryoSerializer。",
+          "enterprise_tip": "生产实践：大数据作业统一开 Kryo 并注册常用类，shuffle 量大的作业能明显降低网络与磁盘开销。"
+        },
+        {
+          "task_id": "s07c08t05",
+          "type": "order",
+          "difficulty": 3,
+          "title": "从 action 到执行的完整流程",
+          "question": "把'一次 action 触发后从 DAG 到执行的完整流程'按正确顺序排列。",
+          "steps": [
+            "调用 action（如 collect），Driver 回溯血缘构建 DAG",
+            "DAG 调度器按宽依赖边界把 DAG 切分为多个 Stage",
+            "每个 Stage 按分区数生成一批 Task",
+            "TaskScheduler 按数据本地性把 Task 分发到各 Executor",
+            "Executor 并行执行 Task，结果汇总回 Driver"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "先整体规划（DAG → Stage → Task），再按本地性分发执行，最后汇总——'先规划后执行'正是懒加载的意义所在。",
+          "analysis": "**标准解题思路**\n1. action 是起点：collect/count 等触发 Driver 回溯血缘，把整条转换链构造成 DAG。\n2. 切 Stage：DAG 调度器按宽依赖边界切分，窄依赖合并进同一 Stage。\n3. 生成 Task：每个 Stage 按分区数生成 Task，分区数 = Task 数。\n4. 分发：TaskScheduler 按数据本地性把 Task 派给 Executor。\n5. 执行与汇总：Executor 并行执行（shuffle 处跨节点传输），结果汇总回 Driver。\n**为什么**：懒加载让 Spark 先看到整条链再切 Stage 优化，这正是'先规划后执行'。"
+        },
+        {
+          "task_id": "s07c08t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "广播变量为什么只读",
+          "question": "为什么 Spark 广播变量（broadcast variable）必须是**只读**的？",
+          "options": [
+            {
+              "text": "一份数据被分发到每个 Executor 内存、被其上的所有 Task 并发共享；若可写，多个 Task 并发修改会破坏一致性，只读才能安全共享且 Driver 只需发送一次",
+              "correct": true,
+              "explain": "正确。只读是'一传多读'共享模型的前提。"
+            },
+            {
+              "text": "只读是为了省内存，可写版本会占用双倍内存",
+              "correct": false,
+              "explain": "省内存不是原因，核心是并发共享的安全性。"
+            },
+            {
+              "text": "广播变量存储在 HDFS 上，HDFS 本身只读",
+              "correct": false,
+              "explain": "广播变量存在 Executor 内存里，不在 HDFS。"
+            },
+            {
+              "text": "只读是因为广播变量只能广播一次，不能重复使用",
+              "correct": false,
+              "explain": "广播变量可以多次使用，只读与使用次数无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 广播的存储模型：Driver 分发一次 → 每个 Executor 内存存一份 → 该 Executor 上所有 Task 共享读。\n2. 并发安全：多个 Task 同时读同一份数据没问题；一旦可写，并发修改会造成数据竞争与结果不一致。\n3. 只读还让 Driver 只需发送一次，无需处理更新同步。\n4. A 正确。\n5. 排除 B（核心是并发安全）、C（在内存不在 HDFS）、D（可多次使用）。\n6. 选 A。\n**面试延伸**：需要可变共享数据时用累加器（accumulator）等专用机制，而不是改广播变量。",
+          "enterprise_tip": "大表 join 小表时广播小表（F.broadcast）让 join 变本地匹配；把广播变量当'配置字典'用是最常见的生产场景。"
+        },
+        {
+          "task_id": "s07c08t07",
+          "type": "python",
+          "difficulty": 3,
+          "title": "模拟分区分配与数据倾斜",
+          "question": "用**纯 Python** 模拟 Spark 的**哈希分区**：给定键值对列表 `data` 与分区数 `num_partitions = 4`，用规则 `partition = sum(ord(ch) for ch in key) % num_partitions`（把 key 各字符的 ASCII 码之和当作哈希值，对分区数取模）把每个键值对分配到对应分区，统计**每个分区收到的条数**，按分区号从小到大每行输出 `分区X: N 条`。",
+          "code_context": "data = [('hot', 100), ('a', 1), ('hot', 200), ('b', 2), ('c', 3), ('hot', 300), ('d', 4), ('e', 5)]\nnum_partitions = 4\n\n# ===== 在这里编写代码 =====\n# 哈希分区：partition = sum(ord(ch) for ch in key) % num_partitions\n# 统计每个分区条数，按分区号从小到大输出 '分区X: N 条'\n",
+          "expected_output": "分区0: 1 条\n分区1: 2 条\n分区2: 1 条\n分区3: 4 条",
+          "reference": "data = [('hot', 100), ('a', 1), ('hot', 200), ('b', 2), ('c', 3), ('hot', 300), ('d', 4), ('e', 5)]\nnum_partitions = 4\n\n# 哈希分区：用 key 各字符 ASCII 码之和作为哈希值\npartitions = [[] for _ in range(num_partitions)]\nfor key, value in data:\n    h = sum(ord(ch) for ch in key)\n    partitions[h % num_partitions].append((key, value))\n\nfor i in range(num_partitions):\n    print('分区%d: %d 条' % (i, len(partitions[i])))",
+          "hint": "题目已给出分区规则，先自己算：每个 key 的 ASCII 码之和与取模结果？注意相同 key 必落同一分区。",
+          "analysis": "**标准解题思路**\n1. 建 4 个空分区：partitions = [[] for _ in range(num_partitions)]。\n2. 遍历键值对：h = sum(ord(ch) for ch in key)，partition = h % num_partitions。\n3. 逐条演算：\n   - ('hot',100)：104+111+116=331，331%4=3 → 分区3\n   - ('a',1)：97%4=1 → 分区1\n   - ('hot',200)：→ 分区3\n   - ('b',2)：98%4=2 → 分区2\n   - ('c',3)：99%4=3 → 分区3\n   - ('hot',300)：→ 分区3\n   - ('d',4)：100%4=0 → 分区0\n   - ('e',5)：101%4=1 → 分区1\n4. 统计：分区0=1 条、分区1=2 条、分区2=1 条、分区3=4 条。\n5. 按分区号顺序输出。\n**为什么**：热点 key 'hot' 哈希后总落在同一分区，导致分区3 独占一半数据——这正是 Spark 里数据倾斜的微观模型，加盐就是把 key 打散到多个分区。",
+          "enterprise_tip": "真实 Spark 中哈希分区与本题同理（用分区器 hash），热点 key 会让某个 Task 处理量爆炸；理解这个模拟，就理解了加盐两阶段聚合为什么有效。"
+        },
+        {
+          "task_id": "s07c08t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "动态资源分配",
+          "question": "关于 Spark 的**动态资源分配**（Dynamic Allocation），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "作业运行期间 Spark 根据负载动态申请/释放 Executor：任务繁忙时按需申请、空闲时回收，提升集群资源利用率；在 YARN 等模式上还需外部 shuffle 服务配合",
+              "correct": true,
+              "explain": "正确。按需伸缩 + 外部 shuffle 服务是动态分配的两个要点。"
+            },
+            {
+              "text": "资源只在作业启动时分配一次，运行期固定不变",
+              "correct": false,
+              "explain": "那是不开动态分配的行为；动态分配正是要运行期伸缩。"
+            },
+            {
+              "text": "开启后集群会固定启动 100 个 Executor",
+              "correct": false,
+              "explain": "Executor 数量按负载动态变化，不是固定值。"
+            },
+            {
+              "text": "动态资源分配会关闭数据本地性",
+              "correct": false,
+              "explain": "动态分配与数据本地性是两回事，互不影响。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 静态分配：提交时申请固定 Executor，跑完释放，闲时浪费资源。\n2. 动态分配：executorAllocationManager 根据『待处理任务数/活跃任务数』按需伸缩 Executor（A 正确）。\n3. 关键前提：YARN 模式下要开启外部 shuffle 服务（External Shuffle Service），因为 Executor 回收后其 shuffle 数据仍需被其他 Executor 读取。\n4. 排除 B（固定不变）、C（固定 100）、D（无关）。\n5. 选 A。\n**面试延伸**：适用场景——多租户共享集群、作业负载波动大；设置 spark.dynamicAllocation.enabled=true 并配置 min/maxExecutors。",
+          "enterprise_tip": "生产注意：开启动态分配必须配 spark.shuffle.service.enabled=true（YARN），否则 Executor 被回收后 shuffle 数据读不到，任务会失败。"
+        },
+        {
+          "task_id": "s07c08t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "推测执行",
+          "question": "关于 Spark 的**推测执行**（Speculative Execution），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "当某个 Task 明显慢于同 Stage 的其他任务时，Spark 在另一节点启动该任务的副本并行计算，先完成者的结果生效，缓解慢节点（straggler）导致的长尾；由 spark.speculation 控制（默认关闭，可按需开启）",
+              "correct": true,
+              "explain": "正确。副本竞赛 + 先到先得，是缓解慢节点的手段。"
+            },
+            {
+              "text": "推测执行会复制集群上的全部数据",
+              "correct": false,
+              "explain": "只针对慢 Task 启动一个副本，不复制全量数据。"
+            },
+            {
+              "text": "推测执行会丢弃所有慢任务的中间结果",
+              "correct": false,
+              "explain": "结果以先完成者为准，不主动丢弃。"
+            },
+            {
+              "text": "开启推测执行后作业一定会变慢",
+              "correct": false,
+              "explain": "对慢节点明显的场景是提速；可能浪费少量资源是它的代价。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 问题背景：集群中个别机器（慢节点）导致个别 Task 超时，拖累整个 Stage。\n2. 推测执行：Spark 监控 Task 执行时间，发现明显落后同 Stage 中位数的 Task 时，在另一节点启动同样任务的副本，谁先完成用谁的结果（A 正确）。\n3. 配置：spark.speculation 默认 false；spark.speculation.quantile（如 0.75）、multiplier 控制触发条件。\n4. 排除 B（不复制全量）、C（不丢弃）、D（不是一定变慢）。\n5. 选 A。\n**面试延伸**：代价是可能多跑一个副本浪费少量资源；集群机器异构或偶发故障多的环境收益大。",
+          "enterprise_tip": "生产经验：机器规格统一、任务稳定的集群默认关闭即可；出现『其他任务秒完、个别任务跑很久』且排除数据倾斜后，再考虑开启 spark.speculation=true。"
+        }
+      ]
+    }
+  ]
+}

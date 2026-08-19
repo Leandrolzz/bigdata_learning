@@ -1,0 +1,3030 @@
+{
+  "stage_id": "s05_hive",
+  "title": "阶段 5：Hive 数据仓库",
+  "subtitle": "用 SQL 玩转大数据",
+  "emoji": "🏛️",
+  "estimated_days": 16,
+  "learning_goal": "掌握 Hive 架构与元数据原理、DDL/DML/常用函数/进阶 SQL，理解存储格式与压缩选型，掌握数据倾斜等调优手段，具备用 SQL 构建数仓分析的能力。",
+  "chapters": [
+    {
+      "chapter_id": "s05c01",
+      "title": "5.1 Hive 是什么与架构",
+      "goal": "理解 Hive = SQL on Hadoop，掌握 Metastore 与执行引擎，理解 SQL 如何变成分布式任务",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "Hive 是 Facebook 2008 年开源的**数据仓库工具**，核心价值一句话：**让你用熟悉的 SQL 操作 Hadoop 上的海量数据**。\n\n没有 Hive 之前，写一个词频统计要写几百行 Java MapReduce；有了 Hive，一句话搞定：\n\n```sql\nSELECT word, COUNT(*) FROM words GROUP BY word;\n```\n\nHive 的定位：**SQL on Hadoop**——它本身**不存储数据**（数据还在 HDFS 上）、**不算数据**（计算由引擎完成），它只做一件事：**把 SQL 翻译成分布式计算任务**（MapReduce/Tez/Spark），然后调度执行。\n\n所以 Hive 三层职责：① 解析 SQL；② 查元数据（表结构、分区信息）；③ 生成并提交计算任务。真正干活的是底层的计算引擎。"
+        },
+        {
+          "type": "text",
+          "content": "Hive 需要记住「有哪些表、每张表的字段、分区、存储位置、格式」——这些信息叫**元数据**，存在 **Metastore** 里。\n\nMetastore 默认用**内嵌 Derby**（仅测试），生产必须换 **MySQL**：\n- **Metastore（服务）**：提供元数据读写接口；\n- **MySQL（存储）**：真实存放元数据表（DBS、TBLS、COLUMNS_V2、PARTITIONS 等）。\n\n执行一条 Hive SQL 时，编译器先从 Metastore 查表结构，才知道 SQL 里的字段在哪、怎么读。**Metastore 挂 = Hive 完全不可用**，所以生产上它也是高可用部署的对象。"
+        },
+        {
+          "type": "text",
+          "content": "Hive 支持三种**执行引擎**，可配置 `hive.execution.engine`：\n- **MapReduce**：默认/最老，最稳但最慢（每步落盘）；\n- **Tez**：DAG 优化，减少落盘，比 MR 快；\n- **Spark**：内存计算，最快，生产常用。\n\n**一条 Hive SQL 的执行链路**（面试必考）：\n1. **解析（Parse）**：SQL 文本 → 抽象语法树（AST），做语法检查；\n2. **语义分析（Semantic Analyze）**：结合 Metastore 元数据做**语义校验**（表/字段是否存在、类型匹配），生成逻辑计划；\n3. **逻辑优化（Logical Optimize）**：规则优化（谓词下推、列裁剪等）；\n4. **物理计划（Physical Plan）**：逻辑计划 → 一串 MapReduce/Tez/Spark 任务（Task），生成物理执行计划；\n5. **执行（Execute）**：把任务提交给 YARN 调度执行；\n6. **返回结果**：汇总结果返回给客户端。\n\n也就是说：**一条 SQL 可能被拆成多个 MR/Spark 任务，每个任务负责 SQL 的一部分（过滤、关联、聚合）**。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "-- 一条 SQL 如何变成分布式任务？以统计每日订单金额为例\n\nSELECT order_date, SUM(amount) AS total\nFROM ods_orders\nWHERE order_date >= '2024-01-01'\nGROUP BY order_date;\n\n-- Hive 内部会把它翻译成类似下面的任务链：\n-- 任务 1（Map 阶段）: 读取 ods_orders，过滤 order_date >= '2024-01-01'，输出 (order_date, amount)\n-- 任务 2（Shuffle） : 按 order_date 分组\n-- 任务 3（Reduce） : 对每组 SUM(amount)\n-- 任务 4          : 结果写回 HDFS 的临时目录，客户端读取展示\n\n-- 查看执行计划（调优利器，5.6 章详解）\nEXPLAIN SELECT order_date, SUM(amount) FROM ods_orders GROUP BY order_date;",
+          "caption": "SQL → 分布式任务链的直观映射"
+        },
+        {
+          "type": "warning",
+          "content": "**Hive 不是传统数据库**：\n- 不支持行级**更新/删除**（数据只进不改，靠分区/覆盖重写）；\n- 不支持事务（默认）、不支持索引（用分区/分桶替代）；\n- 查询**延迟高**（秒~分钟级），不适合在线交互，是**离线批处理**工具；\n- 但**吞吐大**：一次能扫几 TB。\n面试常考『Hive 和 MySQL 的区别』，从存储、更新、延迟、场景四个维度答。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- 数仓团队 80% 的 SQL 都跑在 Hive（或 Spark SQL）上：日报、月报、用户画像、经营分析全在这里。\n- **面试必问**：① Hive 一条 SQL 的执行过程？② Metastore 用什么存、存什么？③ Hive 和 MySQL 的区别？④ 为什么 Hive 慢？\n- **岗位要求**：『精通 Hive SQL』是数仓/大数据开发岗 JD 高频词；面试会让你现场写 SQL 分析订单数据。\n- **常见坑**：把 Hive 当 MySQL 用（频繁 update）；小表 join 大表不走 mapjoin；分区表忘记加分区过滤导致全表扫描。"
+        }
+      ],
+      "hands_on": "1. 打开 Hive 官网（hive.apache.org）阅读 Architecture 页面，把 Metastore、HiveServer2、执行引擎的关系抄下来。\n2. 如果本机装了 Hadoop 伪分布式，可启动 Hive CLI（hive 命令）执行 `SHOW DATABASES;` 和 `CREATE DATABASE IF NOT EXISTS demo;`，体验 Hive 的第一个命令。\n3. 用纸笔画出『用户 → Hive → Metastore(MySQL) → 执行引擎 → YARN → HDFS』的数据/控制流向图。\n4. 思考题：为什么说『Hive 不存数据也不算数据』？用自己的话写一段解释。",
+      "tasks": [
+        {
+          "task_id": "s05c01t01",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Hive 的本质",
+          "question": "关于 Hive，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Hive 是一个分布式文件系统，负责存储海量数据",
+              "correct": false,
+              "explain": "存数据的是 HDFS；Hive 不存储数据。"
+            },
+            {
+              "text": "Hive 把 SQL 翻译成 MapReduce/Tez/Spark 等分布式任务来执行",
+              "correct": true,
+              "explain": "正确。Hive 的核心职责是把 SQL 编译成底层计算引擎的任务。"
+            },
+            {
+              "text": "Hive 的数据必须存储在 MySQL 中",
+              "correct": false,
+              "explain": "数据在 HDFS 上；MySQL 只存 Hive 的元数据（Metastore）。"
+            },
+            {
+              "text": "Hive 支持行级 update/delete，适合在线交易系统",
+              "correct": false,
+              "explain": "Hive 是离线批处理工具，不支持行级更新删除，不适合在线交易。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Hive 定位 = SQL on Hadoop：翻译 SQL、调度执行，不存数据、不算数据。\n2. 存储：数据在 HDFS，元数据在 MySQL（Metastore）。\n3. 执行：SQL → MR/Tez/Spark 任务。\n4. 特性：离线、只追加、无事务、高延迟高吞吐。\n5. 选 B。\n**延伸**：『Hive 不存数据也不算数据』这句话面试常考，要能展开解释。",
+          "enterprise_tip": "面试题『你们公司的 Hive 底层用什么引擎？』常见回答：Spark（hive.execution.engine=spark），比 MR 快数倍；老旧集群可能还是 MR。"
+        },
+        {
+          "task_id": "s05c01t02",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "多选：Metastore 存什么",
+          "question": "Hive 的 Metastore（元数据）中会存储以下哪些信息？（多选）",
+          "options": [
+            {
+              "text": "表名与字段名",
+              "correct": true,
+              "explain": "正确。元数据就是描述表结构的信息，包括表名、列名、列类型。"
+            },
+            {
+              "text": "表数据本身",
+              "correct": false,
+              "explain": "错误。表数据存在 HDFS 上，Metastore 只存描述数据的元数据。"
+            },
+            {
+              "text": "分区信息（分区字段与目录）",
+              "correct": true,
+              "explain": "正确。分区表的分区字段、分区目录都是元数据。"
+            },
+            {
+              "text": "表数据在 HDFS 上的存储位置",
+              "correct": true,
+              "explain": "正确。每张表对应 HDFS 的哪个目录（location）记录在元数据里。"
+            },
+            {
+              "text": "表的存储格式（ORC/Parquet 等）",
+              "correct": true,
+              "explain": "正确。存储格式、字段分隔符等表属性也属于元数据。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 元数据 = 关于数据的数据：表结构、字段、分区、位置、格式、属性。\n2. 表数据本体在 HDFS，不在 Metastore。\n3. 除『表数据本身』外四项都是元数据。\n4. 选 表名/字段名、分区信息、存储位置、存储格式。\n**易错点**：以为 Metastore 存了数据副本——它只存描述信息，查询数据时按 location 去 HDFS 读。",
+          "enterprise_tip": "面试题『Metastore 用的什么数据库？』答：生产用 MySQL；元数据表（DBS/TBLS/COLUMNS_V2/PARTITIONS）能背出来是数仓 DBA 基本功。"
+        },
+        {
+          "task_id": "s05c01t03",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排序：Hive SQL 执行链路",
+          "question": "把『一条 Hive SQL 从提交到返回结果』的执行链路按正确顺序排列。",
+          "steps": [
+            "执行引擎把生成的分布式任务提交到 YARN 调度执行（Map/Reduce/Spark 任务）",
+            "SQL 解析成抽象语法树（AST），进行语法检查",
+            "查询 Metastore 元数据，做语义校验（表/字段是否存在），生成并优化逻辑执行计划",
+            "把逻辑计划编译成物理执行计划（一系列 MR/Tez/Spark 任务）",
+            "客户端提交 SQL 给 Hive",
+            "各任务结果汇总返回客户端"
+          ],
+          "correct_order": [
+            4,
+            1,
+            2,
+            3,
+            0,
+            5
+          ],
+          "order_explain": "执行链路：客户端提交 SQL → 解析成 AST → 查元数据做语义分析并优化 → 生成物理任务 → 提交 YARN 执行 → 汇总返回。本质是『SQL → 语法树 → 逻辑计划 → 物理任务 → 分布式执行』。",
+          "analysis": "**标准解题思路**\n1. **提交**：客户端把 SQL 发给 Hive（HiveServer2）。\n2. **解析**：SQL 文本 → AST，检查语法错误。\n3. **语义分析**：结合 Metastore 校验表/字段/类型，生成逻辑计划并优化（谓词下推、列裁剪）。\n4. **物理计划**：逻辑计划 → 具体 MR/Tez/Spark 任务序列。\n5. **执行**：任务提交 YARN，分布式并行跑。\n6. **返回**：结果汇总回客户端。\n**易错点**：把『解析』和『语义分析』混为一谈——前者只看语法，后者要查元数据。\n**记忆**：提交 → 解析 → 语义 → 物理 → 执行 → 返回。",
+          "enterprise_tip": "面试必背这条链路，并能在白板上画出来；追问『逻辑优化做了什么』答：谓词下推（先过滤再 join）、列裁剪（只读需要的列）、分区裁剪。"
+        },
+        {
+          "task_id": "s05c01t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Metastore 的作用",
+          "question": "Hive 执行一条 SQL 时，**Metastore** 在其中扮演的角色是？",
+          "options": [
+            {
+              "text": "存储表的数据文件",
+              "correct": false,
+              "explain": "表数据在 HDFS 上，Metastore 只存元数据，不存数据本体。"
+            },
+            {
+              "text": "存储元数据（表结构、字段、分区、存储位置），供 SQL 编译时查询",
+              "correct": true,
+              "explain": "正确。编译器要先查 Metastore 才知道字段在哪、表怎么读，做语义校验。"
+            },
+            {
+              "text": "负责执行 SQL 计算",
+              "correct": false,
+              "explain": "计算由底层执行引擎（MR/Tez/Spark）完成，Metastore 不计算。"
+            },
+            {
+              "text": "负责 HDFS 的文件读写",
+              "correct": false,
+              "explain": "HDFS 读写由 HDFS 客户端完成，与 Metastore 无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 元数据 = 关于数据的数据：表名、字段、分区、location、格式。\n2. Metastore 的作用：存元数据并提供读写接口，SQL 编译时查它做语义校验（表/字段是否存在）。\n3. 排除：数据在 HDFS、计算在执行引擎、文件读写是 HDFS 的活。\n4. 选 B。\n**延伸**：Metastore 生产用 MySQL 存储，DBS/TBLS/COLUMNS_V2/PARTITIONS 等表能背出来是数仓 DBA 基本功。",
+          "enterprise_tip": "Metastore 挂 = Hive 完全不可用，所以生产上它也是高可用部署对象；面试题「Metastore 挂了会怎样」要答：所有 SQL 无法编译执行，但 HDFS 数据不受影响。"
+        },
+        {
+          "task_id": "s05c01t05",
+          "type": "multi",
+          "difficulty": 1,
+          "title": "多选：Hive 支持的执行引擎",
+          "question": "Hive 可以通过配置 `hive.execution.engine` 选择执行引擎，以下哪些是 Hive **官方支持**的执行引擎？（多选）",
+          "options": [
+            {
+              "text": "MapReduce",
+              "correct": true,
+              "explain": "正确。MapReduce 是最早也是默认的执行引擎，最稳但最慢。"
+            },
+            {
+              "text": "Tez",
+              "correct": true,
+              "explain": "正确。Tez 以 DAG 优化减少落盘，比 MR 快。"
+            },
+            {
+              "text": "Spark",
+              "correct": true,
+              "explain": "正确。Spark 内存计算最快，生产常用（hive.execution.engine=spark）。"
+            },
+            {
+              "text": "Flink",
+              "correct": false,
+              "explain": "Hive 官方支持 MR/Tez/Spark 三种引擎；Flink 有自己的 SQL 层，不作为 Hive 的执行引擎。"
+            },
+            {
+              "text": "MySQL",
+              "correct": false,
+              "explain": "MySQL 是 Metastore 的存储数据库，不是执行引擎。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 执行引擎决定 SQL 翻译成什么样的分布式任务：MR 每步落盘、Tez DAG 优化、Spark 内存计算。\n2. 官方支持三种：MapReduce / Tez / Spark。\n3. 排除：Flink 是独立流计算框架（不是 Hive 执行引擎）；MySQL 是元数据存储。\n4. 选前三项。\n**易错点**：把 Flink 当 Hive 执行引擎——Hive on Flink 不是官方主流方案，面试按 MR/Tez/Spark 答。",
+          "enterprise_tip": "面试题「你们 Hive 用什么引擎」：答 Spark（hive.execution.engine=spark）比 MR 快数倍；老集群可能还是 MR；选型时还要考虑引擎对函数/语法的兼容差异。"
+        },
+        {
+          "task_id": "s05c01t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：为什么 Hive 慢",
+          "question": "同样是写 SQL，一条 Hive SQL 通常比 MySQL 慢得多。最主要的原因是？",
+          "options": [
+            {
+              "text": "Hive 底层默认用 MapReduce 等分布式引擎执行，中间结果大量读写磁盘，且任务启动（JVM/调度）开销大",
+              "correct": true,
+              "explain": "正确。MR 每步落盘 + 每个 task 一个 JVM 进程，导致秒~分钟级延迟，这是 Hive 慢的根本原因。"
+            },
+            {
+              "text": "Hive 的 SQL 关键字比 MySQL 多，解析阶段特别慢",
+              "correct": false,
+              "explain": "错误。解析耗时占比极小，不是主要瓶颈。"
+            },
+            {
+              "text": "Hive 只能在单机上运行，性能受限于单机",
+              "correct": false,
+              "explain": "错误。Hive 恰恰是分布式执行，慢在分布式任务的磁盘 IO 与调度开销。"
+            },
+            {
+              "text": "Hive 不支持 GROUP BY 等聚合操作",
+              "correct": false,
+              "explain": "错误。Hive 支持完整聚合与各类分析，与查询速度无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 回忆 Hive 执行链路：SQL → 翻译成 MapReduce/Tez/Spark 任务 → 提交 YARN 分布式执行。\n2. 慢的根源在**执行引擎**：默认 MR 引擎下，map 输出落盘 → shuffle 落盘+网络传输 → reduce 输入读盘，每一步都是磁盘 IO；磁盘比内存慢几个数量级。\n3. 加上每个 task 启动独立 JVM、任务排队调度等固定开销，一条简单 SQL 也常要几十秒到分钟级。\n4. 这是**离线批处理**的代价：延迟高，但一次能扫几 TB、吞吐大。\n5. 选 A。\n**延伸**：换 Tez/Spark 引擎（减少落盘、内存计算）可大幅提速，但本质仍是分布式批处理，无法与 OLTP 数据库的低延迟相比。",
+          "enterprise_tip": "面试题「为什么 Hive 慢、怎么优化」：先答引擎（MR 每步落盘 + JVM 开销），再答优化三板斧——换 Spark 引擎、SQL 加分区过滤与列裁剪、避免不必要的 shuffle；能联系到 5.6 章调优就是完整回答。"
+        },
+        {
+          "task_id": "s05c01t07",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "多选：Hive 的适用与不适用场景",
+          "question": "以下业务场景中，**适合**使用 Hive 处理的有哪些？（多选）",
+          "options": [
+            {
+              "text": "每天凌晨对前一天产生的 10 亿条行为日志做离线汇总，生成日报",
+              "correct": true,
+              "explain": "正确。海量数据的离线批处理正是 Hive 的典型场景。"
+            },
+            {
+              "text": "电商大促后对全量历史订单做经营分析报表（数仓分析）",
+              "correct": true,
+              "explain": "正确。数仓分析与报表需求是 Hive 的主场。"
+            },
+            {
+              "text": "在线支付接口需要在 100 毫秒内返回扣款结果",
+              "correct": false,
+              "explain": "错误。低延迟在线请求必须用 OLTP 数据库/缓存，Hive 秒~分钟级延迟不适合。"
+            },
+            {
+              "text": "用户购物车的高频实时读写（每秒上万次）",
+              "correct": false,
+              "explain": "错误。高频实时读写是 OLTP 场景，Hive 无行级更新且延迟高。"
+            },
+            {
+              "text": "银行核心交易系统要求行级事务与强一致",
+              "correct": false,
+              "explain": "错误。Hive 默认无事务、无行级更新，不适合核心交易系统。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 判断依据：Hive = 离线批处理工具——**延迟高（秒~分钟级）、吞吐大（一次扫几 TB）、数据只追加不改**。\n2. 适合：海量数据的离线汇总（日报）、数仓分层分析、经营报表——数据大、时效要求不高、以批量扫描聚合为主。\n3. 不适合：低延迟在线请求（100ms 级）、高频实时读写、行级事务——这些是 OLTP 数据库（MySQL/PG）或缓存/流计算的领域。\n4. 排除后两项：购物车高频读写、银行核心交易都不满足「离线批处理」特征。\n5. 选前两项。\n**记忆口诀**：**离线、海量、批量分析用 Hive；在线、实时、行级事务用 OLTP**。\n**延伸**：实时场景用 Flink/Kafka Streams，交互式低延迟分析用 ClickHouse/Doris 等 OLAP 引擎，Hive 只负责离线层。",
+          "enterprise_tip": "面试题「你们数仓里 Hive、Spark、Flink 怎么分工」：离线批处理（日报/月报/全量加工）用 Hive/Spark SQL；实时指标用 Flink；即席交互查询用 OLAP 引擎——能讲清场景边界是数仓架构师的基本功。"
+        },
+        {
+          "task_id": "s05c01t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：为什么说 Hive 是翻译器",
+          "question": "为什么说 Hive 本质上是一个『翻译器/编译器』，而不是数据库？",
+          "options": [
+            {
+              "text": "Hive 把 SQL 解析编译成 MapReduce/Tez/Spark 作业提交执行，本身不存储数据、不执行计算",
+              "correct": true,
+              "explain": "正确。Hive 只负责翻译与调度，数据在 HDFS、计算在底层引擎。"
+            },
+            {
+              "text": "Hive 把 SQL 直接翻译成机器码",
+              "correct": false,
+              "explain": "Hive 把 SQL 翻译成分布式作业（MR/Tez/Spark），不是机器码。"
+            },
+            {
+              "text": "Hive 会把数据从 HDFS 复制到 MySQL 后再查询",
+              "correct": false,
+              "explain": "数据始终在 HDFS，MySQL 只存元数据（Metastore）。"
+            },
+            {
+              "text": "Hive 只能翻译 SELECT 语句，不支持增删改",
+              "correct": false,
+              "explain": "Hive 支持 DDL/DML（CREATE/INSERT/LOAD 等），只是不支持行级 update/delete。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Hive 的定位是 SQL on Hadoop：不存数据（数据在 HDFS）、不算数据（计算由引擎完成）。\n2. 它做的核心工作是把 SQL 解析编译成 MapReduce/Tez/Spark 作业并提交执行——这就是『翻译器』的含义。\n3. 排除干扰项：翻译目标是分布式作业不是机器码；MySQL 只存元数据；Hive 支持 DDL/DML 只是没有行级更新。\n4. 选 A。\n**延伸**：面试答『Hive 是什么』：一句话——把 SQL 翻译成分布式任务执行的数据仓库工具。",
+          "enterprise_tip": "面试题『Hive 一条 SQL 背后发生了什么』：提交 → 解析 AST → 语义分析（查 Metastore）→ 逻辑/物理计划 → 提交 YARN ——能把这条链路讲清楚，『翻译器』三个字就有说服力了。"
+        },
+        {
+          "task_id": "s05c01t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：beeline 与 HiveServer2",
+          "question": "关于 Hive 的 **HiveServer2** 与 **beeline**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "HiveServer2 是 Hive 的服务端入口，beeline 是通过 JDBC 连接 HiveServer2 的官方命令行客户端",
+              "correct": true,
+              "explain": "正确。HiveServer2 接收客户端请求并编译执行 SQL；beeline 走 JDBC 协议连到 HiveServer2。"
+            },
+            {
+              "text": "HiveServer2 负责存储表数据，beeline 负责计算",
+              "correct": false,
+              "explain": "表数据在 HDFS、元数据在 Metastore，HiveServer2 不存数据；beeline 只是客户端，也不算数据。"
+            },
+            {
+              "text": "beeline 直接连接 HDFS 读取文件，不需要任何服务端",
+              "correct": false,
+              "explain": "beeline 必须通过 JDBC 连接 HiveServer2，由 HiveServer2 完成编译与调度。"
+            },
+            {
+              "text": "一个 HiveServer2 同时只能服务一个客户端会话",
+              "correct": false,
+              "explain": "HiveServer2 支持多会话并发；生产上还会部署多个实例做负载均衡。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. HiveServer2 的定位：Hive 的服务端入口，接收客户端 SQL，负责『编译（查 Metastore）→ 生成任务 → 提交引擎执行』，本身不存数据（数据在 HDFS）。\n2. beeline 的定位：官方命令行客户端，通过 JDBC 协议连接 HiveServer2（对应旧版 hive CLI 直接本地直连的方式）。\n3. 生产架构：多个 HiveServer2 实例 + 负载均衡，支持大量会话并发。\n4. 排除干扰项：不存数据、不直连 HDFS、支持多会话。\n5. 选 A。\n**延伸**：面试问『客户端怎么连 Hive』——beeline 连 HiveServer2；『HiveServer2 挂了会怎样』——所有客户端无法提交 SQL，但 HDFS 数据不受影响。",
+          "enterprise_tip": "生产排障第一步常是『看 HiveServer2 健康状态』：HS2 负载过高或会话泄漏会导致所有作业排队；beeline 连不上先查 HS2 进程与端口，再查 Metastore。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "Hive 是什么？为什么说它「不存数据也不算数据」？",
+          "a": "Hive 是 SQL on Hadoop 工具：数据在 HDFS、计算由执行引擎完成，Hive 只负责把 SQL 翻译成分布式任务并调度执行。"
+        },
+        {
+          "q": "Metastore 存什么？生产用什么数据库？",
+          "a": "存元数据：表名、字段、分区、HDFS location、存储格式等；生产用 MySQL（默认内嵌 Derby 仅测试）。"
+        },
+        {
+          "q": "Hive 支持哪几种执行引擎？",
+          "a": "MapReduce（默认最慢）、Tez（DAG 优化）、Spark（内存计算最快，生产常用），通过 hive.execution.engine 配置。"
+        },
+        {
+          "q": "一条 Hive SQL 的执行链路？",
+          "a": "提交 → 解析成 AST（语法检查）→ 查 Metastore 语义分析+逻辑优化 → 生成物理计划（MR/Tez/Spark 任务）→ 提交 YARN 执行 → 汇总返回。"
+        },
+        {
+          "q": "Hive 和 MySQL 的区别？",
+          "a": "Hive 存 HDFS、只追加不更新、延迟高吞吐大、离线批处理；MySQL 存本地、支持事务与行级更新、低延迟、在线 OLTP——从存储、更新、延迟、场景四维答。"
+        },
+        {
+          "q": "beeline 和 HiveServer2 是什么关系？",
+          "a": "HiveServer2 是 Hive 的服务端入口（接收请求、编译执行 SQL），beeline 是通过 JDBC 连接 HiveServer2 的官方命令行客户端；生产部署多个 HS2 做负载均衡。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Hive",
+          "desc": "基于 Hadoop 的数据仓库工具，把 SQL 翻译成分布式任务执行。"
+        },
+        {
+          "term": "Metastore",
+          "desc": "Hive 的元数据服务，存储表结构、分区、location 等信息，生产用 MySQL。"
+        },
+        {
+          "term": "HiveServer2",
+          "desc": "Hive 的服务端入口，接收客户端 SQL 请求并执行。"
+        },
+        {
+          "term": "执行引擎",
+          "desc": "Hive 底层真正执行计算的部分，可选 MapReduce / Tez / Spark。"
+        },
+        {
+          "term": "AST（抽象语法树）",
+          "desc": "SQL 解析阶段的产物，用于语法检查。"
+        },
+        {
+          "term": "SQL on Hadoop",
+          "desc": "用 SQL 操作 Hadoop 海量数据的理念，Hive/Spark SQL 是其代表。"
+        },
+        {
+          "term": "元数据",
+          "desc": "描述数据的数据，如表结构、字段、分区、存储位置。"
+        },
+        {
+          "term": "EXPLAIN",
+          "desc": "Hive 中查看 SQL 执行计划的命令，是调优的入口。"
+        },
+        {
+          "term": "beeline",
+          "desc": "Hive 官方命令行客户端，通过 JDBC 连接 HiveServer2 提交 SQL。"
+        }
+      ],
+      "kps": [
+        "Hive 是什么（SQL on Hadoop，不存数据不算数据）",
+        "Metastore 与元数据（生产用 MySQL）",
+        "三种执行引擎（MapReduce/Tez/Spark）",
+        "一条 SQL 的执行链路（解析→语义→优化→物理→执行→返回）",
+        "Hive 与传统数据库的区别（无行级更新、高延迟高吞吐、离线批处理）",
+        "为什么 Hive 慢（MR 引擎磁盘 IO 与任务启动开销）",
+        "Hive 的适用与不适用场景",
+        "Hive 是翻译器/编译器的本质（SQL→分布式作业）",
+        "HiveServer2 与 beeline 客户端（JDBC 连接方式）"
+      ]
+    },
+    {
+      "chapter_id": "s05c02",
+      "title": "5.2 Hive DDL：建库建表",
+      "goal": "掌握建库建表、内部表与外部表区别、分区表与分桶表、数据类型",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "Hive 里先有**库**再有**表**（表归属某个库，库对应 HDFS 上一个目录）：\n\n```sql\nCREATE DATABASE IF NOT EXISTS dwd;\nUSE dwd;\n```\n\n建表语法与 MySQL 类似，但多了 Hive 特有子句（行分隔符、存储格式等）：\n\n```sql\nCREATE TABLE dwd_user (\n  user_id    INT,\n  user_name  STRING,\n  age        INT,\n  city       STRING,\n  reg_date   STRING\n)\nROW FORMAT DELIMITED FIELDS TERMINATED BY ','   -- 字段分隔符\nSTORED AS TEXTFILE;                              -- 存储格式\n```\n\nHive 常用数据类型：数值（TINYINT/SMALLINT/INT/BIGINT/FLOAT/DOUBLE/DECIMAL）、字符串（STRING/VARCHAR/CHAR）、日期（DATE/TIMESTAMP，**Hive 中日期常用 STRING 存 '2024-01-05'**）、复杂类型（ARRAY/MAP/STRUCT）。\n\n**注意**：Hive 没有 MySQL 的 AUTO_INCREMENT、UNIQUE、PRIMARY KEY 约束——表结构只是『怎么读 HDFS 上文件的说明书』。"
+        },
+        {
+          "type": "text",
+          "content": "这是**面试最高频考点**，区别就一句话：**删表时，内部表连数据一起删，外部表只删元数据、保留 HDFS 数据**。\n\n- **内部表（管理表）**：建表时没写 EXTERNAL，Hive 认为数据归自己管，`DROP TABLE` 会**同时删除 HDFS 上的数据**。\n- **外部表**：`CREATE EXTERNAL TABLE ...`，数据可能来自别的系统（如 Flume 采集、别的团队产出），Hive 只『借用』，`DROP TABLE` **只删元数据**，HDFS 文件原封不动。\n\n**生产经验**：**ODS 层原始数据、日志数据一律用外部表**——万一误删，表结构没了但数据还在，重建表即可；临时分析表用内部表，删掉自动清理数据。\n\n建表时还可以用 `LOCATION 'hdfs://...'` 指定数据目录：\n\n```sql\nCREATE EXTERNAL TABLE ods_log (\n  log_id   STRING,\n  msg      STRING,\n  log_time STRING\n)\nROW FORMAT DELIMITED FIELDS TERMINATED BY ','\nLOCATION '/data/flume/logs';   -- 指向 Flume 正在写入的目录\n```"
+        },
+        {
+          "type": "text",
+          "content": "**分区表**：按分区字段把数据拆到不同目录（如按日期 `dt` 分区），查询时只扫需要的分区，**避免全表扫描**，是 Hive 性能的第一手段。\n\n```sql\n-- 按日期分区（静态分区：手动指定分区值）\nCREATE TABLE dwd_order (\n  order_id INT, user_id INT, amount DOUBLE\n)\nPARTITIONED BY (dt STRING);\n\n-- 导入数据时指定分区\nINSERT OVERWRITE TABLE dwd_order PARTITION (dt='2024-01-05')\nSELECT order_id, user_id, amount FROM ods_order WHERE dt='2024-01-05';\n```\n\nHDFS 目录结构：`/warehouse/dwd.db/dwd_order/dt=2024-01-05/`。\n\n**动态分区**：分区值来自 SELECT 结果，自动创建分区（需要开启 `set hive.exec.dynamic.partition=true;`）。\n\n**分桶表**：按某列的哈希值把数据分到固定数量的桶（文件）里，用于**抽样、join 优化**（桶间 join）、Map 端聚合。日常先掌握概念，面试常考『分桶 vs 分区』的区别：分区是目录维度的粗粒度切分，分桶是文件维度的细粒度切分。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "-- 分区表 + 动态分区 完整示例\n\n-- 1. 建分区表\nCREATE TABLE dwd_user_login (\n  user_id INT,\n  login_time STRING\n)\nPARTITIONED BY (dt STRING);\n\n-- 2. 开启动态分区（分区值由查询结果决定）\nSET hive.exec.dynamic.partition=true;\nSET hive.exec.dynamic.partition.mode=nonstrict;   -- 允许所有分区列都是动态的\n\n-- 3. 从 ODS 层动态导入：按 ods 表的 dt 自动建分区\nINSERT OVERWRITE TABLE dwd_user_login PARTITION (dt)\nSELECT user_id, login_time, dt FROM ods_user_login;\n\n-- 4. 查询：只扫指定分区（分区裁剪）\nSELECT * FROM dwd_user_login WHERE dt = '2024-01-05';",
+          "caption": "静态分区与动态分区"
+        },
+        {
+          "type": "warning",
+          "content": "**易错点**：\n- 分区字段是**伪列**：它不在数据文件里，是目录名，SELECT 分区字段时值来自目录名；\n- 外部表删了表结构后数据还在，**重建外部表要写对 LOCATION**，否则会新建空目录读不到旧数据；\n- 动态分区不开启/模式不对会报错 `FAILED: SemanticException`；\n- 建表时**忘记指定分隔符**，导入数据会全挤在一列。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- 数仓规范：ODS 层外部表 + 按天分区，DWD/DWS 层内部表（或外部表）分区存储，这是各公司数仓建模的通用约定。\n- **面试必问**：① 内部表和外部表区别？② 为什么 ODS 用外部表？③ 分区表和分桶表区别？④ 动态分区怎么开启？\n- **岗位要求**：能独立设计一张分区表并说明分区粒度选择（天/小时）的理由。\n- **常见坑**：删表不确认内外部，把 ODS 外部表建成内部表导致 DROP 后数据全没——生产事故级别。"
+        }
+      ],
+      "hands_on": "1. 在笔记本上写出内部表与外部表的 DROP 行为对比表（两列：删表前/删表后数据与元数据状态）。\n2. 如果装了 Hive：执行建库、建内部表、建外部表、INSERT 数据、DROP 两张表，用 `hdfs dfs -ls` 验证内部表数据被删而外部表数据还在。\n3. 用 SQLite 模拟分区思想：给一张表加一个 dt 列，分别按 dt='2024-01-05' 过滤查询，体会『只查一部分数据』的意义。\n4. 思考：为什么日志表必须按天分区？如果日志量每天 10 亿条，不分区查询会怎样？写一段笔记。",
+      "tasks": [
+        {
+          "task_id": "s05c02t01",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：内部表 vs 外部表",
+          "question": "关于 Hive 内部表与外部表，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "DROP 内部表只删除元数据，HDFS 数据保留",
+              "correct": false,
+              "explain": "正好相反：内部表数据归 Hive 管理，DROP 时元数据和数据一起删。"
+            },
+            {
+              "text": "DROP 外部表只删除元数据，HDFS 数据保留",
+              "correct": true,
+              "explain": "正确。外部表数据不属于 Hive，DROP 只删『说明书』，文件还在。"
+            },
+            {
+              "text": "外部表的数据必须存在 MySQL 里",
+              "correct": false,
+              "explain": "表数据在 HDFS；MySQL 只存元数据。"
+            },
+            {
+              "text": "内部表不支持分区",
+              "correct": false,
+              "explain": "内部表外部表都支持分区，分区与表类型无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 内部表（管理表）：Hive 拥有数据，DROP 连数据一起删。\n2. 外部表：数据归属外部（其他系统/团队），DROP 只删元数据。\n3. 生产约定：ODS 原始数据用外部表防误删。\n4. 选 B。\n**记忆口诀**：内部表『人走茶凉』（删表删数据），外部表『人去楼空』（只删表不删数据）。",
+          "enterprise_tip": "面试题『为什么 ODS 层用外部表？』答：原始数据一旦误删无法恢复，外部表 DROP 只删元数据，数据仍在 HDFS，重建表即可找回；这层设计是数仓数据安全的兜底。"
+        },
+        {
+          "task_id": "s05c02t02",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：外部表关键字",
+          "question": "创建外部表的 DDL 中，需要在 CREATE 和 TABLE 之间加的关键字是 ____（英文，全大写或小写均可）。",
+          "answer": [
+            "EXTERNAL",
+            "external",
+            "External"
+          ],
+          "hint": "先回忆 Hive 表的两种类型：管理表与外部表区别在哪？创建外部表要加哪个关键字？",
+          "analysis": "**标准解题思路**\n1. 外部表语法：`CREATE EXTERNAL TABLE 表名 (...) ...`。\n2. 关键字：EXTERNAL（大小写均可，Hive 不区分）。\n3. 填 EXTERNAL。\n**延伸**：配合 `LOCATION '目录'` 指定数据存放位置；没有 EXTERNAL 的就是内部表。",
+          "enterprise_tip": "写 DDL 时团队一般统一风格（关键字大写、标识符小写）；外部表 LOCATION 一定要写对，写错会新建空目录读不到旧数据。"
+        },
+        {
+          "task_id": "s05c02t03",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排序：创建分区表并导入流程",
+          "question": "把『创建一张按天分区的订单表并导入数据』的流程按正确顺序排列。",
+          "steps": [
+            "用 INSERT OVERWRITE TABLE ... PARTITION (dt='2024-01-05') 导入当天数据",
+            "执行 CREATE TABLE dwd_order (...) PARTITIONED BY (dt STRING) 建表",
+            "查询验证：SELECT ... WHERE dt='2024-01-05'，确认只扫目标分区",
+            "确认数据源（如 ods_order）存在且有 dt 字段",
+            "用 SHOW PARTITIONS dwd_order 或 HDFS 目录查看分区是否生成"
+          ],
+          "correct_order": [
+            3,
+            1,
+            0,
+            4,
+            2
+          ],
+          "order_explain": "流程：先确认数据源 → 建分区表 → 导入（指定分区）→ 验证分区 → 查询验证。建表前确认数据源可避免『源字段对不上』；导入后先看分区是否生成再查询。",
+          "analysis": "**标准解题思路**\n1. **确认数据源**：先看 ods_order 有哪些字段，确保与目标表字段能对上（避免建完表发现导不进去）。\n2. **建表**：CREATE TABLE + PARTITIONED BY (dt STRING)，分区字段 dt 不在普通列里。\n3. **导入**：INSERT OVERWRITE ... PARTITION (dt='2024-01-05') + SELECT，静态分区指定值。\n4. **验证分区**：SHOW PARTITIONS 或去 HDFS 看 dt=2024-01-05 目录是否存在、文件多大。\n5. **查询验证**：WHERE dt='2024-01-05' 查询，确认数据正确且走分区裁剪。\n**易错点**：分区字段写在 PARTITIONED BY 里而不是普通列里；INSERT 时忘了指定分区值。\n**记忆**：看源 → 建表 → 导入 → 验分区 → 查询。",
+          "enterprise_tip": "生产导入有严格规范：先导到临时分区/临时表校验数据量级与抽样内容，确认无误再正式覆盖目标分区——直接覆盖容易把脏数据写进正式分区。"
+        },
+        {
+          "task_id": "s05c02t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：分区表 vs 普通表",
+          "question": "关于 Hive **分区表**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "分区字段是伪列，其值来自 HDFS 目录名，不存储在数据文件中",
+              "correct": true,
+              "explain": "正确。分区字段不在文件里，SELECT 分区字段时值来自目录名（如 dt=2024-01-05）。"
+            },
+            {
+              "text": "分区表和普通表查询性能完全一样",
+              "correct": false,
+              "explain": "分区表查询时只扫匹配分区（分区裁剪），性能远好于全表扫描。"
+            },
+            {
+              "text": "分区表只能使用动态分区，不能静态分区",
+              "correct": false,
+              "explain": "静态分区（PARTITION (dt='2024-01-05')）和动态分区都支持。"
+            },
+            {
+              "text": "分区表只能按日期分区",
+              "correct": false,
+              "explain": "分区字段可以是任何字段，日期只是最常见的选择。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 分区表 = 按分区字段把数据拆到不同 HDFS 目录（/warehouse/db.db/table/dt=2024-01-05/）。\n2. 分区字段是伪列：值来自目录名，不存于数据文件。\n3. 性能：查询 WHERE 带分区字段时只扫对应目录（分区裁剪），避免全表扫描——这是分区存在的意义。\n4. 排除：性能不同、只能动态、只能按日期都是错的。\n5. 选 A。\n**延伸**：分桶表是在分区之上按哈希把数据分到固定数量的文件，粒度更细。",
+          "enterprise_tip": "面试题「为什么日志表必须按天分区」：每天 10 亿条日志不分区查询要扫全表，按天分区后查某天只读一个目录，扫描量降几个数量级——分区是 Hive 性能的第一手段。"
+        },
+        {
+          "task_id": "s05c02t05",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：补全外部表 DDL",
+          "question": "补全下面的外部表 DDL：`CREATE ____ TABLE ods_log (log_id STRING, msg STRING) LOCATION '/data/flume/logs';` 请填写缺少的关键字（英文）。",
+          "answer": [
+            "EXTERNAL",
+            "external",
+            "External",
+            "EXTERNAL 关键字"
+          ],
+          "hint": "先回忆外部表 DDL 的结构：它比管理表的 CREATE 语句多出哪个关键字？",
+          "analysis": "**标准解题思路**\n1. 外部表语法：CREATE EXTERNAL TABLE 表名 (...) ...。\n2. 关键字 EXTERNAL 表示数据由外部管理（如 Flume 采集目录），DROP 时只删元数据、保留 HDFS 数据。\n3. 配合 LOCATION 指定数据目录。\n4. 填 EXTERNAL。\n**易错点**：没有 EXTERNAL 就是内部表，DROP 会连数据一起删——ODS 层日志表忘写 EXTERNAL 是生产事故级别的错误。",
+          "enterprise_tip": "重建外部表必须写对 LOCATION，写错会新建空目录读不到旧数据；数仓规范：ODS 层原始/日志表一律外部表，是误删数据的最后一道保险。"
+        },
+        {
+          "task_id": "s05c02t06",
+          "type": "sql",
+          "difficulty": 2,
+          "title": "SQL：分区表按天查询（模拟分区裁剪）",
+          "question": "数仓 ODS 层有一张**按天分区**的用户登录日志表（在 Hive 中它是外部表 + `PARTITIONED BY (dt)`，本题用 SQLite 以普通列 `dt` 模拟分区字段，查询语法与 Hive SQL 一致）。请查询 **2024-01-05 当天**的登录记录：输出 `user_id`、`login_time`，按 `user_id` 升序排列。\n\n本题在 SQLite 环境作答，与 Hive SQL 语法一致。",
+          "setup": "CREATE TABLE ods_user_login (user_id INTEGER, login_time TEXT, dt TEXT);\nINSERT INTO ods_user_login VALUES (1,'09:12:33','2024-01-05'),(2,'10:01:00','2024-01-05'),(3,'08:45:12','2024-01-04'),(1,'11:30:05','2024-01-06'),(4,'14:20:18','2024-01-05'),(2,'15:02:47','2024-01-04');",
+          "expected_sql": "SELECT user_id, login_time FROM ods_user_login WHERE dt = '2024-01-05' ORDER BY user_id;",
+          "hint": "先想：分区表查询指定某天，就是对分区列加过滤条件——条件写在哪？别忘了排序。",
+          "analysis": "**标准解题思路**\n1. 读题：要查 2024-01-05 当天的登录记录，输出 user_id 和 login_time。\n2. 过滤条件：WHERE dt = '2024-01-05'。在真实 Hive 中，dt 是**分区字段**（伪列，值来自 HDFS 目录名 dt=2024-01-05/），带上这个条件就触发**分区裁剪（Partition Pruning）**，只扫当天目录，避免全表扫描。\n3. 排序：ORDER BY user_id 保证结果顺序确定。\n4. 完整 SQL：`SELECT user_id, login_time FROM ods_user_login WHERE dt = '2024-01-05' ORDER BY user_id;`\n**验证**：符合条件的是 user 1（09:12:33）、user 2（10:01:00）、user 4（14:20:18），共 3 行，按 user_id 升序。\n**易错点**：① 忘写 WHERE dt 条件——在 Hive 中等于全表扫描，10 亿行日志会扫到崩溃；② 把 dt 当普通列存进数据文件——Hive 中分区字段不存文件里，SELECT 它读的是目录名。\n**延伸**：生产中这张表应建成**外部表 + PARTITIONED BY (dt)**，数据由采集系统写入，DROP 只删元数据、保留 HDFS 原始日志。",
+          "enterprise_tip": "面试题「为什么日志表必须按天分区」：不分区查询每天 10 亿行要全表扫描；按天分区 + WHERE dt=... 只读一个目录，扫描量降几个数量级——分区是 Hive 性能的第一手段，写 SQL 必须养成带分区条件的习惯。"
+        },
+        {
+          "task_id": "s05c02t07",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：TRUNCATE 与 DROP 的区别",
+          "question": "Hive 中 `DROP TABLE` 会删除整张表；而**保留表结构、只清空表中所有数据**的命令是 ____（英文关键字，大写小写均可）。",
+          "answer": [
+            "TRUNCATE",
+            "truncate",
+            "TRUNCATE TABLE",
+            "truncate table",
+            "Truncate"
+          ],
+          "hint": "先回忆清空表数据的命令：保留表结构只删数据，用哪个关键字？它的英文原意是「截断」。",
+          "analysis": "**标准解题思路**\n1. 两个删除类命令的区别：**DROP TABLE 删整张表**（元数据 + 内部表数据一起没）；**TRUNCATE TABLE 只清空表内数据**，表结构、分区定义都保留，之后还能继续使用。\n2. 适用场景：想保留表结构（如分区表要重灌数据）时用 TRUNCATE；确定整张表都不要了才用 DROP。\n3. 注意：**Hive 中 TRUNCATE 不支持外部表**（外部表数据不归 Hive 管，不能截断），只对内部表有效——这正好呼应「内部表数据归 Hive 管理」的语义。\n4. 填 TRUNCATE。\n**易错点**：把 TRUNCATE 当 DROP 用——TRUNCATE 后表还在，可以继续 INSERT；DROP 后表没了，要重新建表。\n**延伸**：MySQL 里 TRUNCATE 是 DDL（隐式提交、不可回滚），Hive 里语义类似；面试常把「DROP / TRUNCATE / DELETE」三者放一起考，Hive 默认无 DELETE（无行级删除）。",
+          "enterprise_tip": "生产重灌数据分区用 `INSERT OVERWRITE` 覆盖即可，很少用 TRUNCATE 清全表；但要清楚 TRUNCATE 只对内部表生效——ODS 外部表清数据只能删 HDFS 文件或重建分区，别在外部表上执行 TRUNCATE 报错后一脸懵。"
+        },
+        {
+          "task_id": "s05c02t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：外部表的元数据与数据分离",
+          "question": "对一张外部表执行 `DROP TABLE` 后，Metastore 与 HDFS 上分别发生了什么？",
+          "options": [
+            {
+              "text": "Metastore 中删除该表的元数据记录；HDFS 上的数据文件原封不动",
+              "correct": true,
+              "explain": "正确。外部表数据不归 Hive 管，删表只删『说明书』（元数据）。"
+            },
+            {
+              "text": "Metastore 元数据保留；HDFS 数据被删除",
+              "correct": false,
+              "explain": "正好相反：外部表删表只删元数据，数据保留。"
+            },
+            {
+              "text": "Metastore 元数据与 HDFS 数据都被删除",
+              "correct": false,
+              "explain": "那是内部表（管理表）的 DROP 行为。"
+            },
+            {
+              "text": "Metastore 与 HDFS 都保留，表还能继续查询",
+              "correct": false,
+              "explain": "元数据已删，表结构不存在，无法再查询，但数据文件还在。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 外部表的本质是『元数据与数据分离』：元数据在 Metastore（MySQL），数据在 HDFS（由外部系统管理）。\n2. DROP 外部表：Metastore 删除该表的元数据记录（TBLS/COLUMNS_V2 等），HDFS 上的数据文件不动。\n3. 对比：DROP 内部表会连元数据和 HDFS 数据一起删，因为数据归 Hive 管理。\n4. 排除干扰项：删表后元数据不存在了，表不能继续查询。\n5. 选 A。\n**延伸**：生产上误删外部表后重建表并写对 LOCATION，数据立刻能读回来——这是 ODS 层用外部表的价值。",
+          "enterprise_tip": "面试题『为什么 ODS 层用外部表』：元数据与数据分离，DROP 只删元数据、数据还在 HDFS，重建表即可找回——这是数仓数据安全的最后一道保险。"
+        },
+        {
+          "task_id": "s05c02t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：复杂类型的设计",
+          "question": "用户画像表需要存储：用户的**标签列表**（数量不定）、每个标签的**打分**（键值对）、用户**基础信息**（年龄、城市等固定字段）。用 Hive 复杂类型最合适的设计是？",
+          "options": [
+            {
+              "text": "tags ARRAY<STRING> 存标签列表，scores MAP<STRING,DOUBLE> 存标签打分，info STRUCT<age INT, city STRING> 存基础信息",
+              "correct": true,
+              "explain": "正确。ARRAY 存同类型集合、MAP 存键值对、STRUCT 存固定字段复合对象，一一对应。"
+            },
+            {
+              "text": "全部拼成一个字符串用逗号分隔，查询时再解析",
+              "correct": false,
+              "explain": "丢失结构信息，每处查询都要解析，容易出错，违背了复杂类型的设计初衷。"
+            },
+            {
+              "text": "每个标签单独建一列",
+              "correct": false,
+              "explain": "标签数量不定，列数无法固定，还会产生大量空列。"
+            },
+            {
+              "text": "Hive 只支持基本类型，不支持复杂类型",
+              "correct": false,
+              "explain": "Hive 原生支持 ARRAY / MAP / STRUCT 三种复杂类型。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 复杂类型三兄弟的语义：**ARRAY<类型>** 存同类型元素的集合（标签列表）；**MAP<键,值>** 存键值对（标签→打分）；**STRUCT<字段列表>** 存固定字段的复合对象（基础信息）。\n2. 题目三个需求与三种类型一一对应：标签列表→ARRAY、打分键值对→MAP、基础信息→STRUCT。\n3. 排除：拼字符串丢结构、建多列无法应对不定数量、『不支持复杂类型』是错误认知。\n4. 选 A。\n**易错点**：区分 MAP（键值对，键不固定）与 STRUCT（字段固定）；ARRAY 元素类型必须一致。\n**延伸**：访问语法——array[0]、map['key']、struct.field，配合 explode 可把复杂类型拆成明细行。",
+          "enterprise_tip": "用户画像/标签场景就是复杂类型的典型战场：标签数组 + 打分 MAP 落画像宽表，再用 explode 拆开做标签人群统计；面试常问『标签表怎么设计』就答 ARRAY/MAP + explode。"
+        },
+        {
+          "task_id": "s05c02t10",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：分桶表关键字",
+          "question": "创建分桶表的 Hive 语法为：`CREATE TABLE t (id INT, name STRING) ____ BY (id) INTO 4 BUCKETS;` 请填写关键字（英文，大写小写均可）。",
+          "answer": [
+            "CLUSTERED",
+            "clustered",
+            "Clustered",
+            "CLUSTERED BY"
+          ],
+          "hint": "回忆分桶表 DDL：BY (字段) INTO N BUCKETS 前那个关键字是什么？",
+          "analysis": "**标准解题思路**\n1. 分桶表语法：`CREATE TABLE t (...) CLUSTERED BY (分桶字段) INTO N BUCKETS;`——按字段哈希把数据分到固定数量的桶（文件）里。\n2. 关键字：CLUSTERED（与分区表的 PARTITIONED BY 区分开）。\n3. 填 CLUSTERED。\n**分桶 vs 分区**：分区按字段值拆**目录**（粗粒度、适合查询裁剪）；分桶按哈希拆**文件**（细粒度、适合抽样与桶间 join 优化）。\n**抽样**：分桶表可用 `TABLESAMPLE(BUCKET x OUT OF y ON 字段)` 快速抽样。",
+          "enterprise_tip": "分桶数一般取 2 的幂（4/8/16）且与后续 join 的桶数匹配才能触发 bucket join；分桶表抽样在『全量数据太大、想快速验证结果』时非常实用。"
+        },
+        {
+          "task_id": "s05c02t11",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Hive 视图的特点",
+          "question": "关于 Hive 视图（`CREATE VIEW`），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "视图是虚拟表：不存储数据，执行查询时才基于定义动态生成结果",
+              "correct": true,
+              "explain": "正确。视图只是把一条 SELECT 封装成『逻辑表』，数据仍在源表里。"
+            },
+            {
+              "text": "创建视图会把数据复制一份存到 HDFS",
+              "correct": false,
+              "explain": "视图不存数据、不占 HDFS 空间，复制数据的是物化视图（且 Hive 也较少用）。"
+            },
+            {
+              "text": "删除源表时视图会自动把数据一起删除",
+              "correct": false,
+              "explain": "视图本身没有数据；DROP VIEW 只删视图定义，与源表数据无关。"
+            },
+            {
+              "text": "视图创建后就不能删除",
+              "correct": false,
+              "explain": "用 DROP VIEW 视图名 即可删除视图。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 视图的本质：把一段 SELECT 封装成虚拟表，查询视图 = 执行那段 SELECT，**不额外存储数据**。\n2. 作用：简化复杂查询（把多表 join 封装成一个视图）、隐藏底层表结构、配合权限控制只暴露需要的列。\n3. 删除：DROP VIEW 只删定义，源表数据不动。\n4. 排除干扰项：不复制数据、不随源表删数据、可以删除。\n5. 选 A。\n**易错点**：把视图当成物化视图（物化视图才存结果）；Hive 视图是纯逻辑的，每次查询都实时执行底层 SQL。",
+          "enterprise_tip": "数仓里视图常用于『口径固化』：把复杂的指标口径（多表 join + 过滤）封装成视图，业务方直接 SELECT 视图，口径统一好维护；面试可答『视图 = 逻辑层，物化视图 = 物理层』。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "内部表和外部表有什么区别？",
+          "a": "删表时内部表连元数据和 HDFS 数据一起删；外部表只删元数据，HDFS 数据保留。记忆：内部表人走茶凉，外部表人去楼空。"
+        },
+        {
+          "q": "为什么 ODS 层用外部表？",
+          "a": "ODS 是原始数据，误删无法恢复；外部表 DROP 只删元数据，数据还在 HDFS，重建表即可找回。"
+        },
+        {
+          "q": "分区表和分桶表的区别？",
+          "a": "分区按字段值拆目录（粗粒度），分桶按哈希拆固定数量文件（细粒度）；分区用于查询裁剪，分桶用于抽样与 join 优化。"
+        },
+        {
+          "q": "分区字段是伪列意味着什么？",
+          "a": "分区字段的值来自 HDFS 目录名而不是数据文件；SELECT 分区字段时读到的是目录名。"
+        },
+        {
+          "q": "动态分区怎么开启？",
+          "a": "SET hive.exec.dynamic.partition=true; 且分区模式设 nonstrict（允许全动态）；INSERT ... PARTITION (dt) SELECT ... 时分区值来自查询结果。"
+        },
+        {
+          "q": "ARRAY / MAP / STRUCT 各适合什么场景？",
+          "a": "ARRAY 存同类型元素的集合（标签列表）；MAP 存键值对（标签→打分）；STRUCT 存固定字段的复合对象（基础信息）。访问：array[0]、map['key']、struct.field。"
+        },
+        {
+          "q": "视图和物化视图的区别？",
+          "a": "视图是虚拟表，不存数据、查询时实时执行底层 SQL；物化视图把结果实际存储下来换取查询速度。Hive 视图是纯逻辑的。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "CREATE TABLE",
+          "desc": "Hive 建表语句，不写 EXTERNAL 时创建的是内部表。"
+        },
+        {
+          "term": "CREATE EXTERNAL TABLE",
+          "desc": "创建外部表，数据由外部管理，DROP 只删元数据。"
+        },
+        {
+          "term": "DROP TABLE",
+          "desc": "删表；内部表连数据一起删，外部表保留 HDFS 数据。"
+        },
+        {
+          "term": "PARTITIONED BY",
+          "desc": "建分区表的子句，声明分区字段（如 dt STRING）。"
+        },
+        {
+          "term": "分区（Partition）",
+          "desc": "按字段值把数据拆分到不同 HDFS 目录，查询时只扫匹配分区。"
+        },
+        {
+          "term": "分桶（Bucket）",
+          "desc": "按哈希把数据分到固定数量文件，用于抽样与 join 优化。"
+        },
+        {
+          "term": "LOCATION",
+          "desc": "指定表数据存放的 HDFS 目录，外部表常用。"
+        },
+        {
+          "term": "动态分区",
+          "desc": "分区值由 INSERT ... SELECT 查询结果自动决定的导入方式。"
+        },
+        {
+          "term": "ARRAY / MAP / STRUCT",
+          "desc": "Hive 三种复杂类型：集合 / 键值对 / 固定字段复合对象。"
+        },
+        {
+          "term": "CLUSTERED BY",
+          "desc": "分桶表关键字，按字段哈希把数据分到固定数量的桶。"
+        },
+        {
+          "term": "CREATE VIEW",
+          "desc": "创建视图：把一段 SELECT 封装成不存数据的虚拟表。"
+        }
+      ],
+      "kps": [
+        "库与表的组织（CREATE DATABASE / USE）",
+        "建表语法与常用数据类型（ROW FORMAT / STORED AS / INT/STRING）",
+        "内部表 vs 外部表（DROP 行为差异）",
+        "ODS 层用外部表的生产约定",
+        "分区表（PARTITIONED BY、静态/动态分区）",
+        "分桶表与「分区 vs 分桶」的区别",
+        "表的删除：DROP TABLE 与 TRUNCATE 的区别",
+        "易错点（分区伪列、LOCATION、分隔符）",
+        "外部表底层原理（元数据与数据分离）",
+        "复杂类型 ARRAY/MAP/STRUCT 的设计与使用",
+        "分桶表建表语法 CLUSTERED BY 与抽样",
+        "视图（CREATE VIEW 虚拟表，不存数据）"
+      ]
+    },
+    {
+      "chapter_id": "s05c03",
+      "title": "5.3 Hive DML 与常用函数",
+      "goal": "掌握 LOAD DATA 与 INSERT 数据加载方式，熟练使用字符串/日期/CASE WHEN 函数",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "Hive 加数据的两种主流方式：\n\n**① LOAD DATA（加载文件）**：把 HDFS/本地文件直接『移动/复制』进表目录：\n\n```sql\n-- 从本地文件系统加载（复制到 HDFS）\nLOAD DATA LOCAL INPATH '/home/hadoop/orders.txt' INTO TABLE ods_order;\n\n-- 从 HDFS 加载（移动文件，源文件消失）\nLOAD DATA INPATH '/data/orders.txt' INTO TABLE ods_order;\n\n-- 加载到指定分区\nLOAD DATA INPATH '/data/2024-01-05/orders.txt' INTO TABLE ods_order PARTITION (dt='2024-01-05');\n```\n\n注意：**LOAD 不做任何校验和转换**，文件格式必须和表定义一致（分隔符、列数），否则数据错位。\n\n**② INSERT（查询写入）**：把查询结果写入表，是**数仓分层加工**的主力：\n\n```sql\nINSERT OVERWRITE TABLE dwd_order PARTITION (dt='2024-01-05')\nSELECT order_id, user_id, amount FROM ods_order WHERE dt = '2024-01-05';\n```\n\n`INSERT OVERWRITE` 覆盖分区（先清空再写），`INSERT INTO` 追加。数仓『ODS → DWD → DWS』层层加工，全靠 INSERT ... SELECT。"
+        },
+        {
+          "type": "text",
+          "content": "**字符串函数**（SQLite 与本平台支持子集）：`substr(字符串, 起始, 长度)` 截取、`instr(字符串, 子串)` 找位置、`length()` 长度、`replace()` 替换、`lower()/upper()` 大小写、`trim()` 去空白、`concat()` 拼接（SQLite 用 `||` 或 concat）。\n\n**条件函数 CASE WHEN**：把数据分档，是数仓打标签的利器：\n\n```sql\nSELECT order_id, amount,\n  CASE WHEN amount < 100  THEN 'small'\n       WHEN amount <= 500 THEN 'medium'\n       ELSE 'large' END AS amount_level\nFROM ods_order;\n```\n\n还有 `IF(条件, 真值, 假值)` 的简化写法。\n\n**日期函数**（Hive 常用，本平台 SQLite 中日期用 TEXT，计算用 `date('2024-01-05','+1 day')`）：Hive 里常用 `to_date()` 取日期、`date_add/date_sub` 加减天、`datediff` 求差、`from_unixtime` 格式化时间戳。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "-- 电商数仓场景：ODS 层原始订单 → 用函数清洗加工\n\n-- 假设 ods_order 是原始表，含脏数据（邮箱大小写混用、金额分档需求）\nCREATE TABLE ods_order (\n  order_id   INT,\n  user_email STRING,\n  amount     DOUBLE,\n  status     STRING,\n  order_date STRING\n);\n\n-- 加工 1：邮箱统一小写 + 截取 @ 前的用户名\nSELECT order_id,\n       lower(user_email) AS email_lower,\n       substr(user_email, 1, instr(user_email, '@') - 1) AS user_name\nFROM ods_order;\n\n-- 加工 2：金额分档 + 状态打标\nSELECT order_id, amount,\n       CASE WHEN amount < 100   THEN 'small'\n            WHEN amount <= 500  THEN 'medium'\n            ELSE 'large' END AS amount_level,\n       CASE WHEN status = 'paid' THEN '已支付'\n            WHEN status = 'cancel' THEN '已取消'\n            ELSE '其他' END AS status_cn\nFROM ods_order;",
+          "caption": "字符串函数 + CASE WHEN 的典型加工场景"
+        },
+        {
+          "type": "warning",
+          "content": "**易错点**：\n- `substr` 从 **1** 开始计数（不是 0）；`substr(s, instr(s,'@')-1)` 少写 -1 会多带一个字符；\n- `CASE WHEN` 从上往下匹配，**第一个命中的分支生效**，条件顺序写错结果就错（如把 amount<=500 写在 amount<100 前面）；\n- LOAD DATA 时**表定义和文件格式不一致**不会报错，只会产生错位数据——导入后一定要抽样验证。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- 数仓开发日常 80% 的 SQL 就是 SELECT + 函数 + CASE WHEN 的组合；面试的 SQL 笔试题 90% 考察这些基本功。\n- **面试必问**：① LOAD DATA 和 INSERT 的区别？② 字符串截取、大小写、替换怎么写？③ CASE WHEN 多条件怎么排？④ 日期加减怎么算？\n- **岗位要求**：给一张订单表和需求（如『按金额分档统计订单数』），能 5 分钟内写出正确 SQL。\n- **常见坑**：日期用字符串比较时格式不统一（'2024-1-5' vs '2024-01-05'）导致过滤错误——数仓规范要求日期一律 `yyyy-MM-dd`。"
+        }
+      ],
+      "hands_on": "1. 在 SQLite 中建一张 ods_order 表（字段 order_id, user_email, amount, status, order_date），插入 5 条含大小写混用邮箱的测试数据。\n2. 用 lower、substr、instr 把邮箱拆成『用户名』和『域名』两列输出。\n3. 用 CASE WHEN 把金额分成 small/medium/large 三档并统计每档订单数。\n4. 用 date('2024-01-05','+1 day') 与 julianday 计算两个日期相差几天，体会 SQLite 的日期运算。\n5. 思考：LOAD DATA 和 INSERT 各适合什么场景？写一段笔记。",
+      "tasks": [
+        {
+          "task_id": "s05c03t01",
+          "type": "sql",
+          "difficulty": 2,
+          "title": "SQL：字符串函数清洗邮箱",
+          "question": "数仓 ODS 层表 `ods_user_info` 记录了用户注册信息，其中 email 字段存在**大小写混用**问题。请查询出 `user_id`、`name` 以及**统一转成小写后的邮箱**（列名 `email_lower`），按 `user_id` 升序排列。\n\n本题在 SQLite 环境作答，与 Hive SQL 语法一致。",
+          "setup": "CREATE TABLE ods_user_info (user_id INTEGER, name TEXT, email TEXT, city TEXT);\nINSERT INTO ods_user_info VALUES (1,'张三','Zhang.San@Example.COM','Shanghai'),(2,'李四','li.si@qq.com','Beijing'),(3,'王五','WANG.WU@163.com','Guangzhou');",
+          "expected_sql": "SELECT user_id, name, lower(email) AS email_lower FROM ods_user_info ORDER BY user_id;",
+          "hint": "先想：把字符串统一转小写用哪个函数？新列名怎么起？别忘了排序。",
+          "analysis": "**标准解题思路**\n1. 读题：要 3 列：user_id、name、小写邮箱 email_lower。\n2. 大小写统一 → lower(email)，别名 AS email_lower。\n3. 表：FROM ods_user_info。\n4. 排序：ORDER BY user_id（升序默认）。\n5. 完整 SQL：`SELECT user_id, name, lower(email) AS email_lower FROM ods_user_info ORDER BY user_id;`\n**易错点**：① 忘记别名 email_lower（比对列名不一致）；② 忘记 ORDER BY（结果顺序不确定）；③ 用了 upper（方向反了）。\n**验证**：1|张三|zhang.san@example.com、2|李四|li.si@qq.com、3|王五|wang.wu@163.com。",
+          "enterprise_tip": "企业数仓做用户主数据（ID-Mapping）前，第一步就是字段标准化：邮箱/手机号统一小写、去空格、去特殊符号，否则同一用户会被当成多个人。"
+        },
+        {
+          "task_id": "s05c03t02",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "SQL：CASE WHEN 金额分档",
+          "question": "从 `ods_orders` 表中查询每笔订单的 `order_id`、`user_id`、`amount`，并用 CASE WHEN 把金额分档输出为 `level` 列：金额 **< 100** 记 `'small'`，**100 ~ 500（含）** 记 `'medium'`，**> 500** 记 `'large'`。按 `order_id` 升序排列。\n\n本题在 SQLite 环境作答，与 Hive SQL 语法一致。",
+          "setup": "CREATE TABLE ods_orders (order_id INTEGER, user_id INTEGER, amount REAL, status TEXT, order_date TEXT);\nINSERT INTO ods_orders VALUES (1001,1,99.5,'paid','2024-01-05'),(1002,2,1200.0,'paid','2024-01-06'),(1003,1,50.0,'cancel','2024-01-07'),(1004,3,299.0,'paid','2024-01-08'),(1005,2,15.5,'paid','2024-01-09');",
+          "expected_sql": "SELECT order_id, user_id, amount, CASE WHEN amount < 100 THEN 'small' WHEN amount <= 500 THEN 'medium' ELSE 'large' END AS level FROM ods_orders ORDER BY order_id;",
+          "hint": "先想分档边界：100 归哪档？500 含在哪档？CASE WHEN 从上到下匹配，先写哪一档？",
+          "analysis": "**标准解题思路**\n1. 读题：输出 4 列（order_id、user_id、amount、level），level 由 amount 分档。\n2. 分档条件：amount<100 → small；amount<=500 → medium；否则 large。\n3. **条件顺序很重要**：必须先判断 <100，再判断 <=500（如果先写 amount<=500，99.5 会命中 medium，错）。\n4. END AS level 给新列命名。\n5. ORDER BY order_id 保证结果顺序确定。\n6. 完整 SQL：`SELECT order_id, user_id, amount, CASE WHEN amount < 100 THEN 'small' WHEN amount <= 500 THEN 'medium' ELSE 'large' END AS level FROM ods_orders ORDER BY order_id;`\n**验证**：1001→small、1002→large、1003→small、1004→medium、1005→small。\n**易错点**：CASE 分支顺序颠倒；条件边界（<=500 含 500）；忘记别名。",
+          "enterprise_tip": "企业里 CASE WHEN 最常见的用途是『打标签/分档』：用户分层（新客/活跃/沉默）、订单分档（小额/中额/大额）。注意边界值（>=、<=）在需求文档里必须定义清楚，否则口径打架。"
+        },
+        {
+          "task_id": "s05c03t03",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：LOAD DATA 语义",
+          "question": "关于 Hive 的 `LOAD DATA INPATH '/data/a.txt' INTO TABLE t;`（不带 LOCAL），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "把本地文件复制到表目录，源文件保留",
+              "correct": false,
+              "explain": "不带 LOCAL 是操作 HDFS 上的文件，且是『移动』不是『复制』。"
+            },
+            {
+              "text": "把 HDFS 上的文件移动到表目录，源文件消失",
+              "correct": true,
+              "explain": "正确。INPATH 指向 HDFS 路径，LOAD 相当于移动（hadoop fs -mv），源文件不再存在。"
+            },
+            {
+              "text": "对文件内容做格式校验后再加载",
+              "correct": false,
+              "explain": "LOAD 不做任何校验/转换，格式不符只会在查询时出现错位数据。"
+            },
+            {
+              "text": "会触发一次 MapReduce 计算",
+              "correct": false,
+              "explain": "LOAD 只是文件系统层面移动，不经过计算引擎。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 带 LOCAL：操作本地文件，复制到 HDFS（源保留）。\n2. 不带 LOCAL：操作 HDFS 文件，**移动**进表目录（源消失）。\n3. LOAD 不校验不计算，纯文件操作。\n4. 选 B。\n**延伸**：生产上更多用 INSERT ... SELECT 做分层加工，LOAD 常用于 ODS 层接收采集系统落地的文件。",
+          "enterprise_tip": "面试题『LOAD DATA 和 INSERT INTO 的区别？』答：LOAD 是文件移动（快、无计算），INSERT 是查询写入（会触发计算引擎、可加工转换）；ODS 接原始文件用 LOAD，分层加工用 INSERT。"
+        },
+        {
+          "task_id": "s05c03t04",
+          "type": "sql",
+          "difficulty": 2,
+          "title": "SQL：按月统计订单金额",
+          "question": "数仓表 `ods_orders` 记录了订单明细（order_id、user_id、amount、status、order_date），order_date 形如 `2024-01-05`。请**按月**统计订单总金额：输出 `month`（order_date 前 7 位，即 `yyyy-MM`）和 `total_amount`（该月所有订单金额之和，不区分状态），按 `month` 升序排列。\n\n本题在 SQLite 环境作答，与 Hive SQL 语法一致（substr 用法相同）。",
+          "setup": "CREATE TABLE ods_orders (order_id INTEGER, user_id INTEGER, amount REAL, status TEXT, order_date TEXT);\nINSERT INTO ods_orders VALUES\n(1001,1,99.5,'paid','2024-01-05'),\n(1002,2,1200.0,'paid','2024-01-15'),\n(1003,1,50.0,'cancel','2024-02-07'),\n(1004,3,299.0,'paid','2024-02-18'),\n(1005,2,15.5,'paid','2024-03-09'),\n(1006,1,88.0,'paid','2024-01-28');",
+          "expected_sql": "SELECT substr(order_date, 1, 7) AS month, SUM(amount) AS total_amount\nFROM ods_orders\nGROUP BY substr(order_date, 1, 7)\nORDER BY month;",
+          "hint": "先想：从日期里取「年月」前 7 位用什么函数？分组键为什么要和 SELECT 里的表达式一致？",
+          "analysis": "**标准解题思路**\n1. 读题：按月分组 → 分组键是 yyyy-MM；聚合值是金额之和 SUM(amount)。\n2. 取月份：substr(order_date, 1, 7) 截取前 7 位得到 '2024-01'，Hive 与 SQLite 用法一致。\n3. 分组：GROUP BY substr(order_date, 1, 7)（与 SELECT 表达式一致，否则报错或结果错）。\n4. 排序：ORDER BY month 保证结果确定（schema 要求）。\n5. 完整 SQL 见 expected_sql。\n**验证**：2024-01 = 99.5+1200+88 = 1387.5；2024-02 = 50+299 = 349.0；2024-03 = 15.5。\n**易错点**：① 截取参数写错（substr(order_date, 7) 是第 7 位起取 7 个字符，不是前 7 位）；② 漏 ORDER BY；③ 把 GROUP BY 写成 GROUP BY month（个别方言不支持，统一用表达式最稳）。",
+          "enterprise_tip": "企业里「按月/按日统计」是最常见需求：日分区表上按天 GROUP BY，跨月汇总用 substr 截断日期。注意日期必须规范存储为 yyyy-MM-dd，否则截取结果错位。"
+        },
+        {
+          "task_id": "s05c03t05",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "SQL：LIKE 查询邮箱域名分布",
+          "question": "数仓表 `ods_user_info` 记录了用户注册信息（user_id、name、email、city），email 字段可能有格式不规范的数据。请**统计各邮箱域名**（'@' 后面的部分，如 `qq.com`）的用户数：\n① 用 **LIKE** 过滤出含 '@' 的有效邮箱；\n② 输出 `domain`（邮箱域名）和 `cnt`（用户数）；\n③ 按 `cnt` 降序、`domain` 升序排列。\n\n本题在 SQLite 环境作答，与 Hive SQL 语法一致（substr/instr/LIKE 用法相同）。",
+          "setup": "CREATE TABLE ods_user_info (user_id INTEGER, name TEXT, email TEXT, city TEXT);\nINSERT INTO ods_user_info VALUES\n(1,'张三','zhang.san@qq.com','Shanghai'),\n(2,'李四','li.si@163.com','Beijing'),\n(3,'王五','wang.wu@example.com','Guangzhou'),\n(4,'赵六','zhao.liu@qq.com','Shenzhen'),\n(5,'钱七','qian.qi@163.com','Hangzhou'),\n(6,'孙八','sun.ba@qq.com','Nanjing'),\n(7,'周九','zhou.jiu@qq.com','Chengdu'),\n(8,'吴十','bad-email-no-at','Wuhan');",
+          "expected_sql": "SELECT substr(email, instr(email, '@') + 1) AS domain, COUNT(*) AS cnt\nFROM ods_user_info\nWHERE email LIKE '%@%'\nGROUP BY substr(email, instr(email, '@') + 1)\nORDER BY cnt DESC, domain;",
+          "hint": "分两步：① 怎么定位 '@' 并取它后面的部分？② 怎么用 LIKE 过滤掉不含 '@' 的脏数据？",
+          "analysis": "**标准解题思路**\n1. 取域名：instr(email, '@') 返回 @ 的位置，substr(email, instr(email, '@') + 1) 取 @ 之后的部分即域名。\n2. 过滤脏数据：WHERE email LIKE '%@%' 排除第 8 行无 @ 的记录（否则它会被算成一个「域名」）。\n3. 分组统计：GROUP BY 域名表达式 + COUNT(*) 得各域名用户数。\n4. 排序：ORDER BY cnt DESC, domain 先按数量降序、再按域名升序，保证结果确定。\n**验证**：qq.com 4 人（1/4/6/7）、163.com 2 人（2/5）、example.com 1 人（3）；第 8 行被 LIKE 过滤。\n**易错点**：① 漏 WHERE LIKE 过滤，脏数据被算成域名；② instr 忘了 +1，域名会多个 '@'；③ GROUP BY 与 SELECT 表达式不一致报错；④ 漏 ORDER BY。",
+          "enterprise_tip": "企业里做用户主数据（ID-Mapping）前要字段标准化：邮箱统一小写、去空格、按 @ 拆用户名与域名；脏数据（无 @、乱码）先用 LIKE/正则过滤或打标，避免污染统计口径。"
+        },
+        {
+          "task_id": "s05c03t06",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "SQL：CASE WHEN 状态分档统计",
+          "question": "数仓表 `ods_orders` 记录了订单明细（order_id、user_id、amount、status、order_date），status 取值有 `paid`（已支付）、`cancel`（已取消）、`pending`（待支付）。请用 **CASE WHEN 多条件分档**把状态翻译成中文标签，并**统计每个标签的订单数和金额合计**：\n① 输出 `status_level`（中文标签）、`order_cnt`（订单数）、`total_amount`（金额合计）；\n② 按 `order_cnt` 降序、`status_level` 升序排列。\n\n本题在 SQLite 环境作答，与 Hive SQL 语法一致。",
+          "setup": "CREATE TABLE ods_orders (order_id INTEGER, user_id INTEGER, amount REAL, status TEXT, order_date TEXT);\nINSERT INTO ods_orders VALUES (1001,1,99.5,'paid','2024-01-05'),(1002,2,1200.0,'paid','2024-01-06'),(1003,1,50.0,'cancel','2024-01-07'),(1004,3,299.0,'pending','2024-01-08'),(1005,2,15.5,'paid','2024-01-09'),(1006,4,88.0,'cancel','2024-01-10'),(1007,5,666.0,'pending','2024-01-11');",
+          "expected_sql": "SELECT CASE WHEN status = 'paid' THEN '已支付' WHEN status = 'cancel' THEN '已取消' ELSE '待支付' END AS status_level, COUNT(*) AS order_cnt, SUM(amount) AS total_amount FROM ods_orders GROUP BY CASE WHEN status = 'paid' THEN '已支付' WHEN status = 'cancel' THEN '已取消' ELSE '待支付' END ORDER BY order_cnt DESC, status_level;",
+          "hint": "先想：三个状态各翻译成什么中文？ELSE 兜底谁？GROUP BY 的分组键和 SELECT 表达式为何要一致？",
+          "analysis": "**标准解题思路**\n1. 读题：状态分档（多条件 CASE WHEN）+ 分组统计（订单数、金额合计）。\n2. 写 CASE WHEN：`CASE WHEN status='paid' THEN '已支付' WHEN status='cancel' THEN '已取消' ELSE '待支付' END`——ELSE 兜底 pending 及其他未知状态。\n3. **多条件注意顺序**：CASE WHEN 从上往下匹配，第一个命中的分支生效；本例三个条件互斥，顺序无影响，但如果条件有重叠（如 amount<100 和 amount<=500）顺序就决定结果，必须把更严格的条件写在前面。\n4. 聚合：COUNT(*) 统计每个标签的订单数，SUM(amount) 合计金额；GROUP BY 必须写与 SELECT 完全相同的 CASE 表达式（不能只写别名，个别方言不支持 GROUP BY 别名）。\n5. 排序：ORDER BY order_cnt DESC, status_level 保证结果确定。\n**验证**：已支付 3 单 1315.0；已取消 2 单 138.0；待支付 2 单 965.0。\n**易错点**：① CASE 分支顺序写反导致分档错误；② GROUP BY 与 SELECT 表达式不一致报错；③ 漏 ORDER BY 结果顺序不确定；④ 忘了 ELSE 分支导致未知状态成 NULL。",
+          "enterprise_tip": "企业里 CASE WHEN 最高频的用法就是「代码值翻译 + 分档打标」：状态码（paid/cancel/pending）翻成中文、金额分档、用户分层。注意业务口径（边界值、未知值走 ELSE 还是单独标记）要在需求里定清楚，否则报表口径打架。"
+        },
+        {
+          "task_id": "s05c03t07",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "选一选：substr 函数用法",
+          "question": "关于字符串函数 `substr` 的用法，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "`substr(s, 1, 3)` 从 s 的第 1 个字符开始截取 3 个字符",
+              "correct": true,
+              "explain": "正确。substr 从 1 开始计数，语法为 substr(字符串, 起始位置, 长度)。"
+            },
+            {
+              "text": "substr 从 0 开始计数，`substr(s, 0, 3)` 才能取前 3 个字符",
+              "correct": false,
+              "explain": "错误。SQL 的 substr 从 1 开始；从 0 开始是 Python 等编程语言的切片习惯。"
+            },
+            {
+              "text": "`substr(s, 3)` 表示取 s 的前 3 个字符",
+              "correct": false,
+              "explain": "错误。substr(s, 3) 表示从第 3 个字符取到末尾；取前 3 个要写 substr(s, 1, 3)。"
+            },
+            {
+              "text": "substr 会修改原字符串的值",
+              "correct": false,
+              "explain": "错误。substr 返回新字符串，不修改原值（SQL 函数无副作用）。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. substr 语法：`substr(字符串, 起始位置, 长度)`，**从 1 开始计数**（这是 SQL 与 Python 最大的差异点）。\n2. `substr(s, 1, 3)`：从第 1 个字符起取 3 个字符 = 前 3 个字符。\n3. `substr(s, 3)`（省略长度）：从第 3 个字符取到字符串末尾。\n4. substr 是纯函数：返回新字符串，不改原值。\n5. 选 A。\n**易错点**：① 用 0 当起始位置——SQL 里 substr(s, 0, 3) 语义和 substr(s, 1, 3) 几乎一致但属于不规范写法，习惯要从 1 写；② 混淆「substr(s, 3)」与「取前 3 个」。\n**延伸**：取 '@' 前的用户名用 `substr(email, 1, instr(email, '@') - 1)`，其中 -1 去掉 @ 本身，是面试常考的组合用法。",
+          "enterprise_tip": "字段清洗三件套：substr 截取、lower/upper 统一大小写、trim 去空白；写清洗 SQL 前先用 SELECT 抽几条数据验证截取位置对不对，避免整批数据错位。"
+        },
+        {
+          "task_id": "s05c03t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：LOAD DATA 的文件移动原理",
+          "question": "Hive 执行 `LOAD DATA INPATH '/data/a.txt' INTO TABLE t;`（不带 LOCAL）时，底层实际做了什么？",
+          "options": [
+            {
+              "text": "把 HDFS 上的 a.txt 从原目录移动到表的存储目录（纯文件系统操作，源文件消失，不经过计算引擎）",
+              "correct": true,
+              "explain": "正确。不带 LOCAL 是移动（move）而非复制，是纯文件系统层面的操作。"
+            },
+            {
+              "text": "把 HDFS 上的 a.txt 复制一份到表目录，源文件保留",
+              "correct": false,
+              "explain": "不带 LOCAL 是移动而非复制；带 LOCAL 才是复制本地文件到 HDFS。"
+            },
+            {
+              "text": "触发一次 MapReduce 作业对 a.txt 做格式转换",
+              "correct": false,
+              "explain": "LOAD 是纯文件系统操作，不触发计算引擎。"
+            },
+            {
+              "text": "对 a.txt 逐行校验，格式错误会中止加载",
+              "correct": false,
+              "explain": "LOAD 不做任何校验，格式不符只会产生错位数据。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 区分 LOCAL：带 LOCAL 操作本地文件系统（复制到 HDFS，源保留）；不带 LOCAL 操作 HDFS 文件。\n2. 不带 LOCAL 的底层：HDFS 上的文件被**移动**进表目录（等价 hadoop fs -mv），源文件消失。\n3. 纯文件系统操作：不经过计算引擎，不做格式校验与转换。\n4. 排除干扰项：复制/校验/触发 MR 都不对。\n5. 选 A。\n**延伸**：生产上 ODS 层接收采集落地文件用 LOAD（快、无计算），分层加工用 INSERT ... SELECT（走引擎、可转换）。",
+          "enterprise_tip": "面试题『LOAD DATA 和 INSERT 的区别』：LOAD 是文件移动（快、无计算、不校验），INSERT 是查询写入（走计算引擎、可加工转换）——一句话讲清底层差异。"
+        },
+        {
+          "task_id": "s05c03t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Hive 函数分类",
+          "question": "Hive 函数分为 UDF、UDAF、UDTF 三类。下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "UDF 一行进一行出（如 upper）、UDAF 多行进一行（如 sum）、UDTF 一行进多行出（如 explode）",
+              "correct": true,
+              "explain": "正确。UDF 标量函数、UDAF 聚合函数、UDTF 表生成函数，输入输出方向各不相同。"
+            },
+            {
+              "text": "sum 属于 UDF，explode 属于 UDAF",
+              "correct": false,
+              "explain": "分类颠倒：sum 是多行聚一行的 UDAF，explode 是一行拆多行的 UDTF。"
+            },
+            {
+              "text": "UDTF 的作用是过滤不满足条件的行",
+              "correct": false,
+              "explain": "过滤行是 WHERE 的职责；UDTF 是表生成函数，一行输入产出多行。"
+            },
+            {
+              "text": "三类函数的输入输出完全一样，只是叫法不同",
+              "correct": false,
+              "explain": "三类函数的输入输出关系完全不同，这正是分类的依据。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 分类依据是『输入输出行数关系』：\n   - **UDF**（User Defined Function，标量函数）：一行进一行出，如 upper、substr、length；\n   - **UDAF**（Aggregate，聚合函数）：多行进一行，如 sum、count、collect_set；\n   - **UDTF**（Table-Generating，表生成函数）：一行进多行出，如 explode、posexplode。\n2. 逐项对照：A 的分类与例子完全正确。\n3. 排除：sum 是 UDAF、UDTF 不是过滤、三类输入输出不同。\n4. 选 A。\n**延伸**：自定义函数写 Java 实现 UDF/UDAF/UDTF 并注册使用，是高级开发的常见需求；UDTF 一般要配合 LATERAL VIEW 使用。",
+          "enterprise_tip": "面试题『explode 属于哪类函数』→ UDTF（一行拆多行）；『collect_set 呢』→ UDAF（多行聚数组）；把三类函数各举两个例子是基本功。"
+        },
+        {
+          "task_id": "s05c03t10",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：正则提取函数",
+          "question": "Hive 中按**正则表达式**从字符串中提取匹配内容（如从邮箱中提取用户名）的函数是 ____（英文函数名）。",
+          "answer": [
+            "regexp_extract",
+            "regexp_extract()",
+            "REGEXP_EXTRACT",
+            "regexp_extract(string, pattern, group)"
+          ],
+          "hint": "回忆 Hive 正则函数：按正则提取匹配内容，函数名由「正则」和「提取」两个英文词组成。",
+          "analysis": "**标准解题思路**\n1. 语法：`regexp_extract(字符串, 正则表达式, 组号)`，按正则匹配并返回指定捕获组的内容。\n2. 例子：`regexp_extract('zhangsan@qq.com', '^(.*?)@', 1)` 返回 zhangsan；组号 0 表示整个匹配。\n3. 与 substr/instr 的对比：substr 按字符位置截取，正则按模式匹配，处理格式不固定的脏数据（手机号、邮箱、URL 参数）更灵活。\n4. 填 regexp_extract。\n**易错点**：组号写错取不到值；正则里的特殊字符（. * ?）要按需转义；Hive 正则用 Java 风格。",
+          "enterprise_tip": "日志/埋点清洗常用正则三件套：regexp_extract 提取、regexp_replace 替换、rlike 判断是否匹配；把埋点 URL 里的参数（如 userId、itemId）用正则提取成列是采集清洗的标准动作。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "LOAD DATA 和 INSERT ... SELECT 的区别？",
+          "a": "LOAD 是文件系统层面移动/复制文件，不做计算不校验；INSERT ... SELECT 走计算引擎，可加工转换；ODS 接原始文件用 LOAD，分层加工用 INSERT。"
+        },
+        {
+          "q": "substr 从几开始计数？instr 找不到返回什么？",
+          "a": "substr 从 1 开始；instr 找不到返回 0。取 @ 前用户名要 substr(email, 1, instr(email,'@')-1)。"
+        },
+        {
+          "q": "CASE WHEN 的执行顺序要注意什么？",
+          "a": "从上往下匹配，第一个命中的分支生效；边界条件（如 amount<100 和 amount<=500）顺序写反结果就错。"
+        },
+        {
+          "q": "日期为什么要存成 'yyyy-MM-dd' 字符串？",
+          "a": "Hive/SQLite 无原生 DATE 类型时用 TEXT 存；格式统一才能字符串比较和 substr 截取，否则 '2024-1-5' vs '2024-01-05' 过滤错乱。"
+        },
+        {
+          "q": "lower/upper/trim 各有什么用？",
+          "a": "lower 转小写、upper 转大写、trim 去首尾空白；字段标准化三件套，用于清洗脏数据。"
+        },
+        {
+          "q": "UDF / UDAF / UDTF 怎么区分？",
+          "a": "按输入输出行数：UDF 一行进一行出（upper）；UDAF 多行进一行（sum、collect_set）；UDTF 一行进多行出（explode）。"
+        },
+        {
+          "q": "regexp_extract 怎么用？",
+          "a": "regexp_extract(字符串, 正则, 组号)：按正则匹配返回第 group 个捕获组；组号 0 是完整匹配。配合 regexp_replace / rlike 处理脏数据。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "LOAD DATA",
+          "desc": "把文件移动/复制进表目录的数据加载命令（LOCAL 表示本地文件）。"
+        },
+        {
+          "term": "INSERT OVERWRITE / INSERT INTO",
+          "desc": "查询写入：OVERWRITE 覆盖（先清空再写），INTO 追加。"
+        },
+        {
+          "term": "substr",
+          "desc": "字符串截取函数，substr(s, 1, 7) 取前 7 位，从 1 计数。"
+        },
+        {
+          "term": "instr",
+          "desc": "查找子串位置函数，返回从 1 开始的位置，找不到返回 0。"
+        },
+        {
+          "term": "CASE WHEN",
+          "desc": "条件分支表达式，从上往下匹配，用于分档打标。"
+        },
+        {
+          "term": "lower / upper",
+          "desc": "字符串大小写转换函数。"
+        },
+        {
+          "term": "trim",
+          "desc": "去除字符串首尾空白字符的函数。"
+        },
+        {
+          "term": "LIKE",
+          "desc": "模糊匹配操作符，'%' 匹配任意长度字符，'_' 匹配单个字符。"
+        },
+        {
+          "term": "UDF / UDAF / UDTF",
+          "desc": "Hive 三类函数：标量 / 聚合 / 表生成，按输入输出行数区分。"
+        },
+        {
+          "term": "regexp_extract",
+          "desc": "按正则表达式提取匹配内容，返回指定捕获组。"
+        }
+      ],
+      "kps": [
+        "LOAD DATA 加载文件（LOCAL / 移动 vs 复制）",
+        "INSERT OVERWRITE / INSERT INTO（覆盖 vs 追加）",
+        "字符串函数（substr/instr/length/replace/lower/upper/trim）",
+        "substr 用法细节（从 1 计数、截取位置）",
+        "CASE WHEN 多条件分档（顺序敏感、边界条件）",
+        "IF 简化写法",
+        "日期函数（Hive 的 date_add/datediff、SQLite 的 date()/julianday）",
+        "LIKE 模糊匹配与脏数据过滤",
+        "LOAD DATA 底层原理（文件移动 vs 复制）",
+        "Hive 函数分类：UDF / UDAF / UDTF",
+        "正则函数 regexp_extract（按模式提取）"
+      ]
+    },
+    {
+      "chapter_id": "s05c04",
+      "title": "5.4 Hive SQL 进阶：关联、子查询与炸裂",
+      "goal": "掌握多表关联、子查询、explode 列转行思想与 collect_set 聚合",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "数仓里几乎没有单表能解决的问题——订单要和用户关联、明细要和维度关联。Hive 支持 `INNER JOIN / LEFT JOIN / RIGHT JOIN / FULL JOIN`，语法和 SQL 一致：\n\n```sql\nSELECT o.order_id, u.user_name, o.amount\nFROM dwd_order o\nLEFT JOIN dwd_user u ON o.user_id = u.user_id;\n```\n\n**重点区别**：\n- INNER JOIN：只保留两边都匹配的行；\n- LEFT JOIN：左表全部保留，右表没匹配上就补 NULL；\n- 生产大表 join 的注意点：① 小表放左边 + mapjoin 优化（5.6 章）；② join 字段要有分区过滤；③ 避免 join 字段数据倾斜。\n\n**子查询**：嵌套在括号里的查询，可用在 WHERE（in/存在判断）或 FROM（作为临时表，Hive 要求必须有别名）：\n\n```sql\n-- FROM 子查询：先过滤再关联，减少数据量\nSELECT t.user_id, COUNT(*) AS cnt\nFROM (SELECT * FROM ods_log WHERE dt = '2024-01-05') t\nGROUP BY t.user_id;"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "-- 关联 + 子查询综合示例：统计每个用户的订单数和总金额\n\n-- 数据准备（示意）\nCREATE TABLE dwd_user (user_id INT, user_name STRING);\nCREATE TABLE dwd_order (order_id INT, user_id INT, amount DOUBLE, order_date STRING);\n\n-- 1) INNER JOIN：只有下过单的用户\nSELECT u.user_id, u.user_name, COUNT(o.order_id) AS order_cnt\nFROM dwd_user u\nJOIN dwd_order o ON u.user_id = o.user_id\nGROUP BY u.user_id, u.user_name;\n\n-- 2) LEFT JOIN：所有用户（没下过单的补 0）\nSELECT u.user_id, u.user_name, COUNT(o.order_id) AS order_cnt\nFROM dwd_user u\nLEFT JOIN dwd_order o ON u.user_id = o.user_id\nGROUP BY u.user_id, u.user_name;\n\n-- 3) FROM 子查询：先按天过滤再 join\nSELECT o.user_id, u.user_name, o.amount\nFROM (SELECT * FROM dwd_order WHERE order_date = '2024-01-05') o\nJOIN dwd_user u ON o.user_id = u.user_id;",
+          "caption": "JOIN 与 FROM 子查询的典型用法"
+        },
+        {
+          "type": "text",
+          "content": "**explode（炸裂/列转行）**：把一行中的一个数组/集合**拆成多行**。例如一行里存了用户的所有标签 `['新客','高价值']`，explode 后变成两行。\n\n```sql\n-- Hive 中：LATERAL VIEW + explode（本平台 SQLite 不支持，此处仅理论）\nSELECT user_id, tag\nFROM user_tags\nLATERAL VIEW explode(tags) t AS tag;\n```\n\n对应思想——**行转列与列转行**：\n- explode：一行 → 多行（列转行），比如把『一个订单多件商品』拆成『每个商品一行』；\n- collect_set/collect_list：多行 → 一行（行转列），把分组内的值聚合成数组。\n\n**collect_set（去重收集）**：`collect_set(字段)` 把组内该字段的所有值收集成一个数组并**去重**，`collect_list` 不去重。经典场景：统计『每个用户买过哪些品类』。\n\n**SQLite 模拟 explode**：SQLite 没有 LATERAL VIEW，但可以用**递归 CTE + substr/instr** 把逗号分隔串拆成多行，效果等价——见下面代码。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "-- SQLite 用递归 CTE 模拟 explode：把一行里的逗号分隔标签拆成多行\n\nCREATE TABLE tmp_tag (user_id INTEGER, tags TEXT);\nINSERT INTO tmp_tag VALUES (1, '新客,高价值'), (2, '老客');\n\nWITH RECURSIVE split(user_id, tag, rest) AS (\n  SELECT user_id, '', tags || ',' FROM tmp_tag\n  UNION ALL\n  SELECT user_id,\n         substr(rest, 1, instr(rest, ',') - 1),\n         substr(rest, instr(rest, ',') + 1)\n  FROM split\n  WHERE rest <> ''\n)\nSELECT user_id, tag FROM split WHERE tag <> '' ORDER BY user_id, tag;\n\n-- 结果：\n-- 1|新客\n-- 1|高价值\n-- 2|老客\n\n-- 类比 Hive：同样的效果用 LATERAL VIEW explode 一行搞定\n-- SELECT user_id, tag FROM tmp_tag LATERAL VIEW explode(split(tags, ',')) t AS tag;",
+          "caption": "用 SQLite 递归 CTE 模拟 Hive 的 explode"
+        },
+        {
+          "type": "warning",
+          "content": "**易错点**：\n- FROM 子查询**必须有别名**（`SELECT ... FROM (子查询) t`），漏了别名直接报错；\n- LEFT JOIN 后 COUNT(右表字段) 统计的是匹配数，要统计左表行数用 COUNT(左表字段)；\n- explode 的列和原表的其他列**不能直接混查**，Hive 里要配合 LATERAL VIEW；\n- collect_set 结果是无序的，要排序请配合 sort_array。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- 数仓建模里的**宽表加工**几乎天天用 JOIN：事实表 join 维度表得到可读的宽表。\n- explode 是**用户标签/画像**场景的核心：标签是数组，需要炸开成多行明细再统计。\n- collect_set 常用于『用户-品类』去重统计、漏斗分析前的数据整理。\n- **面试必问**：① LEFT JOIN 和 INNER JOIN 的区别与 NULL 处理？② explode 和 collect_set 分别解决什么问题？③ 子查询怎么用？\n- **常见坑**：join 没有分区过滤导致全表扫描；关联字段类型不一致（INT vs STRING）导致匹配不上。"
+        }
+      ],
+      "hands_on": "1. 在 SQLite 中建 dwd_user 和 dwd_order 两张表（含 3 个用户、5 笔订单，其中一个用户没订单），分别用 INNER JOIN 和 LEFT JOIN 查询并对比结果，观察 NULL 与行数差异。\n2. 把上面的递归 CTE explode 模拟代码在 SQLite 里跑一遍，改成拆分逗号分隔的商品名并统计每个商品出现次数。\n3. 用 GROUP BY + group_concat(DISTINCT 字段) 模拟 collect_set 思想：查看每个用户买了哪些品类（去重）。\n4. 思考：什么业务场景需要『一行拆多行』？举两个例子写进笔记。",
+      "tasks": [
+        {
+          "task_id": "s05c04t01",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "SQL：多表关联查订单",
+          "question": "数仓 DWD 层有两张表：`dwd_user`（用户维度：user_id、name、city）和 `dwd_order`（订单事实：order_id、user_id、amount、order_date）。请关联两表，查询每笔订单的 `order_id`、下单用户姓名 `name`、订单金额 `amount`，按 `order_id` 升序排列。\n\n本题在 SQLite 环境作答，与 Hive SQL 语法一致。",
+          "setup": "CREATE TABLE dwd_user (user_id INTEGER, name TEXT, city TEXT);\nINSERT INTO dwd_user VALUES (1,'张三','上海'),(2,'李四','北京'),(3,'王五','广州');\nCREATE TABLE dwd_order (order_id INTEGER, user_id INTEGER, amount REAL, order_date TEXT);\nINSERT INTO dwd_order VALUES (1001,1,99.5,'2024-01-05'),(1002,2,1200.0,'2024-01-06'),(1003,3,50.0,'2024-01-07'),(1004,1,299.0,'2024-01-08');",
+          "expected_sql": "SELECT o.order_id, u.name, o.amount FROM dwd_order o JOIN dwd_user u ON o.user_id = u.user_id ORDER BY o.order_id;",
+          "hint": "先想：两表靠哪个字段关联？两表都有 user_id，怎么写才能消除歧义？",
+          "analysis": "**标准解题思路**\n1. 读题：需要订单信息 + 用户名 → 两表 join。\n2. 关联键：订单表 user_id = 用户表 user_id。\n3. 选列：o.order_id、u.name、o.amount（用别名 o/u 区分两表同名字段）。\n4. 用 INNER JOIN（默认 JOIN）：所有订单的用户都存在于用户表。\n5. ORDER BY o.order_id 保证顺序。\n6. 完整 SQL：`SELECT o.order_id, u.name, o.amount FROM dwd_order o JOIN dwd_user u ON o.user_id = u.user_id ORDER BY o.order_id;`\n**验证**：1001 张三 99.5 / 1002 李四 1200.0 / 1003 王五 50.0 / 1004 张三 299.0。\n**易错点**：① 忘记表别名（o/u）导致字段引用不明确；② join 条件写反（ON 两边颠倒）；③ 漏 ORDER BY。\n**延伸**：如果订单 1004 的用户不在 dwd_user 里，LEFT JOIN 会保留该订单且 name 为 NULL——面试常考这个差异。",
+          "enterprise_tip": "企业宽表加工：事实表 LEFT JOIN 维度表，注意 NULL 处理（COALESCE 补默认值）；大表 join 前先做分区过滤和字段裁剪，控制 join 的输入规模。"
+        },
+        {
+          "task_id": "s05c04t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：explode 的作用",
+          "question": "关于 Hive 的 `explode` 函数，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "把多行数据合并成一行",
+              "correct": false,
+              "explain": "合并多行成一行是 collect_set/collect_list 或聚合函数做的事。"
+            },
+            {
+              "text": "把一行中的一个数组/集合拆成多行（列转行）",
+              "correct": true,
+              "explain": "正确。explode 是『炸裂』：一行含数组 → 数组每个元素一行。"
+            },
+            {
+              "text": "对字符串去空格",
+              "correct": false,
+              "explain": "去空格是 trim。"
+            },
+            {
+              "text": "对查询结果去重",
+              "correct": false,
+              "explain": "去重是 DISTINCT 或 GROUP BY。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. explode = 炸裂：数组/集合 → 多行，即列转行。\n2. 反向操作（多行 → 数组）是 collect_set/collect_list，即行转列。\n3. 选 B。\n**延伸**：Hive 中 explode 要配合 LATERAL VIEW 使用；SQLite 里可用递归 CTE + substr/instr 模拟（见理论代码）。",
+          "enterprise_tip": "面试题『explode 和 collect_set 是什么关系？』答：互为逆操作——explode 一行拆多行，collect_set 多行聚一行（数组，去重）；标签表/画像场景两个都高频使用。"
+        },
+        {
+          "task_id": "s05c04t03",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：去重收集函数",
+          "question": "Hive 中，把分组内某字段的所有值收集成一个**去重数组**的聚合函数是 ____。",
+          "answer": [
+            "collect_set",
+            "collect_set()",
+            "collect set"
+          ],
+          "hint": "回忆 Hive 收集函数：把组内某字段收集成数组，去重和不取重各叫什么？题目要哪个？",
+          "analysis": "**标准解题思路**\n1. 收集成数组：collect_set（去重）/ collect_list（不去重）。\n2. 题目要求『去重数组』→ collect_set。\n3. 填 collect_set。\n**延伸**：SQLite 没有 collect_set，对应功能可用 group_concat(DISTINCT 字段) 模拟。",
+          "enterprise_tip": "经典面试 SQL：『统计每个用户买过哪些品类（去重、逗号分隔）』——Hive 用 collect_set + concat_ws，SQLite 用 group_concat(DISTINCT ...)。"
+        },
+        {
+          "task_id": "s05c04t04",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "SQL：LEFT JOIN 查未购买用户",
+          "question": "数仓 DWD 层有两张表：`dwd_user`（user_id、name、city）和 `dwd_order`（order_id、user_id、amount、order_date）。请查询**从未下过单**的用户：输出 `user_id`、`name`，按 `user_id` 升序排列。\n\n本题在 SQLite 环境作答，与 Hive SQL 语法一致。",
+          "setup": "CREATE TABLE dwd_user (user_id INTEGER, name TEXT, city TEXT);\nINSERT INTO dwd_user VALUES (1,'张三','上海'),(2,'李四','北京'),(3,'王五','广州'),(4,'赵六','深圳');\nCREATE TABLE dwd_order (order_id INTEGER, user_id INTEGER, amount REAL, order_date TEXT);\nINSERT INTO dwd_order VALUES (1001,1,99.5,'2024-01-05'),(1002,2,1200.0,'2024-01-06'),(1003,1,299.0,'2024-01-08'),(1004,3,50.0,'2024-02-07');",
+          "expected_sql": "SELECT u.user_id, u.name FROM dwd_user u LEFT JOIN dwd_order o ON u.user_id = o.user_id WHERE o.order_id IS NULL ORDER BY u.user_id;",
+          "hint": "先想：LEFT JOIN 后没匹配上的行右表字段是什么值？怎么筛「从未下单」？为何不能用 = NULL？",
+          "analysis": "**标准解题思路**\n1. 思路：LEFT JOIN 保留所有用户，未匹配的订单侧字段为 NULL。\n2. 关联：dwd_user u LEFT JOIN dwd_order o ON u.user_id = o.user_id。\n3. 过滤：WHERE o.order_id IS NULL——该用户没有任何订单。\n4. 选列：u.user_id、u.name；排序 ORDER BY u.user_id。\n5. 完整 SQL 见 expected_sql。\n**验证**：用户 1/2/3 都有订单，只有 4（赵六）没下过单 → 结果 1 行：4|赵六。\n**易错点**：① 用 = NULL 判断（永远不成立，要用 IS NULL）；② 用 INNER JOIN（会把没订单的用户直接过滤掉，查不到）；③ 忘记表别名 o./u. 导致字段引用不明确。",
+          "enterprise_tip": "「未购买/未活跃用户」是运营分析的经典需求：LEFT JOIN + IS NULL 模式要背熟；大表 join 前先加分区过滤和字段裁剪，控制输入规模。"
+        },
+        {
+          "task_id": "s05c04t05",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：explode 的使用场景",
+          "question": "用户标签表 `user_tags` 中每行存储一个标签数组（如 `['新客','高价值']`），现在需要把**每个标签拆成一行**做统计。在 Hive 中正确的做法是？",
+          "options": [
+            {
+              "text": "用 LATERAL VIEW + explode 把数组炸开成多行",
+              "correct": true,
+              "explain": "正确。explode 把数组元素拆成多行，LATERAL VIEW 负责把它与原表其他列关联起来。"
+            },
+            {
+              "text": "用 GROUP BY 直接统计数组字段",
+              "correct": false,
+              "explain": "GROUP BY 只能对整个数组分组，无法统计单个标签。"
+            },
+            {
+              "text": "用 collect_set 把数组拆成多行",
+              "correct": false,
+              "explain": "collect_set 是聚合（多行聚成数组），方向和 explode 相反。"
+            },
+            {
+              "text": "用 substr 截取数组字符串",
+              "correct": false,
+              "explain": "substr 只能按字符位置截取，无法正确处理数组结构。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 需求是「一行拆多行」（列转行），正是 explode 的用途。\n2. Hive 语法：LATERAL VIEW explode(数组字段) t AS 别名，把数组元素炸成多行并与原表列关联。\n3. 排除：GROUP BY 按数组整体分组；collect_set 是逆操作（行转列）；substr 处理不了数组。\n4. 选 A。\n**延伸**：SQLite 没有 LATERAL VIEW，可用递归 CTE + substr/instr 模拟 explode（见本章理论代码）。",
+          "enterprise_tip": "用户标签/画像场景 explode 是核心：标签数组先炸开成明细，再 join 标签维度表或聚合统计；注意 explode 列与原表列混查必须用 LATERAL VIEW。"
+        },
+        {
+          "task_id": "s05c04t06",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "SQL：子查询 + JOIN 统计品类复购用户数",
+          "question": "数仓 DWD 层有商品品类表 `dim_category`（category_id、category_name）和订单明细表 `dwd_order_item`（order_id、user_id、category_id、amount、order_date）。**复购用户**指在**同一品类下过至少 2 次单**的用户。请统计**每个品类的复购用户数**：\n① 先用**子查询**找出每个品类下的复购用户（同一 user_id + category_id 出现次数 ≥ 2）；\n② 再 **JOIN** 品类表输出 `category_name` 与 `repurchase_user_cnt`（复购用户数）；\n③ 按 `repurchase_user_cnt` 降序、`category_name` 升序排列。\n\n本题在 SQLite 环境作答，与 Hive SQL 语法一致。",
+          "setup": "CREATE TABLE dim_category (category_id INTEGER, category_name TEXT);\nINSERT INTO dim_category VALUES (1,'手机数码'),(2,'服饰鞋包'),(3,'食品生鲜');\nCREATE TABLE dwd_order_item (order_id INTEGER, user_id INTEGER, category_id INTEGER, amount REAL, order_date TEXT);\nINSERT INTO dwd_order_item VALUES (1001,1,1,2999.0,'2024-01-05'),(1002,1,1,199.0,'2024-01-06'),(1003,2,1,4999.0,'2024-01-07'),(1004,1,2,129.0,'2024-01-08'),(1005,2,2,89.0,'2024-01-09'),(1006,2,2,259.0,'2024-01-10'),(1007,3,3,59.0,'2024-01-11'),(1008,3,3,30.0,'2024-01-12'),(1009,3,1,999.0,'2024-01-13');",
+          "expected_sql": "SELECT c.category_name, COUNT(*) AS repurchase_user_cnt\nFROM (\n  SELECT user_id, category_id\n  FROM dwd_order_item\n  GROUP BY user_id, category_id\n  HAVING COUNT(*) >= 2\n) r\nJOIN dim_category c ON r.category_id = c.category_id\nGROUP BY c.category_name\nORDER BY repurchase_user_cnt DESC, c.category_name;",
+          "hint": "分两步：① 子查询怎么筛「同品类 ≥2 次」的用户？② 外层怎么关联品类表、统计人数？",
+          "analysis": "**标准解题思路**\n1. **拆解需求**：「同一品类下过 ≥2 次单的用户」= 按 (user_id, category_id) 分组后计数 ≥ 2——这是内层子查询的过滤条件。\n2. **内层子查询**：`SELECT user_id, category_id FROM dwd_order_item GROUP BY user_id, category_id HAVING COUNT(*) >= 2`——GROUP BY 先按用户+品类分组，HAVING 在分组后过滤出复购组合（注意：过滤分组后的条件用 HAVING，不能用 WHERE）。\n3. **子查询必须起别名**：`FROM (子查询) r`，r 是这个派生表的别名，漏掉直接报错（SQL 标准要求派生表必须有名字）。\n4. **外层 JOIN**：用 r.category_id 关联维度表 dim_category，取品类中文名，再按品类 GROUP BY 并 COUNT(*) 得到每个品类的复购用户数。\n5. **排序**：ORDER BY repurchase_user_cnt DESC, c.category_name 保证结果确定。\n**验证**：复购组合为 (用户1,手机数码)、(用户2,服饰鞋包)、(用户3,食品生鲜) 各一组 → 三个品类各 1 个复购用户。\n**易错点**：① 用 WHERE COUNT(*) >= 2（聚合条件必须放 HAVING）；② 子查询忘别名；③ 内层 GROUP BY 漏掉 category_id（会导致跨品类误判复购）；④ 漏 ORDER BY。",
+          "enterprise_tip": "「复购」「留存」「连续活跃」这类用户行为分析是数仓高频需求，套路都是「内层子查询算行为指标（次数/天数）→ HAVING 阈值过滤 → 外层 JOIN 维度表取名称」；大表场景内层先按分区过滤再分组，控制子查询规模。"
+        },
+        {
+          "task_id": "s05c04t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：collect_set 与 group_concat 的思想",
+          "question": "Hive 的 `collect_set` 与 SQLite 的 `group_concat` 都常用于「把分组内多个值聚合到一起」的场景。下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "两者都体现「行转列」思想：把多行的值聚合成一个集合/字符串",
+              "correct": true,
+              "explain": "正确。多行 → 一个集合（数组）或字符串，就是行转列（聚合）思想。"
+            },
+            {
+              "text": "collect_set 不去重，会保留重复元素",
+              "correct": false,
+              "explain": "错误。collect_set 去重；不去重的版本是 collect_list。"
+            },
+            {
+              "text": "group_concat 只能拼接数字，不能拼接字符串",
+              "correct": false,
+              "explain": "错误。group_concat 可以拼接任意可转字符串的值，字符串拼接最常见。"
+            },
+            {
+              "text": "collect_set 的结果保证按字母序排列",
+              "correct": false,
+              "explain": "错误。collect_set 的结果无序，要排序需配合 sort_array。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 先明确方向：collect_set / group_concat 都是把**多行的值聚成一行的一个值**（数组或字符串）——这就是「行转列」思想，与 explode（一行拆多行，列转行）互为逆操作。\n2. 区别：collect_set 返回去重数组（SQLite 无此函数，用 group_concat(DISTINCT 字段) 模拟）；group_concat 返回逗号拼接的字符串。\n3. 细节辨析：collect_set **去重**（不去重用 collect_list）；group_concat 拼接字符串与数字都行；collect_set 结果**无序**（要排序用 sort_array）。\n4. 选 A。\n**易错点**：把 collect_set 当成不去重、把 group_concat 当成只支持数字——都是常见误解。\n**经典场景**：「统计每个用户买过哪些品类（去重）」——Hive 用 collect_set(category) 得到去重数组，SQLite 用 group_concat(DISTINCT category)。",
+          "enterprise_tip": "面试常考「collect_set 和 group_concat 什么关系」：都是行转列聚合，一个出数组一个出字符串；在 SQLite/MySQL 里没有 collect_set 时用 group_concat(DISTINCT ...) 等价模拟——能跨引擎给出等价写法是加分项。"
+        },
+        {
+          "task_id": "s05c04t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：explode 的底层本质",
+          "question": "从函数类别上看，`explode` 属于 Hive 的哪一类函数？它的核心行为是什么？",
+          "options": [
+            {
+              "text": "UDTF（用户定义表生成函数）：一行输入产出多行输出（列转行）",
+              "correct": true,
+              "explain": "正确。explode 把一行里的数组/集合炸成多行，是典型的表生成函数。"
+            },
+            {
+              "text": "UDAF（聚合函数）：多行输入聚合成一行输出",
+              "correct": false,
+              "explain": "多行聚一行是 collect_set/SUM 等 UDAF；explode 方向相反。"
+            },
+            {
+              "text": "UDF（标量函数）：一行输入产出单值输出",
+              "correct": false,
+              "explain": "UDF 一行进一行出（如 upper）；explode 一行进多行出。"
+            },
+            {
+              "text": "窗口函数：在窗口内计算排名",
+              "correct": false,
+              "explain": "排名是 ROW_NUMBER/RANK 等窗口函数的职责。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Hive 函数三类：UDF（标量，一行进一行出）、UDAF（聚合，多行进一行）、UDTF（表生成，一行进多行出）。\n2. explode 的行为：输入一个数组/集合，输出多行（每行一个元素）——一行进多行出，属于 UDTF。\n3. 排除干扰项：UDAF 方向相反、UDF 是单值输出、窗口函数算排名。\n4. 选 A。\n**延伸**：explode 要配合 LATERAL VIEW 才能与原表其他列混查；collect_set 是其逆操作（行转列）。",
+          "enterprise_tip": "面试题『explode 和 collect_set 什么关系』：互为逆操作——explode 是 UDTF（一行拆多行），collect_set 是 UDAF（多行聚数组）；标签/画像场景两个都高频使用。"
+        },
+        {
+          "task_id": "s05c04t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：collect_set 结果排序",
+          "question": "`collect_set` 收集出的数组结果**是无序的**，需要得到有序数组时，Hive 中正确的做法是？",
+          "options": [
+            {
+              "text": "用 `sort_array(collect_set(字段))` 对数组内的元素排序",
+              "correct": true,
+              "explain": "正确。sort_array 专门对数组排序，返回升序数组。"
+            },
+            {
+              "text": "collect_set 自带排序，结果一定有序",
+              "correct": false,
+              "explain": "collect_set 基于哈希去重，结果顺序不保证，必须显式排序。"
+            },
+            {
+              "text": "用 ORDER BY 对数组排序",
+              "correct": false,
+              "explain": "ORDER BY 是对查询结果的行排序，不能排序数组内部的元素。"
+            },
+            {
+              "text": "用 DISTINCT 排序",
+              "correct": false,
+              "explain": "DISTINCT 只去重，不排序；且它作用于行，不是数组元素。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. collect_set 的语义：把组内字段值聚合成一个**去重**数组，基于哈希实现，**顺序不保证**。\n2. 要数组内有序：用 `sort_array(数组)` 升序排列；降序可先 sort_array 再 reverse，或用 collect_list + sort_array。\n3. 排除：collect_set 不自带排序；ORDER BY / DISTINCT 都是行级操作，管不到数组内部。\n4. 选 A。\n**易错点**：以为 collect_set 结果有序（实际无序）；把行级 ORDER BY 误用于数组元素。\n**延伸**：场景——『每个用户买过的品类（去重且按名称排序）』：`sort_array(collect_set(category))`。",
+          "enterprise_tip": "画像宽表里 collect_set 收集用户标签后，经常要 sort_array 保证数组顺序稳定，否则同用户每次查询结果顺序不同，下游解析容易出 bug。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "INNER JOIN / LEFT JOIN / RIGHT JOIN / FULL JOIN 的区别？",
+          "a": "INNER 只留两边匹配行；LEFT 保留左表全部（右表无匹配补 NULL）；RIGHT 保留右表全部；FULL 两边全部保留。"
+        },
+        {
+          "q": "如何用 LEFT JOIN 找出「没有匹配」的行？",
+          "a": "LEFT JOIN 后加 WHERE 右表主键 IS NULL，例如 WHERE o.order_id IS NULL 找未下单用户；注意不能用 = NULL。"
+        },
+        {
+          "q": "explode 和 collect_set 是什么关系？",
+          "a": "互为逆操作：explode 把一行数组拆成多行（列转行）；collect_set 把多行聚成一个去重数组（行转列）。"
+        },
+        {
+          "q": "FROM 子查询为什么必须有别名？",
+          "a": "SQL 标准要求派生表必须有名字，否则外层无法引用它的列；Hive 里漏别名直接报错。"
+        },
+        {
+          "q": "join 大表有哪些注意事项？",
+          "a": "① 小表放左边并用 mapjoin；② join 前先分区过滤、字段裁剪；③ 关联字段类型一致（INT vs STRING 匹配不上）；④ 警惕关联键数据倾斜。"
+        },
+        {
+          "q": "collect_set 的结果有序吗？",
+          "a": "无序。collect_set 基于哈希去重，顺序不保证；需要有序时用 sort_array(collect_set(字段))。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "INNER JOIN",
+          "desc": "内连接，只保留两表都匹配的行。"
+        },
+        {
+          "term": "LEFT JOIN",
+          "desc": "左连接，保留左表全部行，右表无匹配补 NULL。"
+        },
+        {
+          "term": "LATERAL VIEW",
+          "desc": "Hive 中把 explode 结果与原表列关联的语法。"
+        },
+        {
+          "term": "explode",
+          "desc": "炸裂函数，把一行中的数组/集合拆成多行（列转行）。"
+        },
+        {
+          "term": "collect_set / collect_list",
+          "desc": "把分组内的值聚合成数组，set 去重、list 不去重。"
+        },
+        {
+          "term": "子查询",
+          "desc": "嵌套在括号内的查询，可用于 WHERE 或 FROM（必须有别名）。"
+        },
+        {
+          "term": "IS NULL",
+          "desc": "判断 NULL 的正确写法（= NULL 永远不成立）。"
+        },
+        {
+          "term": "行转列 / 列转行",
+          "desc": "行转列=多行聚一行（collect_set），列转行=一行拆多行（explode）。"
+        },
+        {
+          "term": "sort_array",
+          "desc": "对数组内的元素排序（默认升序），常与 collect_set 搭配。"
+        }
+      ],
+      "kps": [
+        "JOIN 类型（INNER/LEFT/RIGHT/FULL）与 NULL 补位",
+        "LEFT JOIN 找未匹配行（WHERE 右表主键 IS NULL）",
+        "FROM 子查询（必须有别名）",
+        "WHERE 子查询（IN / EXISTS）",
+        "explode 列转行（LATERAL VIEW）",
+        "collect_set / collect_list 行转列",
+        "SQLite 递归 CTE 模拟 explode",
+        "子查询 + JOIN 组合实战（复购分析等）",
+        "explode 的底层本质（UDTF 表生成函数）",
+        "sort_array 对 collect_set 结果排序"
+      ]
+    },
+    {
+      "chapter_id": "s05c05",
+      "title": "5.5 存储格式与压缩",
+      "goal": "理解 TEXT/ORC/Parquet 差异与 Snappy/Gzip/LZO 压缩，掌握选型思路",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "Hive 建表时 `STORED AS` 决定**存储格式**：\n- **TEXTFILE（行存）**：纯文本，兼容性好、人类可读，但**压缩率低、查询慢**——只适合小表/临时表；\n- **ORC / Parquet（列存）**：按**列**存储数据，是生产主流：\n  - **列裁剪**：只读查询需要的列，少读 80% 的 IO；\n  - **高压缩率**：同类型数据放一起，压缩效果远好于行存；\n  - **谓词下推**：min/max 索引跳过无关数据块；\n  - 区别：**ORC** 是 Hive 生态原生（Hive 默认推荐），**Parquet** 是跨生态通用（Spark/Impala/Druid 等都能读）。\n\n一句话：**行存适合『取整行』，列存适合『按列分析』——数仓分析 99% 是后者**。"
+        },
+        {
+          "type": "text",
+          "content": "压缩格式解决『存得省、传得快』：\n- **Snappy**：压缩速度快、压缩比适中，**追求速度**的场景首选（生产最常用）；\n- **Gzip**：压缩比高（省空间）但压缩/解压慢，适合冷数据归档；\n- **LZO**：压缩速度快且支持**切片**（可并行处理），但 GPL 许可，使用门槛高；\n- **Bzip2**：压缩比最高，最慢，几乎不用。\n\n关键概念：**可分割性（Splittable）**——压缩文件能否被切成多块并行读。Gzip 不可分割（一个 gzip 文件只能一个 map 读），Snappy/LZO（配合索引）可分割。**大文件压缩必须选可分割格式**，否则并行度废掉。\n\n选型口诀：**热数据用 Snappy（快），冷数据用 Gzip（省），列存 + Snappy 是生产黄金组合**。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "-- 存储格式与压缩的建表写法\n\n-- ORC + Snappy（生产最常用组合）\nCREATE TABLE dws_sale_daily (\n  dt        STRING,\n  gmv       DOUBLE,\n  order_cnt BIGINT\n)\nSTORED AS ORC\nTBLPROPERTIES ('orc.compress' = 'SNAPPY');\n\n-- Parquet + Snappy（跨引擎通用）\nCREATE TABLE dws_user_tag (\n  user_id  INT,\n  tags     STRING\n)\nSTORED AS PARQUET\nTBLPROPERTIES ('parquet.compression' = 'SNAPPY');\n\n-- 查询时无需感知格式：SELECT 一样写\nSELECT * FROM dws_sale_daily WHERE dt = '2024-01-05';",
+          "caption": "ORC/Parquet + Snappy 建表示例"
+        },
+        {
+          "type": "warning",
+          "content": "**易错点**：\n- 列存表**不要 SELECT ***（会读所有列），只查需要的列才能发挥列存优势；\n- 小表用 ORC 反而浪费（文件头开销），几 KB 的表 TEXTFILE 更合适；\n- 外部系统写入的文件是什么压缩，建表就要匹配（STORED AS + 相应 TBLPROPERTIES），匹配错会读不出来；\n- Gzip 大文件不可分割，会退化成单 map 处理，比不压缩还慢。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- 生产数仓建表规范：**ODS 层 TEXTFILE 或 ORC + 按天分区；DWD/DWS 层 ORC/Parquet + Snappy**。\n- 压缩选型直接关系**存储成本**：PB 级数据压缩率差 20%，成本差 20%。\n- **面试必问**：① ORC/Parquet 为什么快？（列裁剪/压缩/谓词下推）② Snappy 和 Gzip 选哪个？（速度 vs 压缩比）③ 什么是可分割性？④ 你们表用什么格式？\n- **岗位要求**：能根据『读多写少、按列分析、热/冷数据』给出格式+压缩方案。"
+        }
+      ],
+      "hands_on": "1. 用 Python 造一个 100 万行的 CSV（user_id, city, amount），分别用 gzip 和 bz2 压缩，对比文件大小与压缩/解压耗时，直观感受『压缩比 vs 速度』的取舍。\n2. 在 SQLite 里建一张表，导入上面的 CSV，练习『只查需要的列』而不是 SELECT *，体会查询习惯对 IO 的影响。\n3. 上网查 ORC 与 Parquet 的官方文档，各抄 3 个特性。\n4. 设计题：一张每天 5 亿行的行为日志表（20 列、按天查询），你会选什么存储格式和压缩？为什么？写进笔记。",
+      "tasks": [
+        {
+          "task_id": "s05c05t01",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "多选：列式存储的优点",
+          "question": "关于 ORC/Parquet 等**列式存储**格式，下列说法**正确**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "只读取查询涉及的列，减少磁盘 IO（列裁剪）",
+              "correct": true,
+              "explain": "正确。列存按列组织数据，查询几列就读几列，IO 大幅减少。"
+            },
+            {
+              "text": "同列数据同类型聚集，压缩率通常高于行存",
+              "correct": true,
+              "explain": "正确。同类数据聚在一起，压缩效果更好。"
+            },
+            {
+              "text": "支持谓词下推（利用 min/max 索引跳过无关数据块）",
+              "correct": true,
+              "explain": "正确。列存格式带统计信息，可跳过不满足条件的数据块。"
+            },
+            {
+              "text": "适合频繁更新单行数据的 OLTP 场景",
+              "correct": false,
+              "explain": "错误。列存适合批量分析（OLAP），单行更新是行存/OLTP 的强项。"
+            },
+            {
+              "text": "任何表都用列存格式一定最快",
+              "correct": false,
+              "explain": "错误。小表/取整行场景列存优势不明显甚至更慢，要按场景选。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 列存三大优势：列裁剪（少读列）、高压缩（同类型聚集）、谓词下推（跳过无关块）。\n2. 劣势：不适合单行高频更新（OLTP 用行存）。\n3. 选型看场景，不是无脑列存。\n4. 选前三个。\n**易错点**：把『列存』和『一定快』划等号——查询只取一列时列存快，但点查更新场景行存更合适。",
+          "enterprise_tip": "面试题『为什么 ORC 比 TEXTFILE 快？』答三点：列裁剪省 IO、压缩省存储省 IO、谓词下推跳过数据块——每一点都要能举例说明。"
+        },
+        {
+          "task_id": "s05c05t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：热数据压缩选型",
+          "question": "生产热数据表的压缩格式选型，最主流的做法是？",
+          "options": [
+            {
+              "text": "Gzip，压缩比最高最省空间",
+              "correct": false,
+              "explain": "Gzip 省空间但慢，且不可分割，大文件并行度差，不适合热数据。"
+            },
+            {
+              "text": "Snappy，压缩/解压速度快，压缩比适中",
+              "correct": true,
+              "explain": "正确。Snappy 是速度与压缩比的平衡，支持分割，是生产热数据首选。"
+            },
+            {
+              "text": "不压缩，省去解压开销",
+              "correct": false,
+              "explain": "不压缩存储成本高、IO 大，生产大表几乎必压缩。"
+            },
+            {
+              "text": "Bzip2，压缩比最高",
+              "correct": false,
+              "explain": "Bzip2 最慢，生产几乎不用。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 热数据诉求：查询快 → 解压快 → Snappy。\n2. Gzip 压缩比高但解压慢 + 不可分割（大文件退化成单任务）。\n3. 不压缩存储成本高。\n4. Bzip2 太慢。\n5. 选 B。\n**延伸**：冷数据归档用 Gzip 省钱；口诀『热 Snappy、冷 Gzip』。",
+          "enterprise_tip": "面试追问『Snappy 和 Gzip 怎么选？』答：看场景——在线分析链路要速度选 Snappy，历史归档要空间选 Gzip；还要看格式可分割性，Gzip 单文件不可并行读。"
+        },
+        {
+          "task_id": "s05c05t03",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：存储格式选型决策流程",
+          "question": "为一个新数仓表选择存储格式与压缩，把决策流程按正确顺序排列。",
+          "steps": [
+            "根据访问模式选择存储格式：按列分析 → ORC/Parquet；取整行小表 → TEXTFILE",
+            "确定数据热度：热数据 → Snappy；冷数据归档 → Gzip",
+            "明确表的业务用途与查询模式（按列分析 / 取整行 / 频繁更新）",
+            "评估数据量与文件大小，确认压缩格式可分割性（大文件必须可分割）",
+            "建表并写入样例数据，实测查询性能与压缩率后定稿"
+          ],
+          "correct_order": [
+            2,
+            0,
+            3,
+            1,
+            4
+          ],
+          "order_explain": "选型流程：先明确查询模式（列存还是行存）→ 定存储格式 → 评估文件大小/可分割性 → 定压缩（热 Snappy 冷 Gzip）→ 实测验证。查询模式决定格式，数据特性决定压缩，最后用实测数据拍板。",
+          "analysis": "**标准解题思路**\n1. **看业务**：表拿来干什么——按列聚合分析（列存）、整行读取（行存）、还是 OLTP 更新（根本不进数仓）。\n2. **定格式**：分析型 → ORC/Parquet；小表/临时 → TEXTFILE。\n3. **看数据**：文件多大、是否大文件——大文件压缩必须可分割，否则并行度废掉。\n4. **定压缩**：热数据要快 → Snappy；冷归档要省 → Gzip。\n5. **实测**：真实数据建表压测，对比压缩率与查询耗时再定稿。\n**易错点**：跳过第 3 步直接选 Gzip 压缩大文件，导致单 map 处理慢到不可用。\n**记忆**：业务 → 格式 → 数据 → 压缩 → 实测。",
+          "enterprise_tip": "企业里建表选型会沉淀成规范文档（DWS 层一律 ORC+Snappy）；新表上线前用生产量级的样例数据做压测，压缩率、扫描耗时都记录在案，供后续同类型表直接套用。"
+        },
+        {
+          "task_id": "s05c05t04",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "多选：ORC 与 Parquet 的特点",
+          "question": "关于 **ORC 与 Parquet** 两种列式存储格式，下列说法**正确**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "ORC 是 Hive 生态原生的格式，Hive 官方推荐",
+              "correct": true,
+              "explain": "正确。ORC 由 Hive 团队设计，与 Hive 深度集成（支持复杂类型、索引等）。"
+            },
+            {
+              "text": "Parquet 是跨生态通用的格式，Spark、Impala、Druid 等都能读",
+              "correct": true,
+              "explain": "正确。Parquet 是中性列存格式，被众多大数据引擎支持。"
+            },
+            {
+              "text": "两者都支持列裁剪、高压缩率与谓词下推",
+              "correct": true,
+              "explain": "正确。这是列式存储共有的三大优势。"
+            },
+            {
+              "text": "Parquet 是行式存储格式",
+              "correct": false,
+              "explain": "Parquet 和 ORC 一样是列式存储，不是行式。"
+            },
+            {
+              "text": "ORC 只能被 Hive 读取，其他引擎完全无法使用",
+              "correct": false,
+              "explain": "Spark 等引擎也支持读取 ORC（虽不如 Parquet 通用），不能说完全无法使用。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. ORC：Hive 原生格式，与 Hive 集成最深，是 Hive 默认推荐。\n2. Parquet：跨引擎通用，适合多引擎共享数据的场景。\n3. 共同点：列裁剪、高压缩、谓词下推——列存三大优势。\n4. 排除：Parquet 是列存不是行存；ORC 不是只能被 Hive 读。\n5. 选前三项。\n**延伸**：选型口诀——纯 Hive 生态选 ORC，多引擎共享选 Parquet。",
+          "enterprise_tip": "面试题「ORC 和 Parquet 怎么选」：看生态——数据只在 Hive 用选 ORC（集成深、性能好）；Spark/Impala/Druid 多引擎都要读选 Parquet（通用性）。"
+        },
+        {
+          "task_id": "s05c05t05",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：跨引擎场景的格式与压缩选型",
+          "question": "某订单事实表需要被 **Spark SQL 与 Impala 两个引擎共同读取**，且追求较高的查询性能与压缩率。最合理的「存储格式 + 压缩」组合是？",
+          "options": [
+            {
+              "text": "ORC + Snappy",
+              "correct": false,
+              "explain": "ORC 主要在 Hive 生态使用，跨引擎通用性不如 Parquet；Spark/Impala 读 Parquet 更顺。"
+            },
+            {
+              "text": "Parquet + Snappy",
+              "correct": true,
+              "explain": "正确。Parquet 是跨引擎通用列存格式，Snappy 解压快，是热数据黄金组合。"
+            },
+            {
+              "text": "TEXTFILE + Gzip",
+              "correct": false,
+              "explain": "行存文本 + 慢解压，不适合分析型大表，且 Gzip 不可分割会拖垮并行度。"
+            },
+            {
+              "text": "Parquet + Bzip2",
+              "correct": false,
+              "explain": "Bzip2 压缩比高但太慢，不适合查询频繁的热数据表。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 第一步定格式：两个引擎都要读 → 选跨引擎通用的 **Parquet**（ORC 偏 Hive 生态）。\n2. 第二步定压缩：热数据要查询快 → 选解压快的 **Snappy**。\n3. 排除：TEXTFILE 行存不适合分析；Bzip2 太慢。\n4. 选 B。\n**延伸**：口诀——格式看生态（单 Hive 选 ORC、多引擎选 Parquet），压缩看热度（热 Snappy、冷 Gzip）。",
+          "enterprise_tip": "企业数仓建表规范往往这么定：DWS 层纯 Hive 用 ORC+Snappy；有 Impala/Spark 混读的表用 Parquet+Snappy；选型定稿前用生产量级数据压测压缩率与扫描耗时。"
+        },
+        {
+          "task_id": "s05c05t06",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "多选：存储格式选型判断",
+          "question": "以下「业务场景 → 存储格式选型」的组合，**合理**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "每天 5 亿行的行为日志宽表，按列聚合分析 → ORC/Parquet 列存",
+              "correct": true,
+              "explain": "正确。海量分析型表用列存，享受列裁剪、高压缩与谓词下推。"
+            },
+            {
+              "text": "几 KB 的临时配置表，需要人眼直接查看内容 → TEXTFILE 行存",
+              "correct": true,
+              "explain": "正确。小表/临时表用 TEXT 更简单直接，列存格式的文件头开销反而浪费。"
+            },
+            {
+              "text": "需要被 Spark SQL 与 Impala 多引擎共同读取的分析表 → Parquet",
+              "correct": true,
+              "explain": "正确。Parquet 是跨引擎通用列存格式，适合多引擎共享数据。"
+            },
+            {
+              "text": "需要频繁单行更新的在线交易表 → ORC 列存",
+              "correct": false,
+              "explain": "错误。单行高频更新是 OLTP 场景，应使用行存数据库；列存适合批量分析。"
+            },
+            {
+              "text": "任何表用 ORC 一定比 TEXTFILE 快",
+              "correct": false,
+              "explain": "错误。小表、取整行场景列存优势不明显甚至更慢，选型必须看场景。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 选型第一原则：**看查询模式**——按列聚合分析 → 列存（ORC/Parquet）；取整行、小表、临时表 → TEXTFILE。\n2. 列存适合「海量 + 按列分析」：每天 5 亿行宽表、分析型查询 → ORC/Parquet，正确。\n3. 小表用 TEXTFILE：几 KB 的表列存优势为零、还有文件头开销，且 TEXT 人眼可读方便排查，正确。\n4. 跨引擎共享选 Parquet：Spark/Impala/Druid 都能读，正确。\n5. 排除：OLTP 单行更新根本不该进数仓列存表（该用行存数据库）；「ORC 一定更快」是错误绝对化。\n6. 选前三项。\n**易错点**：把「列存」与「一定快」划等号——列存快在按列扫描，取整行/小表/点查场景行存更合适。\n**口诀**：**格式看查询模式（列分析→列存，整行小表→TEXT），生态看引擎（单 Hive→ORC，多引擎→Parquet）**。",
+          "enterprise_tip": "企业建表规范常这么定：ODS 层 TEXTFILE 或 ORC + 按天分区，DWD/DWS 层 ORC/Parquet + Snappy；临时分析表用 TEXTFILE 方便排查——把规范背下来，面试选型题直接套用。"
+        },
+        {
+          "task_id": "s05c05t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：压缩比与解压速度的权衡",
+          "question": "关于压缩格式「压缩比」与「解压速度」的权衡，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Gzip 压缩比高但解压慢，适合冷数据归档；Snappy 解压快、压缩比适中，适合热数据查询",
+              "correct": true,
+              "explain": "正确。热数据重速度选 Snappy，冷数据重空间选 Gzip，是权衡的核心结论。"
+            },
+            {
+              "text": "压缩比越高的格式一定越好",
+              "correct": false,
+              "explain": "错误。高压缩比往往伴随高压缩/解压开销，查询场景反而更慢，要权衡。"
+            },
+            {
+              "text": "所有压缩格式都支持切片并行读取",
+              "correct": false,
+              "explain": "错误。Gzip 不可分割（一个 gzip 文件只能一个 map 读），Snappy/LZO 可分割。"
+            },
+            {
+              "text": "为了省去解压开销，生产大表一律不压缩",
+              "correct": false,
+              "explain": "错误。不压缩存储成本与磁盘 IO 翻倍，生产大表几乎必压缩。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 压缩的两难：**压缩比高 → 省空间，但压缩/解压耗 CPU 慢**；压缩比低 → 快但占空间。没有「又小又快」的免费午餐。\n2. 权衡结论：热数据（频繁查询）选**解压快**的 Snappy（压缩比适中）；冷数据（归档、很少读）选**压缩比高**的 Gzip（慢可以接受）。\n3. 附加维度：**可分割性**——Gzip 大文件不可分割，会退化成单 map 处理，比不压缩还慢；大文件压缩必须选可分割格式。\n4. 排除：压缩比越高不一定越好；不是所有格式都可分割；不压缩在成本与 IO 上双输。\n5. 选 A。\n**口诀**：**热 Snappy、冷 Gzip；大文件必须可分割**。\n**延伸**：列存 + Snappy 是生产黄金组合——列存省 IO + Snappy 解压快，兼顾存储成本与查询性能。",
+          "enterprise_tip": "面试题「压缩怎么选」：答三点——热数据重速度（Snappy）、冷数据重空间（Gzip）、大文件必须可分割；再补一句「压缩率差 20%，PB 级数据成本就差 20%」，体现成本意识。"
+        },
+        {
+          "task_id": "s05c05t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：列式存储压缩率高的原因",
+          "question": "为什么 ORC/Parquet 列式存储的压缩率通常远高于 TEXTFILE 行存？",
+          "options": [
+            {
+              "text": "同一列的数据类型相同、取值相近，连续存放后冗余度高，字典编码/RLE 等压缩算法效果更好",
+              "correct": true,
+              "explain": "正确。同列同类型数据聚集，冗余度高的数据压缩效果远好于混存多种类型的行。"
+            },
+            {
+              "text": "列式存储会自动把重复行删除",
+              "correct": false,
+              "explain": "列存不删行，压缩靠编码冗余而非删除数据。"
+            },
+            {
+              "text": "ORC 只存整数，不存字符串",
+              "correct": false,
+              "explain": "ORC 支持所有类型，压缩率高来自同列数据聚集，不是只存整数。"
+            },
+            {
+              "text": "行存格式本身不支持压缩",
+              "correct": false,
+              "explain": "行存也能压缩（如 gzip），但一行内多种类型混杂导致压缩率低。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 压缩的本质：利用数据**冗余**——相同/相近的字节序列越多，压缩率越高。\n2. 行存：一行内字段类型混杂（字符串+数字+日期），相邻字节差异大，冗余度低。\n3. 列存：同一列的所有值连续存放，类型相同、取值相近（如日期列都是 2024-xx-xx），冗余度极高，字典编码、RLE 游程编码等算法效果远好于行存。\n4. 排除干扰项：不删行、不是只存整数、行存也能压缩。\n5. 选 A。\n**延伸**：压缩率高 → 磁盘占用小、读盘字节少 → 查询更快，这是列存的第二重收益。",
+          "enterprise_tip": "面试题『为什么 ORC 比 TEXTFILE 省空间』：同列同类型数据连续存放，冗余度高，字典/RLE 压缩效果好；再补一句『压缩率差 20%，PB 级数据成本差 20%』体现成本意识。"
+        },
+        {
+          "task_id": "s05c05t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：向量化查询",
+          "question": "关于 Hive 的**向量化查询**（`hive.vectorized.execution.enabled=true`），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "按批次批量处理一批数据（列式批量运算），减少逐行解释执行与虚函数调用开销，配合 ORC 等列存格式显著提升扫描性能",
+              "correct": true,
+              "explain": "正确。向量化把『逐行处理』变成『批量处理』，CPU 效率大幅提升，与列存是天作之合。"
+            },
+            {
+              "text": "让 Hive 完全在内存中运行，不读写磁盘",
+              "correct": false,
+              "explain": "向量化优化的是 CPU 处理方式，数据仍从 HDFS 读取。"
+            },
+            {
+              "text": "只对 TEXTFILE 文本表有效",
+              "correct": false,
+              "explain": "向量化主要配合 ORC/Parquet 等列存格式使用，TEXTFILE 行存收益有限。"
+            },
+            {
+              "text": "自动把 SQL 翻译成机器学习模型",
+              "correct": false,
+              "explain": "向量化是执行层面的批处理优化，与机器学习无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 向量化的核心思想：传统执行器**逐行**处理数据（每行都要做类型判断、函数调用），CPU 大量时间浪费在解释开销上；向量化执行器**按批次（如一次 1024 行）批量运算**，类似 CPU 的 SIMD 思想，减少循环与虚函数调用。\n2. 与列存的配合：列存按列连续存放数据，天然适合批量处理，ORC + 向量化是 Hive 性能黄金组合。\n3. 配置：`SET hive.vectorized.execution.enabled=true;`（新版默认开启），EXPLAIN 中可看到 Vectorized execution 字样。\n4. 排除：不改变数据存储位置、对 TEXTFILE 收益有限、与机器学习无关。\n5. 选 A。\n**延伸**：Spark 的钨丝计划（Tungsten）、ClickHouse 的向量化执行也是同一思路——批处理取代逐行解释。",
+          "enterprise_tip": "面试题『ORC + 向量化为什么快』：列存减少 IO + 向量化减少 CPU 解释开销，两个维度叠加；调优时确认 explain 输出里出现 Vectorized execution，没有就检查引擎版本与表格式。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "行存和列存各适合什么场景？",
+          "a": "行存适合取整行/频繁更新的 OLTP；列存适合按列聚合分析的 OLAP，支持列裁剪、高压缩、谓词下推。"
+        },
+        {
+          "q": "ORC 和 Parquet 有什么区别？",
+          "a": "ORC 是 Hive 生态原生、与 Hive 集成最深；Parquet 是跨引擎通用格式（Spark/Impala/Druid 都能读）；两者都是列存。"
+        },
+        {
+          "q": "Snappy 和 Gzip 怎么选？",
+          "a": "热数据要查询速度选 Snappy（解压快、压缩比适中）；冷数据归档要省空间选 Gzip（压缩比高但慢）。"
+        },
+        {
+          "q": "什么是可分割性？为什么重要？",
+          "a": "压缩文件能否被切块并行读取；Gzip 不可分割，大文件会退化成单 map 处理；大文件压缩必须选可分割格式。"
+        },
+        {
+          "q": "为什么说「列存 + Snappy」是生产黄金组合？",
+          "a": "列存省 IO（列裁剪）+ Snappy 解压快，兼顾存储成本与查询性能，是数仓分析场景的默认选型。"
+        },
+        {
+          "q": "Hive 向量化查询是什么？",
+          "a": "把逐行处理的执行器改成按批次批量处理（列式批量运算），减少解释执行与虚函数开销；主要配合 ORC/Parquet 列存使用，配置 hive.vectorized.execution.enabled=true。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "TEXTFILE",
+          "desc": "Hive 的文本行存格式，兼容性好但压缩率低、查询慢。"
+        },
+        {
+          "term": "ORC",
+          "desc": "Hive 生态原生的列式存储格式，支持高压缩与谓词下推。"
+        },
+        {
+          "term": "Parquet",
+          "desc": "跨引擎通用的列式存储格式，Spark/Impala/Druid 等均支持。"
+        },
+        {
+          "term": "Snappy",
+          "desc": "解压速度快的压缩算法，压缩比适中，热数据首选。"
+        },
+        {
+          "term": "Gzip",
+          "desc": "压缩比高的压缩算法，解压慢且不可分割，适合冷数据归档。"
+        },
+        {
+          "term": "列裁剪（Column Pruning）",
+          "desc": "列存查询只读取涉及的列，大幅减少磁盘 IO。"
+        },
+        {
+          "term": "谓词下推（Predicate Pushdown）",
+          "desc": "利用 min/max 等统计信息跳过不满足条件的数据块。"
+        },
+        {
+          "term": "可分割性（Splittable）",
+          "desc": "压缩文件能否被切成多块并行读取的特性。"
+        },
+        {
+          "term": "向量化查询",
+          "desc": "按批次批量处理数据的执行优化，配合列存格式提升扫描性能。"
+        }
+      ],
+      "kps": [
+        "行存 vs 列存（TEXTFILE vs ORC/Parquet）",
+        "列存三大优势（列裁剪、高压缩、谓词下推）",
+        "ORC 与 Parquet 的区别与选型（生态）",
+        "压缩格式对比（Snappy/Gzip/LZO/Bzip2）",
+        "压缩比 vs 解压速度的权衡",
+        "可分割性（Splittable）与并行度",
+        "格式+压缩建表写法（STORED AS / TBLPROPERTIES）",
+        "选型口诀（热 Snappy、冷 Gzip、列存+Snappy 黄金组合）",
+        "列式存储高压缩的底层原因（列内同类型数据冗余度高）",
+        "向量化查询（hive.vectorized.execution.enabled，批量处理列数据）"
+      ]
+    },
+    {
+      "chapter_id": "s05c06",
+      "title": "5.6 Hive 调优",
+      "goal": "掌握数据倾斜、小文件、动态分区、分区裁剪、mapjoin 与 explain 等调优手段",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**数据倾斜**：某个/某些 key 的数据量远大于其他 key，导致『**少数 reduce 任务扛 90% 数据，其他 reduce 闲着**』，整个作业被最慢的任务拖死。\n\n常见原因：\n- **join 倾斜**：小表里的某个 key（如用户 0、空字符串、默认值）在事实表里出现几亿次；\n- **group by 倾斜**：某个取值占比极高（如城市字段里『未知』占 80%）；\n- **count distinct 倾斜**：对超大基数+热点值去重。\n\n排查方法：\n1. 看任务日志/进度：**某个 reduce 长期 99% 不结束**；\n2. 看中间数据量：`explain` 或抽样统计 key 分布；\n3. 对可疑 key `GROUP BY key` 统计频次，找出热点。\n\n常见解法：\n- 热点 key 加**随机前缀**打散后两阶段聚合（先部分聚合再去前缀）；\n- join 倾斜：**小表广播（mapjoin）** 或对热点 key 单独处理（skew join）；\n- 过滤脏数据（空 key 补默认值再打散）；\n- 两阶段聚合：先加随机数分组预聚合，再去随机数做最终聚合。"
+        },
+        {
+          "type": "text",
+          "content": "**小文件问题**：HDFS 上碎片化的小文件（几 KB~几 MB）会让 NameNode 元数据膨胀、map 任务空转。产生来源：动态分区开太多、reduce 数量多、写入端分区多。\n\n解法：\n- **合并小文件**：`INSERT OVERWRITE` 重写一遍 + `distribute by` 控制分区数；或调 `hive.merge.mapfiles=true`（map-only 任务合并）；\n- 控制**动态分区数量**与**reduce 数量**：`SET hive.exec.reducers.max`、`SET mapreduce.job.reduces=N`；\n- 合理设计分区粒度（不要按小时分太细）。\n\n**分区裁剪（Partition Pruning）**：查询 WHERE 带分区字段（如 `dt='2024-01-05'`）时，Hive 只读对应分区目录，不扫全表——这是**最便宜最有效的优化**，写 SQL 必须养成习惯。\n\n**mapjoin**：小表（默认 < 25MB）在 map 阶段加载进内存，避免 shuffle，join 大表时性能提升明显：`SET hive.auto.convert.join=true;`（默认开）。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "-- Hive 调优常用手段速查\n\n-- 1. 分区裁剪：WHERE 必须带分区字段\nSELECT user_id, SUM(amount)\nFROM dwd_order\nWHERE dt = '2024-01-05'      -- 只扫这一天\nGROUP BY user_id;\n\n-- 2. mapjoin：小表自动进内存，免 shuffle\nSET hive.auto.convert.join = true;                -- 自动把小表转 mapjoin\nSET hive.mapjoin.smalltable.filesize = 26214400;  -- 小表阈值 25MB\nSELECT /*+ MAPJOIN(dim_city) */ o.order_id, c.city_name\nFROM dwd_order o\nJOIN dim_city c ON o.city_id = c.city_id;         -- dim_city 是小表\n\n-- 3. 小文件合并：重写一遍并控制输出文件数\nSET hive.merge.mapfiles = true;     -- map-only 任务自动合并\nSET hive.exec.dynamic.partition.mode = nonstrict;\nINSERT OVERWRITE TABLE dwd_order PARTITION (dt)\nSELECT order_id, user_id, amount, dt\nFROM ods_order\nDISTRIBUTE BY dt;                   -- 按分区字段分发，每分区一个文件\n\n-- 4. 倾斜处理开关：group by 自动两阶段聚合\nSET hive.groupby.skewindata = true;\n\n-- 5. 看执行计划（调优第一步）\nEXPLAIN SELECT user_id, SUM(amount) FROM dwd_order WHERE dt = '2024-01-05' GROUP BY user_id;",
+          "caption": "分区裁剪 / mapjoin / 小文件合并 / explain 速查"
+        },
+        {
+          "type": "warning",
+          "content": "**调优误区**：\n- 一上来就调参数，**先看 SQL 本身**：有没有分区过滤、是不是 SELECT *、join 顺序对不对；\n- EXPLAIN 是**调优的入口**：先看懂执行计划（多少个 MR/Spark 任务、shuffle 发生在哪），再对症下药；\n- 动态分区不限制数量会生成海量小分区/小文件（`hive.exec.max.dynamic.partitions`）；\n- mapjoin 对小表阈值外的表无效，盲目加 hint 也没用。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- 面试必问：① 什么是数据倾斜？怎么排查？怎么解决？② 小文件怎么处理？③ mapjoin 原理？④ explain 有什么用？\n- **生产经验**：倾斜排查黄金流程——看 reduce 进度（某个卡 99%）→ 抽 key 分布 → 定位热点 → 打散/过滤/mapjoin。\n- **岗位要求**：给一段慢 SQL 能说出优化点（加分区过滤、改 join、两阶段聚合）是高级岗的入场券。\n- 常见坑：调优没有『银弹』，参数调参不如 SQL 重写；先 explain 再动手。"
+        }
+      ],
+      "hands_on": "1. 用 Python 造数据模拟数据倾斜：造一个列表，其中 key '0' 出现 90 万次、其余 9 个 key 各 1 万次，分别用『直接分组计数』和『先加随机后缀两阶段聚合』两种方式统计，打印两种方式的耗时对比，体会倾斜与打散的效果。\n2. 在 SQLite 中练习分区裁剪思想：对一张带 dt 列的表（可造 10 万行模拟），对比 WHERE dt='...' 与无 WHERE 的查询，用 EXPLAIN QUERY PLAN 查看是否全表扫描。\n3. 背诵并默写：数据倾斜的 3 个常见原因 + 3 个解法；小文件 2 个解法；mapjoin 一句话原理。\n4. 找一段自己写过的慢查询 SQL，用本章的知识点列出 3 条优化建议。",
+      "tasks": [
+        {
+          "task_id": "s05c06t01",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：数据倾斜的表现",
+          "question": "MapReduce/Hive 作业出现**数据倾斜**时，最典型的特征是？",
+          "options": [
+            {
+              "text": "所有 reduce 任务同时卡在 99%，进度一致",
+              "correct": false,
+              "explain": "倾斜时任务进度极不一致：大多数 reduce 早完成，个别卡住。"
+            },
+            {
+              "text": "大多数 reduce 很快完成，个别 reduce 长时间卡在 99%",
+              "correct": true,
+              "explain": "正确。热点 key 的数据全压在个别 reduce 上，其他 reduce 闲着，整个作业等最慢的。"
+            },
+            {
+              "text": "作业因内存不足直接失败",
+              "correct": false,
+              "explain": "内存不足（OOM）是另一种故障，不是倾斜的典型特征。"
+            },
+            {
+              "text": "集群所有节点磁盘写满",
+              "correct": false,
+              "explain": "磁盘写满是容量故障，与倾斜无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 倾斜本质：数据分布不均衡 → 任务负载不均衡。\n2. 表现：个别 reduce 拿到 90% 数据，进度卡 99%，其他 reduce 早完成。\n3. 选 B。\n**延伸**：排查时盯『进度最慢的 reduce』，再看它的 key 是什么、为什么那么多。",
+          "enterprise_tip": "面试场景题：『一个 group by 作业跑了 2 小时不动，怎么查？』答：先看哪个 reduce 卡住 → 抽样该 reduce 的数据看 key 分布 → 找出热点（如空值/默认值）→ 过滤或加随机前缀两阶段聚合。"
+        },
+        {
+          "task_id": "s05c06t02",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "多选：小文件治理措施",
+          "question": "数仓表产生大量小文件，以下治理措施**合理**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "INSERT OVERWRITE 重写表并用 DISTRIBUTE BY 控制输出文件数",
+              "correct": true,
+              "explain": "正确。重写 + DISTRIBUTE BY 让每个分区只生成少量大文件，是最常用的合并手段。"
+            },
+            {
+              "text": "开启 hive.merge.mapfiles / hive.merge.mapredfiles 自动合并",
+              "correct": true,
+              "explain": "正确。Hive 提供合并参数，任务结束后自动合并小文件。"
+            },
+            {
+              "text": "把分区粒度改细（如按小时分区）来减少每个分区的数据量",
+              "correct": false,
+              "explain": "错误。分区更细 = 分区目录更多 = 小文件更多，方向反了。"
+            },
+            {
+              "text": "控制动态分区数量与 reduce 数量",
+              "correct": true,
+              "explain": "正确。动态分区过多、reduce 过多都会产生海量小文件，要限制。"
+            },
+            {
+              "text": "对小文件目录直接 rm 删除",
+              "correct": false,
+              "explain": "错误。直接删文件丢数据，必须先合并再删或走官方合并机制。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 小文件治理两大方向：合并存量（重写 + DISTRIBUTE BY / 自动合并参数）、控制增量（限制动态分区与 reduce 数量）。\n2. 分区变细是逆向操作，会加剧问题。\n3. 直接删文件丢数据。\n4. 选 重写合并、开启合并参数、控制分区/reduce 数量。\n**延伸**：Spark 写 Hive 时注意 coalesce/repartition 控制文件数。",
+          "enterprise_tip": "面试题『小文件怎么治？』分层答：存量用 INSERT OVERWRITE 合并（DISTRIBUTE BY 控制文件数）；增量靠规范（限制动态分区、控制 reduce、开启 merge 参数）；根治靠建模规范（分区粒度合理、写入端 coalesce）。"
+        },
+        {
+          "task_id": "s05c06t03",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：排查数据倾斜的流程",
+          "question": "一个 GROUP BY 作业执行缓慢，疑似数据倾斜，把排查流程按正确顺序排列。",
+          "steps": [
+            "观察作业进度：确认是否『个别 reduce 卡 99%，其他早完成』的倾斜特征",
+            "对可疑 key 做频次统计（GROUP BY key），确认热点 key 与占比",
+            "对症处理：热点 key 加随机前缀两阶段聚合 / 过滤脏数据 / mapjoin",
+            "用 EXPLAIN 查看执行计划，理解任务划分与 shuffle 位置",
+            "从卡住的 reduce 日志/中间数据中定位可疑 key"
+          ],
+          "correct_order": [
+            0,
+            3,
+            4,
+            1,
+            2
+          ],
+          "order_explain": "排查流程：先确认是不是倾斜（进度特征）→ 看执行计划理解任务 → 定位热点 key → 统计验证 → 对症解决。先确认现象，再定位根因，最后才动手改。",
+          "analysis": "**标准解题思路**\n1. **确认现象**：看任务进度，是否个别 reduce 卡 99%——先确定是倾斜而不是其他问题（如资源不足）。\n2. **看执行计划**：EXPLAIN 理解任务划分、shuffle 位置，确认瓶颈在哪个阶段。\n3. **定位热点**：从卡住的 reduce 处理的中间数据里抽样，找出可疑 key。\n4. **验证**：对可疑 key 做 GROUP BY 频次统计，确认热点及占比（如空字符串占 80%）。\n5. **解决**：按根因处理——热点 key 加随机前缀两阶段聚合；空值/默认值污染则清洗；小表 join 倾斜用 mapjoin。\n**易错点**：没确认现象就盲目调参；不定位热点 key 就乱加随机前缀。\n**记忆**：看进度 → 看计划 → 找 key → 验证 → 解决。",
+          "enterprise_tip": "面试加分项：『倾斜治理后要验证』——重跑作业对比耗时，同时监控 reduce 任务时长分布是否均匀；把热点 key 的清洗规则沉淀到 ODS 清洗环节，从源头避免。"
+        },
+        {
+          "task_id": "s05c06t04",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：数据倾斜的典型现象",
+          "question": "某 Hive 作业按 `city` 字段分组统计用户数，其中『未知』城市的用户占了 80%。该作业**最可能**出现以下哪种现象？",
+          "options": [
+            {
+              "text": "处理『未知』城市的 reduce 任务耗时远超其他任务，其他 reduce 早已完成",
+              "correct": true,
+              "explain": "正确。热点 key『未知』的数据全压在个别 reduce 上，其他 reduce 空闲，整个作业被最慢任务拖住。"
+            },
+            {
+              "text": "所有 reduce 任务耗时均匀，同时完成",
+              "correct": false,
+              "explain": "数据分布均衡才会这样；本题数据严重不均，不会均匀完成。"
+            },
+            {
+              "text": "作业在 map 阶段直接失败",
+              "correct": false,
+              "explain": "倾斜主要影响 reduce 阶段负载，一般不会导致 map 失败。"
+            },
+            {
+              "text": "集群直接拒绝提交该任务",
+              "correct": false,
+              "explain": "倾斜是任务执行中的负载不均问题，与提交阶段无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 分析数据：『未知』占 80%，按 city 分组时该 key 的数据量是其他城市的数十倍。\n2. 影响：hash 分区后『未知』集中在个别 reduce，这些 reduce 处理 80% 数据 → 卡在 99%，其他 reduce 早完成。\n3. 排除：均匀完成需要数据均衡；map 阶段失败与倾斜无关；提交被拒与倾斜无关。\n4. 选 A。\n**延伸**：这类热点常来自脏数据（空值、默认值、爬虫占位符），清洗 ODS 层是治本之策。",
+          "enterprise_tip": "面试场景题：「一个 group by 作业 2 小时跑不完」——先看是不是某个 reduce 卡住（倾斜特征），再抽 key 分布找热点，空值/默认值清洗或加随机前缀两阶段聚合。"
+        },
+        {
+          "task_id": "s05c06t05",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：定位数据倾斜的排查步骤",
+          "question": "一个 GROUP BY 作业执行缓慢，怀疑是数据倾斜。请把**定位数据倾斜**的排查步骤按正确顺序排列。",
+          "steps": [
+            "观察作业进度，确认是否出现『个别 reduce 卡在 99%、其余早已完成』的倾斜特征",
+            "用 EXPLAIN 查看执行计划，确认 GROUP BY 的 shuffle 键是哪个字段",
+            "从卡住的 reduce 输入中抽样统计各 key 的频次，找出占比异常的候选 key",
+            "用 SELECT key, COUNT(*) ... GROUP BY key 在全量数据上验证热点 key 的占比",
+            "针对热点 key 实施优化（清洗脏数据 / 加随机前缀两阶段聚合），重跑对比耗时"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "排查思路：先确认现象（是否真倾斜）→ 看执行计划理解任务 → 抽样定位候选 key → 全量验证热点 → 对症优化并验证效果。先诊断后治疗，避免盲目调参。",
+          "analysis": "**标准解题思路**\n1. **确认现象**：先看是否『个别 reduce 卡 99%、其他早完成』——如果不是这个特征，可能是资源不足等其他问题，别急着按倾斜处理。\n2. **看执行计划**：EXPLAIN 确认 GROUP BY/JOIN 的 shuffle 键，理解任务划分与数据流向。\n3. **抽样定位**：从卡住 reduce 的输入里抽样统计 key 频次，找出占比异常的候选 key（如空值、默认值）。\n4. **全量验证**：对候选 key 做 GROUP BY 频次统计，用全量数据确认热点及占比，避免抽样误差。\n5. **对症解决**：脏数据清洗 / 热点 key 加随机前缀两阶段聚合 / join 场景用 mapjoin，重跑对比耗时验证效果。\n**易错点**：没确认现象就盲目调参；不验证热点 key 就乱加随机前缀。\n**记忆**：看进度 → 看计划 → 找 key → 验证 → 解决。",
+          "enterprise_tip": "把排查步骤沉淀成运维手册：倾斜告警 → 自动抓取卡住 reduce 的 key 分布 → 展示热点 top10 → 一键生成优化建议；治理后重跑对比是必须的闭环。"
+        },
+        {
+          "task_id": "s05c06t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：小文件合并手段",
+          "question": "关于 Hive **小文件合并**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "开启 `hive.merge.mapfiles=true` 可让 map-only 任务结束后自动合并输出的小文件",
+              "correct": true,
+              "explain": "正确。这是 Hive 内置的自动合并参数；另有 hive.merge.mapredfiles 用于含 reduce 的任务。"
+            },
+            {
+              "text": "调大 `dfs.blocksize` 能直接合并 HDFS 上已存在的小文件",
+              "correct": false,
+              "explain": "错误。块大小只影响新写入时的切块，不合并存量小文件。"
+            },
+            {
+              "text": "小文件问题只浪费存储，不影响查询性能",
+              "correct": false,
+              "explain": "错误。小文件会让 NameNode 元数据膨胀、map 任务空转，严重影响性能。"
+            },
+            {
+              "text": "把分区粒度改细（如按小时分区）能减少小文件",
+              "correct": false,
+              "explain": "错误。分区更细会产生更多目录与文件，恰恰加剧小文件问题。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 小文件危害：每个文件/目录都在 NameNode 内存占一条元数据（约 150 字节），且每个小文件可能对应一个 map 任务——元数据膨胀 + 任务空转，双重拖累。\n2. 自动合并手段：`hive.merge.mapfiles=true`（map-only 任务合并）、`hive.merge.mapredfiles=true`（含 reduce 的任务合并），任务结束后自动把小文件合并成少量大文件。\n3. 主动合并手段：`INSERT OVERWRITE` 重写一遍 + `DISTRIBUTE BY` 控制输出文件数（如按分区字段分发，每分区一个文件）。\n4. 排除：调大 blocksize 只管新写入；分区改细是逆向操作；说「只浪费存储」是低估危害。\n5. 选 A。\n**易错点**：把「调大块大小」当成合并存量小文件的手段——块大小是写入时的切块单位，与存量文件无关。\n**延伸**：根治要靠规范——限制动态分区数量、控制 reduce 数量、写入端 coalesce/repartition 控制文件数。",
+          "enterprise_tip": "面试题「小文件怎么治」：存量用 INSERT OVERWRITE 重写 + DISTRIBUTE BY 合并；增量靠开启 hive.merge.mapfiles/mapredfiles 自动合并；根治靠建模规范（分区粒度合理、写入端控制文件数）——三层答法最完整。"
+        },
+        {
+          "task_id": "s05c06t07",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：慢 SQL 优化步骤",
+          "question": "一条 Hive SQL 执行很慢，请把**合理的优化步骤**按正确顺序排列。",
+          "steps": [
+            "用 EXPLAIN 查看执行计划，定位瓶颈（任务数、shuffle 位置、是否全表扫描）",
+            "检查并优化 SQL 本身：补上分区过滤（WHERE 带分区字段）、去掉 SELECT *、只选需要的列",
+            "针对瓶颈对症下药：小表 join 用 mapjoin、倾斜 key 两阶段聚合、小文件合并",
+            "重跑任务，对比优化前后的耗时与资源消耗，验证效果",
+            "把有效的优化经验沉淀到规范（建表规范/SQL 规范），避免同类问题复现"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "慢 SQL 优化流程：先 EXPLAIN 看清执行计划定位瓶颈 → 先优化 SQL 本身（分区过滤、列裁剪）→ 再对症下药（mapjoin、倾斜处理、小文件）→ 重跑验证 → 沉淀规范。核心是「先诊断后治疗、先 SQL 后参数」——调参永远排在 SQL 重写之后。",
+          "analysis": "**标准解题思路**\n1. **第一步看执行计划**：EXPLAIN 能看到这条 SQL 被拆成几个 MR/Spark 任务、shuffle 发生在哪、是否全表扫描——先定位瓶颈再动手，避免盲目调参。\n2. **第二步优化 SQL 本身**：最便宜最有效的优化永远在 SQL 层——WHERE 补分区过滤（分区裁剪）、去掉 SELECT *（列裁剪）、调整 join 顺序；SQL 没写对，调什么参数都白搭。\n3. **第三步对症下药**：根据 EXPLAIN 发现的瓶颈选手段——小表 join 大表用 mapjoin（免 shuffle）、热点 key 加随机前缀两阶段聚合（治倾斜）、INSERT OVERWRITE + DISTRIBUTE BY 合并小文件。\n4. **第四步重跑验证**：优化后重跑，对比耗时与资源消耗，确认有效再收工——不做对比的优化等于没优化。\n5. **第五步沉淀规范**：把有效的优化点固化成团队规范（建表规范、SQL 规范、参数基线），让同类问题不再发生。\n**易错点**：① 跳过 EXPLAIN 直接调参（hive.exec.reducers.max 等）——参数是最后手段；② 优化后不重跑对比，无法确认效果。\n**记忆**：看计划 → 改 SQL → 对症调 → 验证 → 沉淀。",
+          "enterprise_tip": "面试场景题「一段慢 SQL 你怎么优化」：按五步答并强调「先 SQL 后参数、先 EXPLAIN 后动手」；能举例说明「一条加 WHERE dt=... 分区过滤的优化顶十个参数」是高级岗的加分回答。"
+        },
+        {
+          "task_id": "s05c06t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：mapjoin 的底层原理",
+          "question": "Hive 的 mapjoin 为什么能避免 shuffle？它的底层原理是？",
+          "options": [
+            {
+              "text": "把小表（默认小于 25MB）加载进每个 map 任务的内存，map 读到大表分片时直接在本地内存中关联，无需 shuffle",
+              "correct": true,
+              "explain": "正确。小表广播进 map 内存，大表按分片本地关联，省去 reduce 端 shuffle。"
+            },
+            {
+              "text": "把大表加载进每个 reduce 内存，与小表在 reduce 端关联",
+              "correct": false,
+              "explain": "mapjoin 是把小表广播进 map 端，大表仍按分片读取。"
+            },
+            {
+              "text": "把两表都复制到 NameNode，由 NameNode 完成关联",
+              "correct": false,
+              "explain": "NN 不参与计算，mapjoin 是内存广播 + 本地关联。"
+            },
+            {
+              "text": "mapjoin 会跳过 map 阶段，直接由单个 reduce 处理全部数据",
+              "correct": false,
+              "explain": "mapjoin 恰恰避免了 reduce 端的 shuffle 与集中处理，不是跳过 map。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 普通 join 的问题：两表都要按关联键 shuffle 到 reduce，跨节点传输 + reduce 集中处理，慢且容易倾斜。\n2. mapjoin 的底层：把小表（默认 < 25MB，hive.mapjoin.smalltable.filesize）**广播（复制）到每个 map 任务的内存**，map 读到大表的每个分片时，直接在本地内存的小表哈希表里查关联——整个过程**不需要 shuffle，也没有 reduce 阶段**。\n3. 适用条件：小表确实小（能塞进每台机器的 map 内存），否则内存溢出。\n4. 排除干扰项：广播的是小表不是大表；NN 不参与；没有跳过 map。\n5. 选 A。\n**延伸**：hive.auto.convert.join=true（默认开）自动把小表 join 转成 mapjoin；大表 join 大表时 mapjoin 不适用，只能走 shuffle。",
+          "enterprise_tip": "面试题『小表 join 大表怎么优化』：mapjoin——小表广播进 map 内存，免 shuffle；并提醒『小表阈值 25MB，超过要调 hive.mapjoin.smalltable.filesize 或换方案』，体现对底层限制的理解。"
+        },
+        {
+          "task_id": "s05c06t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：CBO 优化器",
+          "question": "关于 Hive 的 **CBO（基于代价的优化器，hive.cbo.enable）**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "基于表的统计信息（行数、数据大小、列基数等）估算不同执行方案的代价，选出代价最小的 join 顺序与执行计划",
+              "correct": true,
+              "explain": "正确。CBO 用统计信息算代价、选最优计划，是优化器的核心思想。"
+            },
+            {
+              "text": "把 SQL 中所有 join 强制改成 mapjoin",
+              "correct": false,
+              "explain": "mapjoin 只是众多优化手段之一，CBO 是全局代价评估，不会无脑强制。"
+            },
+            {
+              "text": "自动给所有表创建索引",
+              "correct": false,
+              "explain": "CBO 不做索引管理；Hive 本身也较少用索引（用分区/分桶替代）。"
+            },
+            {
+              "text": "只做语法检查，不涉及执行计划",
+              "correct": false,
+              "explain": "语法检查是解析阶段的事；CBO 专门优化执行计划。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 优化器两类：**RBO（规则优化）**按固定规则重写（谓词下推、列裁剪），不看数据；**CBO（代价优化）**先 ANALYZE TABLE 收集统计信息（行数、文件大小、列基数 distinct 数），再枚举候选执行计划（不同 join 顺序、join 算法），估算 IO/CPU 代价，选最优。\n2. 典型收益：多表 join 自动调整 join 顺序（小表先 join）、选择 broadcast join 还是 shuffle join。\n3. 配置：hive.cbo.enable=true（默认开启，Hive 使用 Apache Calcite 实现）。\n4. 排除：不是强制 mapjoin、不建索引、不是语法检查。\n5. 选 A。\n**易错点**：统计信息过旧会让 CBO 选错计划——生产上对关键表定期 ANALYZE TABLE COMPUTE STATISTICS。",
+          "enterprise_tip": "面试题『Hive 的 CBO 和 RBO 区别』：RBO 规则重写、CBO 统计代价；生产调优发现 join 顺序诡异时，先检查表统计信息是否过期（ANALYZE TABLE ... COMPUTE STATISTICS）。"
+        },
+        {
+          "task_id": "s05c06t10",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：skew join 原理",
+          "question": "关于 Hive 的 **skew join**（`hive.optimize.skewjoin=true`），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "自动识别 join 中数据量异常大的倾斜 key，把倾斜 key 的数据拆分出来单独处理（单独 job），避免热点 key 全部压在一个 reduce 上",
+              "correct": true,
+              "explain": "正确。skew join 把热点 key 分离出来单独关联，从机制上缓解 join 倾斜。"
+            },
+            {
+              "text": "关闭 join 功能，从源头避免倾斜",
+              "correct": false,
+              "explain": "关闭 join 等于放弃业务功能，不是优化手段。"
+            },
+            {
+              "text": "把大表完整复制到每台机器上进行本地 join",
+              "correct": false,
+              "explain": "那是 mapjoin 的思路（且只适用于小表），大表无法广播。"
+            },
+            {
+              "text": "只对 group by 生效，对 join 无效",
+              "correct": false,
+              "explain": "skew join 专门处理 join 场景的倾斜；group by 倾斜用两阶段聚合或 hive.groupby.skewindata。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. join 倾斜的根源：热点 key（如空值、默认值）在事实表中出现几亿次，shuffle 后全部集中到同一 reduce，拖慢整个作业。\n2. skew join 的原理：运行时检测倾斜 key，把 **倾斜 key 的数据单独拆出来走独立的 job**（或用加盐/拆分的方式并行处理），避免和非倾斜数据混在一起压垮单个 reduce，最后合并结果。\n3. 配置：hive.optimize.skewjoin=true；它与手动『加随机前缀两阶段聚合』思路一致，但由优化器自动完成。\n4. 排除：不关闭 join、不是广播大表、不作用于 group by。\n5. 选 A。\n**延伸**：配合清洗 ODS 脏数据（空 key 补默认值/过滤）才是治本；skew join 是自动化的兜底手段。",
+          "enterprise_tip": "面试题『join 倾斜怎么解决』三层答：①源头清洗脏数据（空值/默认值）；②自动手段开 hive.optimize.skewjoin；③手动手段热点 key 加盐拆分单独 join。"
+        },
+        {
+          "task_id": "s05c06t11",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：本地模式",
+          "question": "关于 Hive 的**本地模式**（`hive.exec.mode.local.auto=true`），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "输入数据量较小时（默认约 128MB 以内）任务在本地单机直接运行，不提交 YARN，省去分布式调度与启动开销，小任务提速明显",
+              "correct": true,
+              "explain": "正确。小数据量走本地模式，避免『杀鸡用牛刀』的分布式开销。"
+            },
+            {
+              "text": "开启后所有任务都在本地运行，不再使用集群",
+              "correct": false,
+              "explain": "只有满足小数据量等条件的任务才走本地模式，大任务仍提交 YARN。"
+            },
+            {
+              "text": "本地模式会把 HDFS 上的数据复制到开发机",
+              "correct": false,
+              "explain": "本地模式仍在集群节点本地执行（本地文件系统输入），不复制数据到开发机。"
+            },
+            {
+              "text": "本地模式只对 ORC 格式的表生效",
+              "correct": false,
+              "explain": "本地模式与存储格式无关，由输入数据量、任务数等条件决定。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 本地模式的动机：小数据量的 SQL 若也走『提交 YARN → 申请容器 → 启动多任务』，调度开销比计算本身还大。\n2. 机制：`hive.exec.mode.local.auto=true` 时，若输入数据量小（默认 < 128MB，hive.exec.mode.local.auto.inputbytes.max）、map 任务数少（< 4）、reduce 任务数少（< 1），任务就在**本地单机**直接跑，不提交 YARN。\n3. 适用：开发调试、小表测试；大任务不满足条件仍走集群。\n4. 排除：不是全量本地化、不复制数据、与存储格式无关。\n5. 选 A。\n**延伸**：这也解释了为什么小表 join 快——引擎有本地模式 + mapjoin 双重保障，别总以为所有任务都要起集群。",
+          "enterprise_tip": "开发环境调试 SQL 时开启本地模式能大幅缩短等待；生产调度（凌晨批量）大任务不会触发本地模式，别指望它提升大作业性能。"
+        },
+        {
+          "task_id": "s05c06t12",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：严格模式限制",
+          "question": "开启 Hive **严格模式**（`hive.mapred.mode=strict`）后，以下哪类查询会被**禁止**？",
+          "options": [
+            {
+              "text": "对分区表查询时 WHERE 不带分区字段（会触发全表扫描）",
+              "correct": true,
+              "explain": "正确。严格模式禁止无分区过滤的分区表全表扫描，防止误操作。"
+            },
+            {
+              "text": "普通的 SELECT 查询",
+              "correct": false,
+              "explain": "普通查询不受影响，严格模式只限制危险查询。"
+            },
+            {
+              "text": "使用 GROUP BY 聚合",
+              "correct": false,
+              "explain": "GROUP BY 是正常功能，严格模式不限制。"
+            },
+            {
+              "text": "使用 LIMIT 分页",
+              "correct": false,
+              "explain": "LIMIT 反而被鼓励：严格模式要求 ORDER BY 必须带 LIMIT。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 严格模式的定位：防止『危险查询』把集群打爆，是生产环境的保护开关（hive.mapred.mode=strict）。\n2. 三大限制：\n   - **分区表必须带分区过滤**：WHERE 里必须出现分区字段条件，否则禁止（防全表扫描）；\n   - **ORDER BY 必须带 LIMIT**：防止单 reduce 拉取全量数据排序；\n   - **禁止笛卡尔积**：join 必须有 on 条件（或等值条件），禁止无条件的 CROSS JOIN。\n3. 对照选项：分区表无分区过滤会被禁——选 A。\n4. 排除：普通查询、GROUP BY、LIMIT 都不在被禁之列。\n**易错点**：严格模式 ≠ 限制所有操作，它只拦『高危』查询；生产上建议开启防止误操作。",
+          "enterprise_tip": "生产集群常开严格模式：一防分析师忘加分区条件全表扫描打爆集群，二防大结果集 ORDER BY 拖死单节点；面试题『hive.mapred.mode=strict 限制了什么』要能说出三点。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "什么是数据倾斜？典型现象是什么？",
+          "a": "某个/某些 key 数据量远大于其他 key，导致个别 reduce 扛 90% 数据、其他 reduce 空闲；典型现象是单个 reduce 卡在 99% 不结束。"
+        },
+        {
+          "q": "数据倾斜的常见原因？",
+          "a": "① join 倾斜（某 key 在事实表出现几亿次）；② group by 倾斜（某取值占比极高，如『未知』城市 80%）；③ count distinct 倾斜（热点值去重）。"
+        },
+        {
+          "q": "group by 倾斜怎么解决？",
+          "a": "热点 key 加随机前缀做两阶段聚合：先按 (前缀+key) 预聚合，再去前缀做最终聚合；或开启 hive.groupby.skewindata=true。"
+        },
+        {
+          "q": "join 倾斜怎么解决？",
+          "a": "小表广播 mapjoin 免 shuffle；热点 key 单独处理（skew join）；清洗空值/默认值等脏 key。"
+        },
+        {
+          "q": "mapjoin 的原理与适用条件？",
+          "a": "小表（默认 <25MB）在 map 阶段加载进内存与每份大表分片做本地 join，避免 shuffle；阈值由 hive.mapjoin.smalltable.filesize 控制。"
+        },
+        {
+          "q": "Hive 的 CBO 优化器是什么？",
+          "a": "基于统计信息（行数、大小、列基数）估算不同执行计划代价并选最优，如自动调整 join 顺序；hive.cbo.enable=true（默认开），统计信息过旧会选错计划。"
+        },
+        {
+          "q": "skew join 怎么解决 join 倾斜？",
+          "a": "自动识别数据量异常的倾斜 key，把热点 key 数据拆分出来单独走一个 job 处理，避免全部压在一个 reduce；配置 hive.optimize.skewjoin=true。"
+        },
+        {
+          "q": "严格模式限制了哪三类查询？",
+          "a": "①分区表查询必须带分区过滤；②ORDER BY 必须带 LIMIT；③禁止无条件的笛卡尔积。目的：防止误操作全表扫描/大结果集排序。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "数据倾斜（Data Skew）",
+          "desc": "key 分布不均导致个别 reduce 负载过高，拖慢整个作业。"
+        },
+        {
+          "term": "两阶段聚合",
+          "desc": "热点 key 加随机前缀先局部聚合、再去前缀全局聚合的倾斜解法。"
+        },
+        {
+          "term": "mapjoin",
+          "desc": "把小表广播进 map 内存做本地 join，避免 shuffle 的优化手段。"
+        },
+        {
+          "term": "分区裁剪（Partition Pruning）",
+          "desc": "WHERE 带分区字段时只扫匹配分区，最便宜的优化。"
+        },
+        {
+          "term": "小文件合并",
+          "desc": "通过重写（DISTRIBUTE BY）或合并参数治理 HDFS 小文件。"
+        },
+        {
+          "term": "hive.groupby.skewindata",
+          "desc": "开启后 group by 自动两阶段聚合，缓解倾斜。"
+        },
+        {
+          "term": "EXPLAIN",
+          "desc": "查看 SQL 执行计划（多少个任务、shuffle 位置），调优的入口。"
+        },
+        {
+          "term": "hive.auto.convert.join",
+          "desc": "自动把小表 join 转成 mapjoin 的开关，默认开启。"
+        },
+        {
+          "term": "CBO",
+          "desc": "基于代价的优化器，用统计信息估算代价选最优执行计划。"
+        },
+        {
+          "term": "skew join",
+          "desc": "自动把 join 倾斜 key 拆分单独处理的优化机制。"
+        },
+        {
+          "term": "本地模式",
+          "desc": "小数据量任务在本地单机运行、不提交 YARN 的优化。"
+        },
+        {
+          "term": "严格模式",
+          "desc": "hive.mapred.mode=strict，禁止全表扫描等危险查询。"
+        }
+      ],
+      "kps": [
+        "数据倾斜的概念与典型现象（个别 reduce 卡 99%）",
+        "倾斜常见原因（join / group by / count distinct）",
+        "倾斜排查流程（看进度→EXPLAIN→找 key→验证）",
+        "倾斜解法（随机前缀两阶段聚合、mapjoin、清洗脏数据）",
+        "小文件问题与合并手段（重写 + DISTRIBUTE BY、merge 参数）",
+        "分区裁剪（最便宜的优化）",
+        "mapjoin 原理与配置",
+        "EXPLAIN 与慢 SQL 优化步骤",
+        "mapjoin 底层原理（小表广播进内存、免 shuffle）",
+        "CBO 优化器（基于统计信息的代价优化）",
+        "skew join（hive.optimize.skewjoin 自动处理 join 倾斜）",
+        "本地模式（hive.exec.mode.local.auto）",
+        "严格模式（hive.mapred.mode=strict 的限制）"
+      ]
+    },
+    {
+      "chapter_id": "s05c07",
+      "title": "5.7 Hive 执行原理与存储底层进阶",
+      "goal": "深入 Hive SQL 执行链路、Metastore 底层、分区裁剪、列式存储、数据倾斜与动态分区的机制级原理，能讲清底层细节",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "一条 Hive SQL 从提交到返回结果，内部是一条完整的**编译-执行流水线**：\n\n1. **解析（Parse）**：Hive 用 Antlr 把 SQL 文本解析成**抽象语法树 AST**，这一步只做**语法检查**（关键字对不对、括号匹配），不关心表和字段是否存在；\n2. **语义分析（Semantic Analyze）**：遍历 AST，**查询 Metastore** 拿到表结构、字段类型、分区信息，做**语义校验**（表/字段是否存在、类型是否匹配），把 AST 转成语义树；\n3. **逻辑计划（Logical Plan）**：语义树经过**逻辑优化**——谓词下推（先过滤再 join）、列裁剪（只读需要的列）、分区裁剪——生成逻辑执行计划（算子树：Scan → Filter → Join → Aggregate …）；\n4. **物理计划（Physical Plan）**：把逻辑算子拆成一个个**物理任务**（Map/Reduce/Tez/Spark Task），确定 shuffle 键、任务数量；\n5. **提交执行**：物理任务提交给 YARN，由执行引擎（MR/Tez/Spark）调度执行，中间结果通过 shuffle 流转；\n6. **汇总返回**：结果汇总后写临时目录，客户端读取展示。\n\n所以一条 SQL 可能被拆成多个分布式任务，每个任务负责 SQL 的一部分（过滤、join、聚合）——这就是『Hive 是翻译器』的底层含义。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "一条 Hive SQL 的底层执行链路：\n\n SQL文本 ──解析──▶ AST（语法检查）\n    │\n    ├─语义分析─▶ 查 Metastore（MySQL）校验表/字段/类型\n    │\n    ├─逻辑计划─▶ 谓词下推 / 列裁剪 / 分区裁剪（逻辑优化）\n    │\n    ├─物理计划─▶ Map/Reduce/Tez/Spark 任务链（含 shuffle 键）\n    │\n    ├─提交执行─▶ YARN 调度 → 各节点并行执行\n    │\n    └─汇总返回─▶ 结果写临时目录 → 客户端展示\n\n用 EXPLAIN 能看到物理任务链（示意）：\nEXPLAIN SELECT dt, SUM(amount) FROM ods_order WHERE dt='2024-01-05' GROUP BY dt;\n\nStage-1: Map（读 ods_order，过滤 dt='2024-01-05'，输出 (dt, amount)）\n         Shuffle（按 dt 分区）\n         Reduce（SUM(amount) 分组聚合）\nStage-0: Fetch（客户端读取结果）",
+          "caption": "SQL → 任务链：EXPLAIN 看到的物理计划"
+        },
+        {
+          "type": "text",
+          "content": "**Metastore 的底层**：元数据不是玄学，就是 MySQL 里几张表——**DBS**（数据库）、**TBLS**（表）、**COLUMNS_V2**（字段）、**PARTITIONS**（分区）、**SDS**（存储描述：location、格式）等。建表/加分区就是往这些表插记录；执行 SQL 时编译器查这些表拿到表结构。**HiveServer2** 是服务端入口：每个客户端会话（session）连接一个 HiveServer2 实例，会话里提交的 SQL 由它编译执行；生产上会部署多个 HiveServer2（负载均衡）并做会话隔离。一句话：**MySQL 存『元数据』，HiveServer2 管『会话与编译』，底层引擎干『计算』**。"
+        },
+        {
+          "type": "text",
+          "content": "**分区裁剪（Partition Pruning）的底层**：分区表在 HDFS 上就是**目录嵌套**——`/warehouse/dwd.db/dwd_order/dt=2024-01-05/`、`dt=2024-01-06/`……每个分区值对应一个目录。查询带 `WHERE dt='2024-01-05'` 时，编译器在**逻辑计划阶段**就把读取范围缩小到 `dt=2024-01-05` 这一个目录（把 Filter 下推到 Scan 之上），物理计划只扫描这一个目录下的文件。**不写分区条件 = 扫全表**——每天 10 亿行的日志表，扫一天和扫一年相差 365 倍 IO。这也是数仓铁律『查询必须带分区过滤』的底层原因。"
+        },
+        {
+          "type": "text",
+          "content": "**列式存储 ORC/Parquet 的底层**：行存（TEXTFILE）把一行所有字段连续写在一起；列存把**同一列的所有值连续写在一起**（ORC 内部按 stripe 组织，每个 stripe 再按列分块）。三个底层优势由此而来：\n\n1. **列裁剪**：查 3 列只读 3 列的数据块，其余列的块完全不碰——IO 少 80% 以上；\n2. **高压缩率**：同一列数据类型相同、取值相近（比如日期列都是 2024-xx-xx），**冗余度高**，压缩算法（字典编码、RLE 游程编码等）效果远好于混存多种类型的行；\n3. **谓词下推**：每个 stripe/块保存每列的 **min/max 等统计信息**（还有 bloom filter、行数等），查询引擎先用统计信息判断『这个数据块里有没有满足条件的值』，没有就直接跳过整个块，不用真的解压读取。\n\nTEXTFILE 没有这些结构，只能全量解压全量扫——这就是『同样数据，ORC 比 TEXTFILE 快几个数量级』的底层原因。"
+        },
+        {
+          "type": "text",
+          "content": "**数据倾斜的底层原理**：GROUP BY/JOIN 的结果依赖 shuffle 把相同 key 的数据送到同一个 reducer。shuffle 的分区规则是 `hash(key) % reducer数`——**key 一样，去的 reducer 一定一样**。如果某个 key 的数据量特别大（比如城市字段 80% 是『未知』），这个 key 对应的那一个（或几个）reducer 就要处理全集群 80% 的数据，其他 reducer 早早干完等着——**整个作业的完成时间 = 最慢那个 reducer 的时间**。倾斜不是框架 bug，而是『数据分布不均 × hash 分区固定』的必然结果。解法（两阶段聚合、mapjoin、清洗热点 key）的底层思路都是**让热点数据先被拆散/提前聚合，避免集中在单个 reducer**。"
+        },
+        {
+          "type": "text",
+          "content": "**小文件合并的底层原理**：Hive 查 HDFS 上的文件，每个文件都对应 NameNode 的一条元数据（约 150 字节/块），并且**每个文件都可能启动一个 map 任务**。小文件多 → ① NN 内存被元数据撑爆（存储侧）；② 一个 map 任务启动 JVM、调度、读文件头，真正处理的数据却只有几 KB，**任务启动开销 >> 数据处理时间**（计算侧）。合并手段：`INSERT OVERWRITE` 重写 + `DISTRIBUTE BY` 控制输出文件数（每个分区只出少量大文件）、开启 `hive.merge.mapfiles/mapredfiles` 自动合并——底层都是在减少『文件数』这个元数据/任务数因子。\n\n**动态分区的底层原理**：`INSERT OVERWRITE TABLE t PARTITION (dt) SELECT ...` 时，Hive 在执行阶段**读取 SELECT 结果里 dt 的实际取值**，为每个取值**自动创建对应的 HDFS 目录**（`dt=2024-01-05/`、`dt=2024-01-06/`……）并把数据写进去，同时往 Metastore 的 PARTITIONS 表插入分区记录。相比静态分区（手动写死一个分区值），动态分区适合『一次导入很多天/很多类别的数据』，但**不限制分区数量会生成海量小目录小文件**——这就是 5.6 章『动态分区要限流』的底层原因。"
+        },
+        {
+          "type": "warning",
+          "content": "**易错点**：\n- 解析（AST）只做语法检查，**语义分析才查 Metastore**——表字段报错发生在语义分析阶段；\n- 分区裁剪发生在**编译期（逻辑优化）**，不是执行期——执行前扫描范围就已确定；\n- 列存的 min/max 统计信息是『粗筛』：能跳过不含目标值的块，但块内仍需逐行解压判断；\n- 倾斜的根因是 key 分布不均 + hash 分区固定，不是任务数量太少；\n- 动态分区默认 strict 模式禁止全动态分区，要先 `SET hive.exec.dynamic.partition.mode=nonstrict;`。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- **面试必考**：① 一条 SQL 从提交到结果的完整链路？② Metastore 底层存哪几张表？③ 分区裁剪的原理？④ 为什么 ORC 压缩率比 TEXTFILE 高？⑤ 数据倾斜的底层原理与解法？⑥ 小文件为什么影响性能？\n- **生产指导**：优化 Hive 就是优化这条链路——逻辑层（分区裁剪、谓词下推、列裁剪）、物理层（引擎选型、shuffle 减负、小文件合并）、存储层（列存 + 压缩）；\n- **常见坑**：以为 EXPLAIN 是运行时诊断（它只是编译期计划预览）；以为动态分区开得越多越好（会制造小文件）；分区条件写错类型（如 dt 字符串 vs 数字）导致裁剪失效。"
+        }
+      ],
+      "hands_on": "1. 用 Python 写一个『迷你 SQL 编译器』：输入一段极简 SQL（SELECT 列 FROM 表 WHERE 条件），用正则拆出列、表、条件，模拟『解析 → 语义（检查表字段是否存在）→ 生成过滤逻辑』三步，打印每步结果。\n2. 在 SQLite 里建一张带 dt 列的表，造 10 万行数据，分别执行带 WHERE dt='...' 与不带 WHERE 的查询，用 EXPLAIN QUERY PLAN 对比是否全表扫描，体会分区裁剪（此处用列模拟分区）。\n3. 用 Python 模拟数据倾斜：生成一个 80% 是同一 key 的列表，分别用『单次聚合』和『加随机前缀两阶段聚合』统计，打印两种方式的中间分组数对比。\n4. 用纸笔画『SQL → AST → 逻辑计划 → 物理计划 → YARN』的完整链路图，标出 Metastore 在哪个环节被查询。",
+      "tasks": [
+        {
+          "task_id": "s05c07t01",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：Hive SQL 的执行全链路",
+          "question": "把『一条 Hive SQL 从提交到返回结果』的底层执行链路按正确顺序排列。",
+          "steps": [
+            "客户端提交 SQL 给 HiveServer2",
+            "解析：SQL 文本生成抽象语法树 AST（语法检查）",
+            "语义分析：查询 Metastore 元数据，校验表/字段/类型，生成逻辑计划并优化（谓词下推、列裁剪、分区裁剪）",
+            "物理计划：把逻辑计划编译成 Map/Reduce/Tez/Spark 任务链",
+            "提交 YARN 执行：各节点并行运行分布式任务",
+            "汇总结果返回客户端"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "order_explain": "执行链路：提交 → 解析成 AST（语法检查）→ 查 Metastore 做语义分析并逻辑优化 → 编译成物理任务链 → 提交 YARN 分布式执行 → 汇总返回。本质是『SQL → 语法树 → 逻辑计划 → 物理任务 → 分布式执行』。",
+          "analysis": "**标准解题思路**\n1. **提交**：客户端把 SQL 发给 HiveServer2（服务端入口，管理会话）。\n2. **解析**：SQL 文本 → 抽象语法树 AST，只做语法检查（关键字、括号）。\n3. **语义分析**：查 Metastore（MySQL）拿到表结构，校验表/字段/类型是否存在，生成逻辑计划并做逻辑优化——谓词下推、列裁剪、分区裁剪都发生在这里。\n4. **物理计划**：逻辑算子 → 具体的 Map/Reduce/Tez/Spark 任务链，确定 shuffle 键与任务数。\n5. **执行**：任务提交 YARN，各节点并行执行，中间结果 shuffle 流转。\n6. **返回**：结果汇总写临时目录，客户端读取展示。\n**易错点**：① 把『解析』和『语义分析』混为一谈——前者只看语法，后者要查元数据；② 忘了逻辑优化（谓词下推等）发生在物理计划之前。\n**记忆**：提交 → 解析 → 语义 → 物理 → 执行 → 返回。",
+          "enterprise_tip": "面试必背这条链路并能在白板画出；追问『逻辑优化做了什么』答：谓词下推（先过滤再 join）、列裁剪（只读需要的列）、分区裁剪（只扫匹配分区）。"
+        },
+        {
+          "task_id": "s05c07t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Metastore 存什么",
+          "question": "Hive 的 Metastore（元数据）底层存储在 MySQL 中。以下哪一项**不是** Metastore 存储的内容？",
+          "options": [
+            {
+              "text": "表数据本身（每一行记录）",
+              "correct": true,
+              "explain": "正确。表数据在 HDFS 上，Metastore 只存描述数据的元数据（表结构、分区、location 等）。"
+            },
+            {
+              "text": "表名、字段名与字段类型",
+              "correct": false,
+              "explain": "这些记录在 TBLS / COLUMNS_V2 表中，属于元数据。"
+            },
+            {
+              "text": "分区信息（分区字段与分区目录）",
+              "correct": false,
+              "explain": "分区记录在 PARTITIONS 表中，属于元数据。"
+            },
+            {
+              "text": "表数据在 HDFS 上的 location",
+              "correct": false,
+              "explain": "存储位置记录在 SDS 表中，属于元数据。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 元数据 = 关于数据的数据：表名、字段、分区、location、格式。\n2. Metastore 底层就是 MySQL 里的几张表：DBS（库）、TBLS（表）、COLUMNS_V2（字段）、PARTITIONS（分区）、SDS（存储描述）。\n3. 表数据本体在 HDFS，不在 Metastore——这是『不是』的选项。\n4. 选 A。\n**延伸**：执行 SQL 时编译器查这些表拿表结构；Metastore 挂 = Hive 不可用，但 HDFS 数据不受影响。",
+          "enterprise_tip": "面试题『Metastore 用的什么数据库、存哪些表』：生产用 MySQL；能说出 DBS/TBLS/COLUMNS_V2/PARTITIONS 是数仓 DBA 基本功。"
+        },
+        {
+          "task_id": "s05c07t03",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：列式存储为什么快",
+          "question": "同一份数据，ORC/Parquet 列式存储通常比 TEXTFILE 行存查询快很多。下列哪一项**不是**列式存储快的原因？",
+          "options": [
+            {
+              "text": "列存表会自动对查询结果做缓存，第二次查询不走磁盘",
+              "correct": true,
+              "explain": "正确。列存快在结构本身（列裁剪/压缩/统计信息），没有自动缓存机制。"
+            },
+            {
+              "text": "只读取查询涉及的列（列裁剪），减少磁盘 IO",
+              "correct": false,
+              "explain": "列裁剪是列存的核心优势之一，只读需要的列。"
+            },
+            {
+              "text": "同列同类型数据聚集，压缩率高，读盘数据量小",
+              "correct": false,
+              "explain": "高压缩率让需要解压读取的字节数大幅减少，是列存快的原因。"
+            },
+            {
+              "text": "min/max 统计信息支持谓词下推，跳过不含目标值的数据块",
+              "correct": false,
+              "explain": "谓词下推跳过无关数据块，是列存快的重要原因。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 列存三大优势：列裁剪（只读需要的列）、高压缩率（同列同类型聚集）、谓词下推（min/max 统计信息跳过无关块）。\n2. 这三项从『少读数据』和『跳过数据』两个方向减少 IO，是列存快的全部原因。\n3. 『自动缓存』不是列存机制——列存没有内置结果缓存，缓存是上层引擎（如 Spark 缓存）的事。\n4. 选 A（不是列存快的原因）。\n**易错点**：题目问的是『不是』原因，别惯性选优势项。",
+          "enterprise_tip": "面试题『为什么 ORC 比 TEXTFILE 快』：答三点——列裁剪省 IO、高压缩省存储省 IO、谓词下推跳过数据块；每一点都要能举例说明。"
+        },
+        {
+          "task_id": "s05c07t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：分区裁剪的原理",
+          "question": "关于 Hive 分区裁剪（Partition Pruning）的底层原理，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "分区表在 HDFS 上是目录嵌套，WHERE 带分区字段时编译器只扫描对应分区目录",
+              "correct": true,
+              "explain": "正确。分区值=目录，WHERE 带分区字段触发编译期裁剪，只读匹配目录。"
+            },
+            {
+              "text": "分区裁剪发生在任务执行完之后，用来清理多余数据",
+              "correct": false,
+              "explain": "分区裁剪发生在编译期（逻辑优化阶段），执行前扫描范围就已确定。"
+            },
+            {
+              "text": "分区裁剪需要手动开启，默认关闭",
+              "correct": false,
+              "explain": "分区裁剪自动生效，只要 WHERE 带分区字段就会触发。"
+            },
+            {
+              "text": "分区裁剪是把所有分区都读一遍再过滤掉无关行",
+              "correct": false,
+              "explain": "那就等于全表扫描了；裁剪是不读无关目录，而不是读了再过滤。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 分区表的物理形态：HDFS 目录嵌套（/warehouse/dwd.db/dwd_order/dt=2024-01-05/ 等），每个分区值对应一个目录。\n2. 分区裁剪时机：**编译期**（逻辑优化阶段）——编译器把 WHERE 条件里的分区字段变成读取范围，物理计划只扫匹配目录。\n3. 自动生效：不需要手动开启，只要 WHERE 带分区字段（且类型匹配）就触发。\n4. 排除干扰项：不是执行后清理、不是全表读再过滤。\n5. 选 A。\n**延伸**：不写分区条件 = 全表扫描；分区条件类型写错（字符串 vs 数字）会失效。",
+          "enterprise_tip": "面试题『日志表为什么必须按天分区』：分区=目录，WHERE dt=... 只扫一个目录，扫描量降几个数量级——分区裁剪是 Hive 性能的第一手段，写 SQL 必须带分区条件。"
+        },
+        {
+          "task_id": "s05c07t05",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：ORC 的全称",
+          "question": "ORC 是 Hive 官方推荐的列式存储格式，它的全称是 Optimized ____ ____（两个英文单词，首字母分别 R 和 C，中间用空格隔开）。",
+          "answer": [
+            "Row Columnar",
+            "Rowcolumnar",
+            "ROW COLUMNAR",
+            "Row Columnar (ORC)"
+          ],
+          "hint": "先回忆 ORC 全称结构：Optimized 后面跟哪两个单词？想想它「行组 + 列存」的设计。",
+          "analysis": "**标准解题思路**\n1. ORC = Optimized Row Columnar：优化后的『行组 + 列式』存储格式。\n2. 它的组织方式：数据先按行切成 stripe（行组），每个 stripe 内部再按列存储——所以叫 Row Columnar。\n3. 填 Row Columnar。\n**延伸**：ORC 由 Hive 团队设计，与 Hive 集成最深；列内同类型数据连续存放带来高压缩率与列裁剪、谓词下推能力。",
+          "enterprise_tip": "面试题『ORC 和 Parquet 怎么选』：纯 Hive 生态选 ORC（集成深），多引擎共享选 Parquet；能说出 ORC 全称及其『行组+列式』结构是加分项。"
+        },
+        {
+          "task_id": "s05c07t06",
+          "type": "python",
+          "difficulty": 3,
+          "title": "纯 Python 模拟数据倾斜分析",
+          "question": "模拟数据倾斜分析：给定一组 GROUP BY 的 key 列表 `keys`（其中某个 key 占比极高，模拟热点 key），请：\n① 统计每个 key 出现的次数（模拟 group by 计数）；\n② 找出出现次数**最多**的热点 key；\n③ 输出一行：`热点key 次数 占比%`（占比 = 次数 ÷ 总数 × 100，保留 1 位小数，格式如 `unknown 800 80.0%`）。\n只允许使用 Python 标准库。",
+          "code_context": "keys = ['unknown'] * 800 + ['beijing'] * 100 + ['shanghai'] * 60 + ['guangzhou'] * 40\n\n# ===== 在这里编写代码 =====\n# ① 统计每个 key 出现次数\n# ② 找出现次数最多的热点 key\n# ③ 输出 '热点key 次数 占比%'（占比保留 1 位小数）\n",
+          "expected_output": "unknown 800 80.0%",
+          "reference": "keys = ['unknown'] * 800 + ['beijing'] * 100 + ['shanghai'] * 60 + ['guangzhou'] * 40\n\n# ① 统计每个 key 出现次数（模拟 group by count）\ncounts = {}\nfor k in keys:\n    counts[k] = counts.get(k, 0) + 1\n\n# ② 找出热点 key（出现次数最多）\ntotal = len(keys)\nhot_key = max(counts, key=counts.get)\nhot_cnt = counts[hot_key]\n\n# ③ 输出：热点 key、次数、占比（百分比保留 1 位小数）\nprint(hot_key, hot_cnt, '%.1f%%' % (hot_cnt * 100.0 / total))",
+          "hint": "分三步：① 怎么统计每个 key 次数？② 怎么找出次数最多的 key？③ 占比怎么算并保留 1 位小数？",
+          "analysis": "**标准解题思路**\n1. **理解数据**：keys 共 1000 个，其中 unknown 800、beijing 100、shanghai 60、guangzhou 40——unknown 占 80%，是典型的热点 key（模拟数据倾斜）。\n2. **统计次数**：遍历 keys，counts[k] = counts.get(k, 0) + 1，得到 {unknown:800, beijing:100, shanghai:60, guangzhou:40}。\n3. **找热点**：max(counts, key=counts.get) 返回计数最大的 key = unknown；hot_cnt = 800。\n4. **算占比**：800 ÷ 1000 × 100 = 80.0%，用 '%.1f%%' 格式化成 80.0%。\n5. 输出：unknown 800 80.0%。\n**易错点**：① 占比要保留 1 位小数且带 % 号；② 用 max(counts, key=counts.get) 而不是 max(counts)（后者按 key 字符串比较）；③ 不要 import 第三方库。\n**对照真实 Hive**：dict 统计 = GROUP BY 计数；占比极高说明该 key 会集中在单个 reducer——这就是倾斜。优化思路是给热点 key 加随机前缀做两阶段聚合。",
+          "enterprise_tip": "面试场景题『group by 作业 2 小时跑不完』：先抽 key 分布找热点（就是本题的统计），确认后对热点 key 加随机前缀两阶段聚合或清洗脏数据——能动手算占比，比只会背概念强。"
+        },
+        {
+          "task_id": "s05c07t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：动态分区的原理",
+          "question": "执行 `INSERT OVERWRITE TABLE dwd_order PARTITION (dt) SELECT order_id, user_id, amount, dt FROM ods_order;`（动态分区）时，Hive 底层的行为是？",
+          "options": [
+            {
+              "text": "读取 SELECT 结果中 dt 的实际取值，自动为每个取值创建对应 HDFS 分区目录并写入数据，同时写入 Metastore 分区记录",
+              "correct": true,
+              "explain": "正确。动态分区的核心就是按 dt 实际值自动拆分区目录。"
+            },
+            {
+              "text": "忽略 dt 列，把所有数据写进一个默认分区",
+              "correct": false,
+              "explain": "动态分区的核心恰恰是按 dt 实际值自动拆分目录，不会忽略。"
+            },
+            {
+              "text": "要求用户先手动创建好所有分区目录才能执行",
+              "correct": false,
+              "explain": "动态分区正是自动创建目录；手动指定分区值的是静态分区。"
+            },
+            {
+              "text": "把分区信息只存在内存中，不写入 Metastore",
+              "correct": false,
+              "explain": "每个自动创建的分区都会往 Metastore 的 PARTITIONS 表写入记录。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 动态分区 vs 静态分区：静态分区手动写死一个分区值（PARTITION (dt='2024-01-05')）；动态分区不写值（PARTITION (dt)），值来自 SELECT 结果。\n2. 底层行为：执行阶段读取 SELECT 结果中 dt 的实际取值（2024-01-05、2024-01-06……），为每个取值**自动创建 HDFS 目录**（dt=xxx/）并写入数据，同时往 Metastore 的 PARTITIONS 表插入分区记录。\n3. 限制：默认 strict 模式禁止全动态分区，需 SET hive.exec.dynamic.partition.mode=nonstrict；分区数不限制会生成海量小文件。\n4. 排除干扰项：不会忽略 dt、不需要手动建目录、分区记录要落 Metastore。\n5. 选 A。\n**延伸**：动态分区适合一次导入多天/多类别数据；生产上要配合 hive.exec.max.dynamic.partitions 限流。",
+          "enterprise_tip": "面试题『动态分区有什么坑』：分区数不受控会生成海量小目录小文件（元数据+任务启动开销双杀）——所以要设 max.dynamic.partitions 并配合 DISTRIBUTE BY 控制输出；能讲清底层『自动建目录』就到位了。"
+        },
+        {
+          "task_id": "s05c07t08",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：ACID 事务表",
+          "question": "关于 Hive 的 **ACID 事务表**（transactional 表），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "表需要以 ORC 格式存储并设置 transactional 属性，Hive 3.x 起默认支持事务，可执行 UPDATE / DELETE / MERGE 等操作",
+              "correct": true,
+              "explain": "正确。ACID 表 = ORC 存储 + transactional 标识，是 Hive 支持行级更新的前提。"
+            },
+            {
+              "text": "任何格式的表都能直接进行事务操作",
+              "correct": false,
+              "explain": "Hive 事务表要求 ORC 格式（2.x 还要求分桶），TEXTFILE 等格式不支持。"
+            },
+            {
+              "text": "ACID 表与普通表性能完全一样，没有任何额外开销",
+              "correct": false,
+              "explain": "事务表底层靠 delta 文件 + 事务 ID 合并，读写有额外开销，适合需要更新的场景而非全表。"
+            },
+            {
+              "text": "ACID 表用于替代 HDFS 存储数据",
+              "correct": false,
+              "explain": "ACID 表数据仍在 HDFS 上，只是多了事务语义；不是替代 HDFS。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 背景：Hive 默认『只追加、无行级更新』；业务需要修正数据时（如删错数据、流式更新），用 **ACID 事务表**。\n2. 前提条件：① 存储格式必须 ORC；② 设置 `'transactional'='true'`（Hive 2.x 还需开启 hive.support.concurrency 等配置并分桶，3.x 起默认支持事务）。\n3. 底层机制：更新/删除不直接改原文件，而是写 **delta 增量文件**，由事务 ID 管理版本，读时合并——所以有额外 IO 开销。\n4. 支持操作：UPDATE / DELETE / MERGE（根据主键合并），配合流式写入（Streaming API）做近实时更新。\n5. 排除：非 ORC 不行、无额外开销是误解、不替代 HDFS。\n6. 选 A。\n**延伸**：数仓绝大多数场景仍是『分区覆盖重写』，ACID 表只用于确有行级更新需求的场景，面试要能说出『什么时候才用 ACID 表』。",
+          "enterprise_tip": "生产常见用法：Kafka 流式数据用 Hive Streaming 写 ACID 表做近实时更新；面试题『Hive 怎么支持 update/delete』→ ORC + transactional + MERGE/UPDATE，并说明代价是 delta 文件合并开销。"
+        },
+        {
+          "task_id": "s05c07t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：Hive 与 HBase 集成",
+          "question": "关于 **Hive 与 HBase 的集成**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "可以创建映射 HBase 表的外部表，用 Hive SQL 查询/写入 HBase 数据，把 HBase 的实时随机读写能力与 Hive 的 SQL 分析结合起来",
+              "correct": true,
+              "explain": "正确。Hive 通过 HBaseStorageHandler 建外部表映射 HBase 表，SQL 背后读写 HBase。"
+            },
+            {
+              "text": "集成后 Hive 表的数据会自动同步到 HBase",
+              "correct": false,
+              "explain": "没有自动同步：需要手动创建映射表（Hive 表 ↔ HBase 表），两边数据是同一份，不是复制。"
+            },
+            {
+              "text": "HBase 表只能在 Hive 里创建，不能在 HBase 原生客户端创建",
+              "correct": false,
+              "explain": "HBase 表由 HBase 管理（原生 API/Shell 创建），Hive 只是建映射视图。"
+            },
+            {
+              "text": "集成后 Hive 查询延迟降到与 MySQL 相同",
+              "correct": false,
+              "explain": "Hive 层仍是批量 SQL 执行，延迟远高于 MySQL；HBase 负责实时随机读写，Hive 负责离线批量分析。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 两者的定位：**HBase** 是 NoSQL 列族数据库，按 RowKey 随机读写、实时性好；**Hive** 是 SQL 数仓工具，批量分析强。集成 = 用 Hive SQL 操作 HBase 表。\n2. 实现：建外部表时用 `STORED BY 'org.apache.hadoop.hive.hbase.HBaseStorageHandler'` 并指定 HBase 表名/列族映射，数据仍是 HBase 里那一份，**不复制**。\n3. 典型场景：明细数据实时写 HBase 支持点查（按 RowKey 秒回），同时建 Hive 映射表跑批量聚合分析。\n4. 排除：无自动同步、HBase 表归属 HBase、延迟不可能到 MySQL 级别。\n5. 选 A。\n**易错点**：把『映射』理解成『同步复制』——Hive 映射表与 HBase 表是同一份数据的两个视图。",
+          "enterprise_tip": "经典架构『明细入 HBase + Hive 映射做分析』现在多被 Doris/ClickHouse 等替代，但面试仍常问『Hive 怎么查 HBase 数据』——答 HBaseStorageHandler 外部表映射即可。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "一条 Hive SQL 的执行链路？",
+          "a": "解析成 AST（语法检查）→ 查 Metastore 语义分析（校验表/字段）→ 逻辑计划（谓词下推/列裁剪/分区裁剪）→ 物理计划（MR/Tez/Spark 任务）→ 提交 YARN 执行 → 汇总返回。"
+        },
+        {
+          "q": "分区裁剪的底层原理？",
+          "a": "分区表在 HDFS 上是目录嵌套（dt=xxx/），WHERE 带分区字段时编译器在逻辑优化阶段就把扫描范围缩到对应目录；不写分区条件 = 全表扫描。"
+        },
+        {
+          "q": "为什么列式存储压缩率高、查询快？",
+          "a": "同列同类型数据连续存放、冗余度高（字典/RLE 压缩效果好）；列裁剪只读需要的列；min/max 统计信息支持谓词下推跳过无关数据块。"
+        },
+        {
+          "q": "数据倾斜的底层原理？",
+          "a": "shuffle 按 hash(key) 固定分区，key 分布不均导致热点 key 全压在同一 reducer，作业时间 = 最慢 reducer 的时间；解法是打散/预聚合/广播。"
+        },
+        {
+          "q": "动态分区的底层原理？",
+          "a": "执行时读取 SELECT 结果里分区字段的实际取值，为每个取值自动创建 HDFS 目录并写入数据、登记 Metastore 分区记录；不限制数量会制造海量小文件。"
+        },
+        {
+          "q": "Hive ACID 事务表的条件与用途？",
+          "a": "条件：ORC 格式 + transactional=true（3.x 默认支持事务）。用途：需要 UPDATE/DELETE/MERGE 行级更新的场景；底层用 delta 文件 + 事务 ID，读时合并，有额外开销。"
+        },
+        {
+          "q": "Hive 怎么查询 HBase 的表？",
+          "a": "建 HBaseStorageHandler 外部表映射 HBase 表（指定表名与列族），用 Hive SQL 读写；数据是同一份不复制，HBase 负责随机读写、Hive 负责批量分析。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "AST（抽象语法树）",
+          "desc": "SQL 解析阶段的产物，用于语法检查。"
+        },
+        {
+          "term": "语义分析",
+          "desc": "查 Metastore 校验表/字段/类型并生成语义树的阶段。"
+        },
+        {
+          "term": "逻辑计划",
+          "desc": "经过谓词下推、列裁剪、分区裁剪优化的算子树。"
+        },
+        {
+          "term": "物理计划",
+          "desc": "逻辑计划翻译成的 Map/Reduce/Tez/Spark 任务链。"
+        },
+        {
+          "term": "Metastore",
+          "desc": "用 MySQL 存元数据（DBS/TBLS/COLUMNS_V2/PARTITIONS/SDS）的服务。"
+        },
+        {
+          "term": "分区裁剪（Partition Pruning）",
+          "desc": "WHERE 带分区字段时只扫对应目录的编译期优化。"
+        },
+        {
+          "term": "谓词下推（Predicate Pushdown）",
+          "desc": "把过滤条件下推到扫描阶段，利用 min/max 统计信息跳过无关数据块。"
+        },
+        {
+          "term": "数据倾斜（Data Skew）",
+          "desc": "key 分布不均导致个别 reducer 过载，拖慢整个作业的现象。"
+        },
+        {
+          "term": "ACID 事务表",
+          "desc": "ORC + transactional 的 Hive 表，支持 UPDATE/DELETE/MERGE。"
+        },
+        {
+          "term": "HBaseStorageHandler",
+          "desc": "Hive 集成 HBase 的存储处理器，用于建 HBase 映射外部表。"
+        }
+      ],
+      "kps": [
+        "一条 Hive SQL 的执行链路（解析→语义分析→逻辑计划→物理计划→YARN 执行）",
+        "Metastore 底层（MySQL 元数据表、HiveServer2 会话）",
+        "列式存储底层（按列存、min/max 统计信息、谓词下推、高压缩原因）",
+        "分区裁剪原理（分区=目录、跳过无关目录）",
+        "ORC 全称与列统计信息（Optimized Row Columnar）",
+        "数据倾斜原理（key 分布不均 → 单 reducer 过载）",
+        "动态分区原理（分区值来自 SELECT 结果、自动建目录）",
+        "ACID 事务表（transactional=true，update/delete/merge）",
+        "Hive 与 HBase 集成（外部表映射 HBase 表）"
+      ]
+    },
+    {
+      "chapter_id": "s05c08",
+      "title": "5.8 OLAP 查询引擎：Trino / ClickHouse / Doris",
+      "goal": "理解 OLAP 引擎的定位，掌握 Trino 联邦查询、ClickHouse 列式向量化、Doris MPP 实时数仓的特点与选型",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**为什么需要 OLAP 引擎？**\n\nHive/Spark 是离线批处理的代表：一条 SQL 翻译成分布式任务，秒到分钟级延迟，适合凌晨批量加工。但业务侧还有几类『等不起』的需求：\n- **即席查询**：分析师临时看数，希望输入 SQL 后几秒出结果；\n- **实时报表/大屏**：运营盯着屏幕看指标，每几秒刷新一次；\n- **高并发点查**：前台页面按用户 ID 秒级查明细。\n\nHive 的延迟（秒~分钟）和并发能力扛不住这些场景，于是诞生了一类专门引擎：**OLAP（联机分析处理）查询引擎**——牺牲一部分批处理能力，把『查询』做到极致快（秒级返回）。与之对应的是 **OLTP（联机事务处理）**：面向在线交易的行级读写，如 MySQL，与 OLAP 的分析场景正好互补。"
+        },
+        {
+          "type": "text",
+          "content": "**Trino（前身 Presto）——无存储的分布式 SQL 查询引擎**\n\nTrino 的核心定位一句话：**不存数据、纯查询**。它自己不管理任何数据，靠各种 **Connector** 连接外部数据源：Hive、HBase、MySQL、PostgreSQL、对象存储（OSS/S3）、ClickHouse 等。\n\n- 一条 SQL 可以**同时查询多个数据源再关联**，这就是**联邦查询（Federated Query）**——比如 Hive 里的用户表和 MySQL 里的订单表直接 JOIN；\n- 查询被拆成分布式任务，数据以**内存管道**方式流转（不落盘），秒级返回；\n- 与 Hive 的本质区别：**Hive 是数仓工具**（管理元数据、做批量加工、负责 ETL），**Trino 是查询引擎**（不管理数据、不做加工，只负责把查询跑得快）。\n\n面试高频题『Trino 和 Hive 有什么区别』就答：存储、加工、延迟、定位四个维度。"
+        },
+        {
+          "type": "text",
+          "content": "**ClickHouse——单机性能怪兽**\n\nClickHouse 是俄罗斯 Yandex 开源的**列式分析数据库**，以『**单机性能怪兽**』著称：一台普通服务器就能支撑每秒几十亿行的扫描吞吐。快的原因三板斧：\n1. **列式存储**：查询只读需要的列，IO 大幅减少；\n2. **向量化执行**：按批次批量处理数据（一次处理一批行），而不是逐行解释执行，CPU 效率极高；\n3. **极致压缩**：列内同类型数据聚集，压缩比高，读盘字节少。\n\n适合：单表大宽表的聚合分析、明细查询、大屏实时指标。短板也要清楚：**join 能力弱、update/delete 弱**（MergeTree 系列引擎为主），分布式集群能力不如 MPP 架构完善。"
+        },
+        {
+          "type": "text",
+          "content": "**Apache Doris——MPP 实时数仓**\n\nDoris 是百度开源、Apache 顶级项目的 **MPP（大规模并行处理）分析型数据库**：数据分片存储在多台节点上并行计算，支持 **MySQL 协议**（MySQL 客户端/工具直接连）。\n\n核心卖点：**实时与离线统一**——既支持实时导入（Routine Load 直接消费 Kafka），又支持批量导入，一张表同时服务实时报表与离线分析，简化了『Lambda 架构』要维护两套链路的痛苦。\n\n**StarRocks 是 Doris 的同源分支**（早期 fork），理念与架构类似，也是目前主流的 MPP 实时数仓。适合：高并发点查（用户明细）、实时报表、用户行为分析、大促大屏。"
+        },
+        {
+          "type": "text",
+          "content": "**与 Hive/Spark 对比与选型（面试常问）**\n\n| 引擎 | 定位 | 延迟 | 并发 | 是否存储 |\n|---|---|---|---|---|\n| Hive / Spark SQL | 离线批量加工 | 秒~分钟 | 低 | 是（HDFS） |\n| Trino | 即席/联邦查询 | 秒级 | 中 | 否（纯查询） |\n| ClickHouse | 单表极速分析 | 毫秒~秒 | 中高 | 是 |\n| Doris / StarRocks | MPP 实时数仓 | 毫秒~秒 | 高 | 是 |\n\n选型口诀：**批量加工用 Hive/Spark；分析师即席查询用 Trino；实时大屏/报表用 ClickHouse；高并发点查/实时数仓用 Doris**。面试问『你们数仓的 OLAP 引擎怎么选』就按这个框架答。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "-- 用 Trino 查 Hive 表的完整流程示例\n\n-- 1. 配置 Hive Connector（etc/catalog/hive.properties）\n--    connector.name=hive\n--    hive.metastore.uri=thrift://metastore-host:9083\n\n-- 2. 启动 Trino CLI，用三段式 catalog.schema.表名 引用 Hive 表\n--    hive 是 catalog 名（对应 Hive Connector），default 是 Hive 里的库名\nSELECT order_date, SUM(amount) AS gmv\nFROM hive.default.dws_order_daily\nWHERE order_date >= '2024-01-01'\nGROUP BY order_date;\n\n-- 3. 联邦查询：一条 SQL 同时查 Hive 与 MySQL 并关联\nSELECT h.user_id, u.user_name\nFROM hive.default.dwd_user h\nJOIN mysql.biz.user_info u ON h.user_id = u.user_id;\n\n-- 说明：Trino 只负责计算与调度，数据仍在 Hive/MySQL 里，不搬移、不复制",
+          "caption": "Trino 查询 Hive 表与联邦查询示例"
+        },
+        {
+          "type": "warning",
+          "content": "**易错点/常见误区**：\n- Trino **无存储**：它的『表』都是外部数据源的映射，不是它自己存的；\n- ClickHouse 是**数据库**（有存储），Trino 不是数据库——别把两者混为一谈；\n- Doris/StarRocks 是**存储 + 计算一体**，适合自建实时数仓；\n- ClickHouse 的 join/高并发点查能力弱于 Doris，选型要看场景，不是越新越好。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- 面试必问：① Trino 和 Hive 什么关系/区别？② ClickHouse 为什么快？③ OLAP 引擎怎么选型？④ OLTP 和 OLAP 的区别？\n- 生产实践：大多数公司的标准架构是『Hive/Spark 批量加工 → 结果表落 ClickHouse/Doris → 报表/大屏秒查』；Trino 用于分析师即席查询与跨源联邦查询，不承担日常高并发。\n- **岗位要求**：能根据数据量、并发、时效、成本给出一套 OLAP 选型方案，是数仓高级岗的加分项。\n- **常见坑**：把 Trino 当数仓用（它不做加工）；把 ClickHouse 当万能数据库（join 弱）；所有报表都压在一个 OLAP 集群（不按并发分层）。"
+        }
+      ],
+      "hands_on": "1. 打开 Trino 官网阅读 Hive Connector 文档，写下配置的三个关键点（connector.name / metastore.uri / catalog 命名）。\n2. 用纸笔画两条链路：『Hive 批量加工 → ClickHouse/Doris → 报表大屏』与『分析师 → Trino 联邦查询』，标注各自的延迟量级。\n3. 查资料对比 ClickHouse 的 MergeTree 与 Doris 的明细模型，各记 2 个特点。\n4. 思考题：Trino 自己不存数据，为什么还能秒级查询 PB 级 Hive 数据？写一段你的理解。",
+      "tasks": [
+        {
+          "task_id": "s05c08t01",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Trino 与 Hive 的区别",
+          "question": "关于 **Trino** 与 **Hive** 的区别，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Hive 是数仓工具（管理元数据、做批量加工）；Trino 是无存储的分布式 SQL 查询引擎（不管理数据、只查询，靠 Connector 连各种数据源）",
+              "correct": true,
+              "explain": "正确。Hive 负责『加工』，Trino 负责『查询』，这是两者定位的本质区别。"
+            },
+            {
+              "text": "Trino 会把自己的查询结果永久存储在 HDFS 上",
+              "correct": false,
+              "explain": "Trino 无存储，查询结果直接返回客户端，不落盘持久化。"
+            },
+            {
+              "text": "Hive 只能查询 Hive 自身的数据，Trino 只能查询 MySQL",
+              "correct": false,
+              "explain": "Hive 查 HDFS 上的数据；Trino 能连 Hive/HBase/MySQL/对象存储等多个数据源。"
+            },
+            {
+              "text": "Trino 可以替代 Hive 做数据加工（ETL 写回）",
+              "correct": false,
+              "explain": "Trino 定位是查询引擎，不擅长批量加工；加工仍是 Hive/Spark 的职责。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 定位对比：Hive = 数仓工具（SQL on Hadoop，管元数据、做批量加工）；Trino = 分布式 SQL 查询引擎（不存数据、不加工）。\n2. Trino 的架构：通过 Connector 连接外部数据源（Hive/HBase/MySQL/对象存储等），查询时把任务拆到多节点并行执行，数据内存管道流转。\n3. 典型配合：Hive 把数据加工好，Trino 负责把『查』做得快；两者不是替代关系。\n4. 排除：Trino 不落盘存储结果、能连多数据源、不做 ETL 加工。\n5. 选 A。\n**延伸**：面试答『Trino 和 Hive 区别』从存储（无 vs 有）、加工（不做 vs 做）、延迟（秒级 vs 秒~分钟）、定位（查询引擎 vs 数仓）四维展开。",
+          "enterprise_tip": "企业常见分工：Hive/Spark 凌晨批量加工 → 结果表让 Trino 秒查；Trino 承担分析师即席查询与联邦查询，属于『查询加速层』而非『加工层』。"
+        },
+        {
+          "task_id": "s05c08t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：ClickHouse 快的核心原因",
+          "question": "ClickHouse 能以单机支撑每秒几十亿行的扫描吞吐，其**核心原因**是？",
+          "options": [
+            {
+              "text": "列式存储 + 向量化执行 + 高压缩：只读需要的列、按批次批量处理数据、读盘字节少，三者叠加把扫描性能推到极致",
+              "correct": true,
+              "explain": "正确。列存省 IO、向量化省 CPU、压缩再省 IO，是 ClickHouse 快三板斧。"
+            },
+            {
+              "text": "它把数据全部缓存在内存中，从不读磁盘",
+              "correct": false,
+              "explain": "数据持久化在磁盘，列式 + 压缩让读盘字节少，而不是不读盘。"
+            },
+            {
+              "text": "它用了比 MySQL 快一万倍的索引算法",
+              "correct": false,
+              "explain": "没有所谓『快一万倍』的索引；快来自列存 + 向量化 + 压缩的架构设计。"
+            },
+            {
+              "text": "它牺牲了查询准确性换取速度",
+              "correct": false,
+              "explain": "结果完全准确，快来自架构优化而非牺牲正确性。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 拆解『快』的来源，三层叠加：\n   - **列式存储**：查询几列只读几列，IO 少；\n   - **向量化执行**：按批次（一批行）批量计算，减少逐行解释与函数调用开销，CPU 效率高；\n   - **高压缩**：列内同类型数据聚集，压缩比高，磁盘读入的数据量小。\n2. 类比：Hive 的 ORC + 向量化也是同一思路，ClickHouse 把它做到极致并去掉分布式调度开销。\n3. 排除：不靠全内存缓存、没有魔法索引、不牺牲准确性。\n4. 选 A。\n**延伸**：ClickHouse 适合『单表大宽表聚合分析』；join/update 能力弱是它的代价，选型要看场景。",
+          "enterprise_tip": "面试题『ClickHouse 为什么快』标准答案：列式存储 + 向量化执行 + 高压缩 + 稀疏索引；能补一句『单表分析强、join 弱』体现你了解它的边界。"
+        },
+        {
+          "task_id": "s05c08t03",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：ClickHouse 的执行方式",
+          "question": "ClickHouse 查询快的一个关键原因是采用____执行：按批次批量处理一批数据，而不是逐行解释执行，配合列式存储把扫描性能推到极致（填两个字，中文）。",
+          "answer": [
+            "向量化",
+            "向量化执行",
+            "vectorized",
+            "Vectorized",
+            "向量"
+          ],
+          "hint": "与『逐行』相对，把一批数据当作一个整体批量计算，类似 CPU 的 SIMD 思想。",
+          "analysis": "**标准解题思路**\n1. 传统执行器逐行处理：每行都要做类型判断、函数调用、循环分支，CPU 大量时间浪费在解释开销上。\n2. 向量化执行：一次处理**一批**数据（例如一批行/一列向量），批量调用底层指令（类似 SIMD 单指令多数据），循环与分支开销被摊薄，CPU 利用率大幅提升。\n3. 与列式存储天然契合：列存把同类型数据连续存放，正好适合批量向量运算。\n4. 填『向量化』（vectorized 也算对）。\n**延伸**：Spark 的 Tungsten、Hive 的向量化查询（hive.vectorized.execution.enabled）也是同一思想——批处理取代逐行解释。",
+          "enterprise_tip": "面试题『向量化执行和普通执行的区别』：普通执行逐行解释、函数调用开销大；向量化按批处理、批量运算，CPU 效率高；ClickHouse/Spark/Hive 都在用这个思想。"
+        },
+        {
+          "task_id": "s05c08t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Doris 适用场景",
+          "question": "以下哪个场景**最适合**使用 Apache Doris？",
+          "options": [
+            {
+              "text": "实时报表 + 高并发点查 + 实时离线统一：Kafka 实时导入、MySQL 协议直连、按用户 ID 秒级点查",
+              "correct": true,
+              "explain": "正确。Doris 的 MPP 架构 + 实时离线统一 + 高并发能力正好覆盖这个场景。"
+            },
+            {
+              "text": "凌晨对 10 亿行日志做批量 ETL 加工",
+              "correct": false,
+              "explain": "批量加工是 Hive/Spark 的职责，Doris 定位是查询服务而非 ETL 加工。"
+            },
+            {
+              "text": "银行核心交易系统的行级事务",
+              "correct": false,
+              "explain": "行级事务是 OLTP 数据库（MySQL/PG）的领域，Doris 是分析型数据库。"
+            },
+            {
+              "text": "跨 Hive、MySQL、对象存储的联邦查询",
+              "correct": false,
+              "explain": "联邦查询是 Trino 的强项，Doris 主要分析自己存储的数据。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Doris 的定位：MPP 分析型数据库，主打**实时与离线统一**（Routine Load 接 Kafka 实时导入 + 批量导入）、**MySQL 协议**（低接入成本）、**高并发**（大宽表点查）。\n2. 典型场景：实时报表、大屏、用户行为分析、高并发点查（按 key 查明细）。\n3. 排除：批量 ETL 加工（Hive/Spark）、行级事务（OLTP）、跨源联邦查询（Trino）。\n4. 选 A。\n**延伸**：StarRocks 是 Doris 同源分支，理念类似；选型时两者常互为备选。",
+          "enterprise_tip": "面试题『实时数仓怎么搭』：Kafka → Flink 清洗 → 写 Doris（Routine Load/Stream Load）→ 报表/大屏/点查直连 Doris，MySQL 协议让 BI 工具零改造接入——这是当前最主流架构之一。"
+        },
+        {
+          "task_id": "s05c08t05",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：OLAP 与 OLTP 的区别",
+          "question": "关于 **OLAP 与 OLTP** 的区别，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "OLTP 面向在线事务（行级读写、低延迟小事务，如 MySQL）；OLAP 面向分析（批量扫描聚合、海量数据秒级查询，如 ClickHouse/Doris/Trino）",
+              "correct": true,
+              "explain": "正确。OLTP 点查更新、OLAP 扫描聚合，是两个维度的互补场景。"
+            },
+            {
+              "text": "OLAP 和 OLTP 都要求毫秒级行级更新",
+              "correct": false,
+              "explain": "毫秒级行级更新是 OLTP 的要求；OLAP 是批量扫描分析，不做行级更新。"
+            },
+            {
+              "text": "OLTP 数据库适合存放全量历史数据做聚合分析",
+              "correct": false,
+              "explain": "海量数据聚合分析是 OLAP 的领域，OLTP 库存业务明细，分析要同步到 OLAP 引擎。"
+            },
+            {
+              "text": "OLAP 引擎（如 ClickHouse）可以完全替代 OLTP 数据库",
+              "correct": false,
+              "explain": "两者场景互补：OLTP 管事务、OLAP 管分析，不存在替代关系。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 两个概念的对比维度：\n   - **OLTP**（联机事务处理）：在线交易，行级读写、事务强一致、低延迟小事务——代表 MySQL/PG；\n   - **OLAP**（联机分析处理）：分析决策，批量扫描 + 聚合、海量数据、秒级返回——代表 ClickHouse/Doris/Trino；\n2. 存储形态：OLTP 行存（取整行）、OLAP 列存（按列分析）。\n3. 关系：数仓把业务库数据同步到 OLAP 引擎做分析，互补而非替代。\n4. 排除：OLAP 不做行级更新、OLTP 不适合全量聚合分析、不能相互替代。\n5. 选 A。\n**记忆口诀**：**OLTP 管交易（点查更新），OLAP 管分析（扫描聚合）**。",
+          "enterprise_tip": "面试题『OLTP 和 OLAP 的区别』按场景/存储/延迟/操作类型四维答；再补一句『数仓 = 业务库数据 → 同步 → OLAP 分析』体现架构理解。"
+        },
+        {
+          "task_id": "s05c08t06",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：用 Trino 查 Hive 表的流程",
+          "question": "把『用 Trino 查询 Hive 表』的完整流程按正确顺序排列。",
+          "steps": [
+            "编写 SELECT SQL，用 hive.default.表名 三段式引用 Hive 中的表",
+            "Trino 分布式引擎把查询拆成任务，通过 Hive Connector 从 HDFS 拉取数据并行计算",
+            "在 Trino 的 etc/catalog 下配置 Hive Connector，指向 Hive Metastore 地址",
+            "结果汇总后返回客户端展示",
+            "启动 Trino 集群并进入 CLI，确认 hive catalog 可正常访问"
+          ],
+          "correct_order": [
+            2,
+            4,
+            0,
+            1,
+            3
+          ],
+          "order_explain": "流程：配置 Hive Connector（告诉 Trino Metastore 在哪）→ 启动集群并验证 catalog 可用 → 写三段式 SQL 引用表 → Trino 拆任务经 Connector 拉 Hive 数据并行计算 → 结果返回。核心：数据不动，Trino 只负责『查』。",
+          "analysis": "**标准解题思路**\n1. **配置 Connector**：在 Trino 的 etc/catalog/hive.properties 里配置 connector.name=hive 和 hive.metastore.uri（指向 Hive 的 Metastore），Trino 才知道去哪里读表结构。\n2. **启动验证**：启动 Trino 集群（Coordinator + Worker）并进入 CLI，执行 SHOW CATALOGS 确认 hive catalog 正常。\n3. **写 SQL**：用三段式 catalog.schema.表名（如 hive.default.dws_order_daily）引用 Hive 表，写 SELECT。\n4. **执行**：Trino 把查询拆成分布式任务，Worker 通过 Hive Connector 从 HDFS 拉数据（利用 Hive 的元数据与存储格式）并行计算，数据内存管道流转。\n5. **返回**：结果汇总到 Coordinator，返回 CLI/客户端展示。\n**易错点**：漏配 Metastore 地址（Trino 读不到表结构）；三段式库名写错；把 Trino 当成会复制数据的工具。\n**记忆**：配 Connector → 验证 → 写 SQL → 并行查 → 返回。",
+          "enterprise_tip": "面试题『Trino 查 Hive 数据要配什么』：Hive Connector + hive.metastore.uri；强调『Trino 不搬数据，只通过 Connector 读』，数据在 HDFS 原位置。"
+        },
+        {
+          "task_id": "s05c08t07",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：联邦查询概念",
+          "question": "Trino 可以在一条 SQL 中同时查询 Hive、MySQL、对象存储等多个数据源并做关联，这种跨数据源的统一查询能力叫____查询（中文两个字，英文为 federated query）。",
+          "answer": [
+            "联邦",
+            "联邦查询",
+            "federated",
+            "Federated",
+            "federated query"
+          ],
+          "hint": "先回忆 Trino 的核心能力：一条 SQL 同时查多个数据源并关联，这种查询叫什么？",
+          "analysis": "**标准解题思路**\n1. 联邦查询（Federated Query）：一条 SQL 跨越**多个异构数据源**查询并关联，数据源各自存储，查询层统一。\n2. Trino 的实现：每个数据源配一个 catalog（hive、mysql、oss...），SQL 里用 catalog.schema.表名 直接引用，引擎自动跨源拉取与 join。\n3. 价值：不用把数据先搬到一个地方再分析，省去同步成本，适合『数据分布在不同系统、临时关联分析』。\n4. 填『联邦』（federated 也算对）。\n**易错点**：联邦查询 ≠ 数据同步——数据不搬移，只是查询时跨源读取。",
+          "enterprise_tip": "面试题『联邦查询解决什么问题』：多源数据（Hive + MySQL + 对象存储）无需搬移即可一条 SQL 关联，省同步成本、分析快；代价是跨源 join 性能受限于最慢的数据源。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "OLAP 和 OLTP 的区别？",
+          "a": "OLTP 面向在线事务：行级读写、低延迟小事务（MySQL 代表）；OLAP 面向分析：批量扫描聚合、海量数据秒级查询（ClickHouse/Doris/Trino 代表）。OLTP 管交易、OLAP 管分析，互补不替代。"
+        },
+        {
+          "q": "Trino 和 Hive 的区别？",
+          "a": "Hive 是数仓工具（管元数据、做批量加工）；Trino 是无存储的分布式 SQL 查询引擎（不管理数据、只查询，靠 Connector 连各种数据源，支持联邦查询）。"
+        },
+        {
+          "q": "ClickHouse 为什么快？",
+          "a": "列式存储（只读需要的列）+ 向量化执行（按批处理数据）+ 高压缩（读盘字节少）+ 稀疏索引，把单机扫描吞吐推到极致；短板是 join 与 update/delete 能力弱。"
+        },
+        {
+          "q": "Doris 和 StarRocks 什么关系？",
+          "a": "StarRocks 是 Doris 的同源分支（早期 fork），都是 MPP 分析型数据库，主打实时与离线统一、MySQL 协议、高并发查询。"
+        },
+        {
+          "q": "OLAP 引擎怎么选型？",
+          "a": "批量加工用 Hive/Spark；分析师即席/联邦查询用 Trino；实时大屏与报表用 ClickHouse；高并发点查与实时数仓用 Doris/StarRocks。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "OLAP",
+          "desc": "联机分析处理，面向批量扫描聚合的分析查询场景。"
+        },
+        {
+          "term": "OLTP",
+          "desc": "联机事务处理，面向在线交易的行级读写场景。"
+        },
+        {
+          "term": "Trino",
+          "desc": "无存储的分布式 SQL 查询引擎（前身 Presto），支持联邦查询。"
+        },
+        {
+          "term": "ClickHouse",
+          "desc": "列式分析数据库，以列存 + 向量化 + 压缩的单机高性能著称。"
+        },
+        {
+          "term": "Apache Doris",
+          "desc": "MPP 分析型数据库，实时离线统一、支持 MySQL 协议、高并发查询。"
+        },
+        {
+          "term": "StarRocks",
+          "desc": "Doris 的同源分支，MPP 实时数仓。"
+        },
+        {
+          "term": "联邦查询",
+          "desc": "一条 SQL 查询多个异构数据源并关联的能力。"
+        },
+        {
+          "term": "向量化执行",
+          "desc": "按批次批量处理数据而非逐行解释执行，CPU 效率高。"
+        }
+      ],
+      "kps": [
+        "为什么需要 OLAP 引擎（即席查询秒级返回）",
+        "Trino 与 Hive 的区别（无存储、纯查询、Connector 多数据源）",
+        "ClickHouse 快的核心原因（列式 + 向量化 + 压缩）",
+        "ClickHouse 单机性能特点与短板（join/update 弱）",
+        "Apache Doris：MPP、实时与离线统一、StarRocks 同源",
+        "OLAP vs OLTP 的区别",
+        "用 Trino 查 Hive 表的流程（Connector → 三段式 SQL → 并行执行）",
+        "联邦查询（Federated Query）概念"
+      ]
+    }
+  ]
+}

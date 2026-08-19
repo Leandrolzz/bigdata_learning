@@ -1,0 +1,2923 @@
+{
+  "stage_id": "s04_hadoop",
+  "title": "阶段 4：Hadoop 生态（HDFS/MapReduce/YARN）",
+  "subtitle": "分布式存储与计算的基石",
+  "emoji": "🐘",
+  "estimated_days": 16,
+  "learning_goal": "理解大数据 4V 特征与分布式思想，掌握 HDFS 存储原理、MapReduce 计算模型与 YARN 资源调度，了解集群部署与高可用方案，建立分布式系统的完整认知。",
+  "chapters": [
+    {
+      "chapter_id": "s04c01",
+      "title": "4.1 大数据概述与 Hadoop 生态全景",
+      "goal": "理解 4V 特征、分布式思想与 Hadoop 生态组件地图，了解 Hadoop 发展历史",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "说到大数据，先记住一个公式：**数据量大到单台机器处理不了，就需要分布式技术，而这一整套技术的集大成者就是 Hadoop 生态**。业界用 **4V** 来概括大数据特征：\n\n- **Volume（大量）**：数据规模巨大，从 GB 到 TB、PB 甚至 EB 级。一家中型电商每天产生的行为日志就有几十 TB。\n- **Velocity（高速）**：数据产生和处理速度快，例如双 11 每秒产生数百万条订单。\n- **Variety（多样）**：数据类型多样，结构化（关系表）、半结构化（JSON/日志）、非结构化（图片/视频）并存。\n- **Value（价值）**：海量数据中真正有价值的信息密度低，需要靠分析挖掘提炼价值。\n\n所以「大数据」不只是「数据大」，而是**数据规模、速度、多样性带来的处理挑战**，以及「从海量数据中挖出价值」的诉求。"
+        },
+        {
+          "type": "text",
+          "content": "单台机器性能再强也有天花板（内存、磁盘、CPU 都有限），而且贵。**分布式**的核心思想是「分而治之」：\n\n- **横向扩展（Scale Out）**：多台普通机器组成集群，共同存储、共同计算——这是大数据的主流路线。\n- **纵向扩展（Scale Up）**：换更强的单机，成本高且有上限。\n\n以存数据为例：一个 100TB 的文件，单机装不下，那就**切成小块分到 100 台机器上**，每台只存 1TB，这就是 HDFS 做的事情；算数据也一样，把任务拆成很多小任务**并行跑**，这就是 MapReduce/Spark 做的事情。\n\n分布式的代价是**复杂度**：机器会坏、网络会断、数据可能不一致——所以 Hadoop 生态里大量机制（副本、心跳、容错、协调）都是在对抗「不可靠的硬件」。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "Hadoop 生态组件地图（按功能分层）：\n\n┌─────────────────────────────────────────────────────┐\n│  应用层：Hive（SQL 数仓） HBase（NoSQL） Spark Flink    │\n├─────────────────────────────────────────────────────┤\n│  计算层：MapReduce    Tez    Spark    Flink            │\n├─────────────────────────────────────────────────────┤\n│  调度层：YARN（资源管理）                               │\n├─────────────────────────────────────────────────────┤\n│  存储层：HDFS（分布式文件系统）                         │\n├─────────────────────────────────────────────────────┤\n│  协调层：ZooKeeper（分布式协调）                       │\n└─────────────────────────────────────────────────────┘\n\n核心组件一句话：\n- HDFS      分布式文件存储，把大文件切块多副本存放\n- YARN      资源调度器，负责给计算任务分配 CPU/内存\n- MapReduce 第一批分布式计算框架，分而治之地跑批任务\n- Hive      SQL on Hadoop，把 SQL 翻译成 MapReduce/Tez/Spark 任务\n- HBase     海量数据的随机读写 NoSQL 数据库\n- ZooKeeper 分布式协调服务，选主、配置管理\n- Spark     内存计算框架，比 MapReduce 快很多\n- Flink     流式计算框架，处理实时数据",
+          "caption": "生态全景：底层存储 + 上层调度 + 多种计算引擎，各司其职"
+        },
+        {
+          "type": "text",
+          "content": "Hadoop 的故事从搜索引擎开始：2002 年 Doug Cutting 开发开源搜索引擎 Nutch，但 Nutch 处理不了越来越大的网页数据。2003~2004 年 Google 相继发表 **GFS**（分布式文件系统）和 **MapReduce** 两篇论文，Doug Cutting 受其启发，把 Nutch 中的分布式文件系统与计算框架独立出来，2006 年命名为 **Hadoop**（他儿子的玩具大象名字）。\n\n之后的里程碑：\n- 2008 年 Hadoop 成为 Apache 顶级项目，同年 1000 节点集群跑完 1TB 排序只花 209 秒，破了世界纪录。\n- 2008 年 Yahoo 用 Hadoop 支撑搜索业务，标志着 Hadoop 进入大规模生产时代。\n- 随后 Hive（2008）、HBase（2008）、Spark（2010，源自 UC Berkeley AMPLab）、Flink（2014）等相继加入，形成完整生态。\n- 发行版：Apache 官方版、CDH（Cloudera）、HDP（Hortonworks，后与 CDH 合并为 CDP）等，企业常基于发行版部署。"
+        },
+        {
+          "type": "warning",
+          "content": "**别把 4V 背成口号**。面试官常问「你们项目里的大数据到底大在哪？」——要回答**具体数字**：多少台机器、每天多少条日志、单表多少亿行。另外注意 4V 里的 Value 说的是「价值密度低」，不是「没有价值」，挖数据的意义恰恰是把低密度价值提炼出来。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- **生产集群规模**：中小企业几台到几十台，大厂几千台。一台普通机器约 2~4TB 磁盘、128GB 内存，整个集群存储可达 PB 级。\n- **岗位要求**：大数据工程师岗位 JD 上几乎必写「熟悉 Hadoop 生态（HDFS/MapReduce/YARN/Hive）」。\n- **面试高频题**：① 什么是 4V？② 为什么不用一台超级服务器？③ Hadoop 和 Spark 什么关系？④ 你们公司数据量多大、用什么组件？\n- **常见坑**：把「Hadoop」和「Hive」「Spark」混为一谈——Hadoop 是生态总称，Hive/Spark 是其中的组件。"
+        }
+      ],
+      "hands_on": "1. 打开浏览器访问 Apache Hadoop 官网（hadoop.apache.org），找到「Project Structure」页面，把 HDFS、YARN、MapReduce 的图标和一句话简介抄到笔记本上。\n2. 用画图工具（或纸笔）画出「存储层-调度层-计算层-应用层」四层生态图，标出 HDFS/YARN/MapReduce/Hive/HBase/ZooKeeper/Spark/Flink 的位置。\n3. 搜索「电商 大数据 技术架构」相关文章，找出 3 个你认识的 Hadoop 生态组件在架构图中的位置，截图存档。",
+      "tasks": [
+        {
+          "task_id": "s04c01t01",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：哪个不是 4V 特征",
+          "question": "以下哪一项**不是**大数据的 4V 特征？",
+          "options": [
+            {
+              "text": "Volume（数据量大）",
+              "correct": false,
+              "explain": "Volume 是 4V 之一，指数据规模巨大。"
+            },
+            {
+              "text": "Variety（类型多样）",
+              "correct": false,
+              "explain": "Variety 是 4V 之一，指结构化/半结构化/非结构化数据并存。"
+            },
+            {
+              "text": "Velocity（处理高速）",
+              "correct": false,
+              "explain": "Velocity 是 4V 之一，指数据产生和处理速度快。"
+            },
+            {
+              "text": "Virtual（虚拟化）",
+              "correct": true,
+              "explain": "正确。4V 是 Volume/Velocity/Variety/Value，没有 Virtual。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 回忆 4V：Volume（大量）、Velocity（高速）、Variety（多样）、Value（价值密度低）。\n2. 逐一核对选项，Virtual（虚拟化）不在其中。\n3. 选 D。\n**延伸**：有的资料讲 5V（再加 Veracity 真实性），面试时说出 4V 即可，能补一句 Veracity 会加分。",
+          "enterprise_tip": "面试题「说说你对大数据的理解」：先答 4V，再用一个具体业务例子（如电商日志）把每个 V 落到数字上，比背定义更有说服力。"
+        },
+        {
+          "task_id": "s04c01t02",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "多选：Hadoop 生态核心组件",
+          "question": "以下哪些属于 Hadoop 生态的核心组件？（多选）",
+          "options": [
+            {
+              "text": "HDFS",
+              "correct": true,
+              "explain": "HDFS 是 Hadoop 的分布式文件系统，负责存储，属于核心组件。"
+            },
+            {
+              "text": "YARN",
+              "correct": true,
+              "explain": "YARN 是 Hadoop 的资源调度层，负责给计算任务分配资源，属于核心组件。"
+            },
+            {
+              "text": "Hive",
+              "correct": true,
+              "explain": "Hive 是基于 Hadoop 的 SQL 数仓组件，属于 Hadoop 生态。"
+            },
+            {
+              "text": "ZooKeeper",
+              "correct": true,
+              "explain": "ZooKeeper 是 Hadoop 生态的分布式协调组件（HA 选主、配置管理），属于核心组件。"
+            },
+            {
+              "text": "MySQL",
+              "correct": false,
+              "explain": "MySQL 是传统关系型数据库，不属于 Hadoop 生态（虽然 Hive 会用 MySQL 存元数据）。"
+            },
+            {
+              "text": "Redis",
+              "correct": false,
+              "explain": "Redis 是内存缓存数据库，不属于 Hadoop 生态。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Hadoop 生态按层回忆：存储（HDFS）+ 调度（YARN）+ 计算（MapReduce/Spark/Flink）+ 应用（Hive/HBase）+ 协调（ZooKeeper）。\n2. HDFS/YARN/Hive/ZooKeeper 都属于这个生态。\n3. MySQL 只是 Hive 元数据的存储介质，不是 Hadoop 组件；Redis 属于缓存中间件。\n4. 选前四项。\n**易错点**：Metastore 用 MySQL 存，容易让人误以为 MySQL 是 Hadoop 组件，注意区分「组件」和「外部依赖」。",
+          "enterprise_tip": "面试常考「画一画你们公司的 Hadoop 架构」：存储层 HDFS + 调度层 YARN + 计算层 Hive/Spark + 协调层 ZooKeeper，能画出并讲清每层职责就通过了。"
+        },
+        {
+          "task_id": "s04c01t03",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：处理 100TB 文件的标准流程",
+          "question": "一个 100TB 的日志文件需要处理，请把标准处理流程按正确顺序排列。",
+          "steps": [
+            "汇总各节点的中间结果，得到最终输出",
+            "根据 100TB 规模规划集群机器数量，进行横向扩展",
+            "将 100TB 文件切分成 128MB 的数据块，多副本存储到 HDFS 各节点",
+            "把计算任务分发到数据所在节点，就近并行计算",
+            "将最终结果写回 HDFS，供后续报表与分析使用"
+          ],
+          "correct_order": [
+            1,
+            2,
+            3,
+            0,
+            4
+          ],
+          "order_explain": "处理大数据遵循「先规划 → 再存储 → 后计算 → 汇总 → 落盘」的流水线：先根据数据规模规划集群（横向扩展），再把数据切块分布式存储到 HDFS（存储层），然后把计算任务下推到数据所在节点并行执行（移动计算而非移动数据），各节点中间结果汇总后得到最终输出，最后写回 HDFS 持久化。",
+          "analysis": "**标准解题思路**\n1. 第一步永远是**规划**：100TB 数据要估算节点数，例如每台机器可用 10TB，考虑 3 副本后约需 30+ 台机器——横向扩展是解决大数据的起点。\n2. 第二步**存储**：HDFS 把文件切成 128MB 块、每块 3 副本分散存放，保证容量和容错。\n3. 第三步**计算**：MapReduce 把任务下推到数据所在的 DataNode 上执行（数据本地性），避免把 100TB 数据搬到计算节点。\n4. 第四步**汇总**：各节点并行处理完的中间结果汇到一起，得到最终结果。\n5. 第五步**写回**：结果落回 HDFS，之后 Hive/报表才能读取分析。\n**记忆口诀**：规划 → 存储 → 计算 → 汇总 → 落盘。",
+          "enterprise_tip": "「移动计算而不是移动数据」是面试金句。生产上估算集群：总数据量 × 副本数 ÷ 单机可用容量 = 节点数；还要预留计算和调度余量。"
+        },
+        {
+          "task_id": "s04c01t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：4V 特征的情景判断",
+          "question": "某电商平台在「双 11」当天每秒产生数百万条订单数据，需要系统实时处理。这主要体现了大数据 4V 特征中的哪一项？",
+          "options": [
+            {
+              "text": "Volume（数据量大）",
+              "correct": false,
+              "explain": "Volume 强调的是数据「规模」巨大（TB/PB 级存量），而本题强调的是数据「产生和处理的速度」，属于 Velocity。"
+            },
+            {
+              "text": "Velocity（处理高速）",
+              "correct": true,
+              "explain": "正确。「每秒数百万条」描述的是数据产生与处理的速度，正是 Velocity（高速）特征。"
+            },
+            {
+              "text": "Variety（类型多样）",
+              "correct": false,
+              "explain": "Variety 指数据类型多样（结构化、半结构化、非结构化并存），与产生速度无关。"
+            },
+            {
+              "text": "Value（价值密度低）",
+              "correct": false,
+              "explain": "Value 指海量数据中真正有价值的信息密度低，与产生速度无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 抓关键词：「每秒数百万条」——描述的是**速度**。\n2. 4V 含义逐项对照：Volume=规模大、Velocity=速度快、Variety=类型多、Value=价值密度低。\n3. 「每秒产生数百万条」对应 Velocity（高速），选 B。\n**易错点**：看到「数据多」就选 Volume——Volume 讲的是存量规模（TB/PB 级），Velocity 讲的是产生/处理速率；双 11 场景两者都有，但题干突出的是「每秒」的速度。\n**延伸**：面试聊 4V 时用这个双 11 例子，把每个 V 落到具体数字，比干背定义更有说服力。",
+          "enterprise_tip": "面试题「你们平台的数据量大在哪」：用具体数字回答——每秒订单峰值多少、一天日志多少 TB、单表多少亿行，分别对应 Velocity 和 Volume，让面试官感受到你接触过真实数据。"
+        },
+        {
+          "task_id": "s04c01t05",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "多选：Hadoop 生态组件职责匹配",
+          "question": "以下关于 Hadoop 生态组件与其职责的描述，搭配**正确**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "HDFS —— 分布式文件系统，把大文件切块、多副本存储",
+              "correct": true,
+              "explain": "正确。HDFS 是存储层核心，负责把大文件切成 128MB 块并冗余存储。"
+            },
+            {
+              "text": "YARN —— 资源调度器，为计算任务分配 CPU 与内存",
+              "correct": true,
+              "explain": "正确。YARN 是调度层，负责管理集群计算资源。"
+            },
+            {
+              "text": "Hive —— 把 SQL 翻译成 MapReduce/Tez/Spark 任务执行",
+              "correct": true,
+              "explain": "正确。Hive 是 SQL on Hadoop 工具，本身不存储不计算。"
+            },
+            {
+              "text": "ZooKeeper —— 分布式协调服务，负责选主与配置管理",
+              "correct": true,
+              "explain": "正确。ZooKeeper 为 HA 选主、配置管理提供协调能力。"
+            },
+            {
+              "text": "MapReduce —— 海量数据的随机读写 NoSQL 数据库",
+              "correct": false,
+              "explain": "随机读写数据库是 HBase 的职责；MapReduce 是批处理计算框架，不是数据库。"
+            },
+            {
+              "text": "MySQL —— Hadoop 生态的分布式计算框架",
+              "correct": false,
+              "explain": "MySQL 是传统关系型数据库，只是 Hive 元数据的存储介质，不属于 Hadoop 组件。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 按生态分层记忆：存储层 HDFS → 调度层 YARN → 计算层 MapReduce/Spark/Flink → 应用层 Hive/HBase → 协调层 ZooKeeper。\n2. 逐项核对职责：HDFS 管存储、YARN 管资源、Hive 管 SQL 翻译、ZooKeeper 管协调——四项搭配均正确。\n3. 排除干扰项：MapReduce 是计算框架不是数据库（那是 HBase）；MySQL 是外部关系库，不算 Hadoop 组件。\n4. 选前四项。\n**易错点**：Metastore 用 MySQL 存元数据，容易误以为 MySQL 属于 Hadoop 生态——要区分「组件」和「外部依赖」。",
+          "enterprise_tip": "面试「画一下你们公司的大数据架构」：存储 HDFS + 调度 YARN + 计算 Hive/Spark + 协调 ZooKeeper，能分层讲清职责是过关的第一步。"
+        },
+        {
+          "task_id": "s04c01t06",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "多选：4V 特征的具体场景判断",
+          "question": "以下是几个真实业务场景，请选出「**场景描述与其体现的 4V 特征**」搭配**正确**的选项。（多选）",
+          "options": [
+            {
+              "text": "电商平台每天新增 50TB 行为日志，需要分布式存储 → Volume（大量）",
+              "correct": true,
+              "explain": "正确。数据规模巨大（TB/PB 级存量）是 Volume 的典型体现。"
+            },
+            {
+              "text": "双 11 零点每秒产生数百万条订单，系统需实时处理 → Velocity（高速）",
+              "correct": true,
+              "explain": "正确。「每秒」描述的是数据产生与处理的速度，正是 Velocity。"
+            },
+            {
+              "text": "日志中既有关系型表格、JSON 半结构化数据，也有图片视频 → Variety（多样）",
+              "correct": true,
+              "explain": "正确。结构化/半结构化/非结构化并存体现 Variety（多样）。"
+            },
+            {
+              "text": "百万条日志里真正有效的异常告警只有几十条 → Value（价值密度低）",
+              "correct": true,
+              "explain": "正确。有价值信息占比低、需要靠挖掘提炼，正是 Value 的含义。"
+            },
+            {
+              "text": "把全部数据放到一台内存 1TB 的超级服务器上 → 体现了横向扩展思想",
+              "correct": false,
+              "explain": "错误。换更强的单机是纵向扩展（Scale Up）；横向扩展是用多台普通机器组成集群共同存储与计算。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 先回忆 4V 各自含义：Volume=存量规模大（TB/PB 级）、Velocity=产生/处理速度快（每秒量级）、Variety=数据类型多样（结构化/半结构化/非结构化）、Value=价值密度低（需挖掘提炼）。\n2. 逐项把「场景关键词」与 V 对应：每天 50TB → 规模（Volume）；每秒数百万条 → 速率（Velocity）；多种类型并存 → 多样（Variety）；百万条里只有几十条有效 → 价值密度低（Value）。\n3. 干扰项辨析：一台超级服务器是纵向扩展，横向扩展是多台普通机器组成集群——它考的是分布式思想，不属于 4V 特征。\n4. 选前四项。\n**易错点**：看到「数据多」就选 Volume——Volume 讲存量规模，Velocity 讲产生速率，双 11 场景两者都有，要以题干突出的维度为准。\n**面试延伸**：被问「你们数据大在哪」时，用具体数字把每个 V 落到业务指标上（每天多少 TB、每秒多少条、几种数据源、有效占比多少），比背定义更有说服力。",
+          "enterprise_tip": "面试官考 4V 很少让你背定义，而是给场景让你判断。平时积累自己业务的数据指标（日增 TB、日志条数、数据源种类），回答时张口就来是加分项。"
+        },
+        {
+          "task_id": "s04c01t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Hadoop 三大核心组件职责",
+          "question": "关于 Hadoop 三大核心组件（HDFS、MapReduce、YARN）的职责分工，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "HDFS 负责分布式存储，YARN 负责资源调度，MapReduce 负责分布式计算",
+              "correct": true,
+              "explain": "正确。HDFS 存数据、YARN 分资源、MapReduce 做计算，三者各司其职。"
+            },
+            {
+              "text": "HDFS 负责资源调度，YARN 负责分布式存储，MapReduce 负责元数据管理",
+              "correct": false,
+              "explain": "错误。资源调度是 YARN 的活、存储是 HDFS 的活，职责说反了。"
+            },
+            {
+              "text": "三个组件都负责数据的分布式存储",
+              "correct": false,
+              "explain": "错误。只有 HDFS 负责存储；YARN 管资源分配、MapReduce 管计算。"
+            },
+            {
+              "text": "MapReduce 是 NoSQL 数据库，负责海量数据的随机读写",
+              "correct": false,
+              "explain": "错误。随机读写数据库是 HBase；MapReduce 是批处理计算框架。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 记一句话：**HDFS 管「数据怎么存」，YARN 管「资源怎么分」，MapReduce 管「计算怎么做」**。\n2. HDFS：分布式文件系统，切块多副本存储；YARN：资源调度器，分配 CPU/内存；MapReduce：分布式计算框架，分而治之跑批任务。\n3. 排除干扰项：三个组件职责各不相同，不存在「都管存储」；MapReduce 不是数据库（那是 HBase）。\n4. 选 A。\n**易错点**：把 Hive/Spark 也当核心组件——它们属于应用层/计算层生态组件，而「三大核心」特指 HDFS + YARN + MapReduce 这个 Hadoop 基础三件套。\n**延伸**：面试让画架构图时按「存储层 HDFS → 调度层 YARN → 计算层 MapReduce/Spark/Flink → 应用层 Hive/HBase → 协调层 ZooKeeper」分层讲，层次清晰是加分项。",
+          "enterprise_tip": "面试题「Hadoop 和 Spark 什么关系」：Hadoop 是生态总称（HDFS+YARN+MapReduce 三件套），Spark 是其中的内存计算引擎，常跑在 HDFS/YARN 之上，二者不是对立关系。"
+        },
+        {
+          "task_id": "s04c01t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：为什么必须分而治之",
+          "question": "大数据处理必须采用『分而治之』的分布式方案，而不是依赖一台超级计算机。最根本的原因是？",
+          "options": [
+            {
+              "text": "单机的内存容量、磁盘容量与 IO 带宽存在物理上限，海量数据单机装不下也处理不动",
+              "correct": true,
+              "explain": "正确。单机性能有天花板且成本指数上升，横向扩展多台机器才能线性扩容并天然容错。"
+            },
+            {
+              "text": "分布式方案的代码写起来更简单",
+              "correct": false,
+              "explain": "恰恰相反：分布式要处理网络、容错、一致性，复杂度远高于单机。"
+            },
+            {
+              "text": "多台机器拼起来能让 CPU 主频更高",
+              "correct": false,
+              "explain": "并行靠多机并行度（Scale Out），不是提升单核主频（Scale Up）。"
+            },
+            {
+              "text": "只有分布式方案才能对数据加密",
+              "correct": false,
+              "explain": "加密与分布式无关，单机同样可以加密。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 先回忆分布式动机：数据量大到单机装不下/处理不动，是『分而治之』的出发点。\n2. 单机瓶颈具体在：内存容量（装不下）、磁盘容量与 IO 带宽（读不动）、CPU 算力（算不动）——且单机越强越贵，成本指数上升。\n3. 横向扩展用多台普通机器分摊存储与计算，可线性扩容、可容错，是主流路线。\n4. 排除干扰项：分布式代码更复杂而不是更简单；并行不提高主频；加密与分布式无关。\n5. 选 A。\n**延伸**：面试答『为什么不用一台超级服务器』：容量与 IO 的物理上限 + 成本 + 容错三点。",
+          "enterprise_tip": "面试题『你们集群怎么规划的』：按总数据量 × 副本数 ÷ 单机可用容量估算节点数——这就是『分而治之』落到生产的第一步。"
+        },
+        {
+          "task_id": "s04c01t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Hadoop 3.x 新特性",
+          "question": "关于 **Hadoop 3.x** 相比 Hadoop 2.x 的新特性，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "引入 HDFS 纠删码（Erasure Coding）降低存储成本、支持 NameNode Federation 多 NameNode、YARN Timeline Service v2",
+              "correct": true,
+              "explain": "正确。纠删码、多 NameNode、Timeline Service v2 都是 Hadoop 3 的真实新特性。"
+            },
+            {
+              "text": "移除了 YARN，所有任务直接在 HDFS 上运行",
+              "correct": false,
+              "explain": "错误。YARN 仍是 Hadoop 3 的资源调度核心，没有被移除。"
+            },
+            {
+              "text": "取消了副本机制，所有数据只存一份",
+              "correct": false,
+              "explain": "错误。副本仍是默认机制，纠删码只是可选的另一种容错方案。"
+            },
+            {
+              "text": "只支持 Java 6 及以下版本",
+              "correct": false,
+              "explain": "错误。恰恰相反，Hadoop 3 要求 Java 8 及以上。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 回忆 Hadoop 3 的关键新特性：HDFS 纠删码（EC）、支持多 NameNode（Federation）、YARN Timeline Service v2、Shell 脚本重写、Java 8+ 等。\n2. 逐项核对：纠删码省存储、多 NameNode 缓解单点规模瓶颈、Timeline v2 增强 YARN 可观测性——都是 3.x 的真实特性。\n3. 排除干扰项：YARN 没被移除；副本仍是默认（EC 是可选容错方案）；Java 要求是 8 及以上。\n4. 选 A。\n**延伸**：面试聊升级：纠删码（RS-6-3 省约 40% 存储）、多 NameNode 支持更大集群、YARN 时间线服务 v2 是 3.x 的三大卖点。",
+          "enterprise_tip": "面试问「你们用 Hadoop 几、为什么升级」：Hadoop 3 的纠删码可省一半存储、多 NameNode 解决单 NN 规模瓶颈——升级理由要落到成本与规模，而不是「版本新」。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "大数据的 4V 特征是什么？",
+          "a": "Volume（数据量大，GB~PB 级）、Velocity（高速，数据产生与处理快）、Variety（多样，结构化/半结构化/非结构化并存）、Value（价值密度低，需挖掘提炼）。面试可补一句 5V 的 Veracity（真实性）。"
+        },
+        {
+          "q": "Hadoop 生态从底到上分哪几层？各层有哪些核心组件？",
+          "a": "存储层 HDFS、调度层 YARN、计算层 MapReduce/Tez/Spark/Flink、应用层 Hive/HBase、协调层 ZooKeeper。"
+        },
+        {
+          "q": "为什么大数据用横向扩展而不是一台超级服务器？",
+          "a": "单机性能有物理上限且成本随性能指数上升；横向扩展用多台普通机器分摊存储与计算，成本可控、可线性扩容，还能天然容错。"
+        },
+        {
+          "q": "Hadoop 和 Spark 是什么关系？",
+          "a": "Hadoop 是生态总称（HDFS+YARN+MapReduce 等），Spark 是其中的内存计算引擎，常与 HDFS/YARN 配合使用，不能把二者对立。"
+        },
+        {
+          "q": "面试被问「你们项目数据量大在哪」怎么答？",
+          "a": "用数字回答：多少台机器、每天多少条日志、单表多少亿行、日增多少 TB，把 4V 落到具体业务指标上，比背定义更有说服力。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "大数据 4V",
+          "desc": "概括大数据特征的四个维度：Volume（大量）、Velocity（高速）、Variety（多样）、Value（价值密度低）。"
+        },
+        {
+          "term": "HDFS",
+          "desc": "Hadoop 分布式文件系统，把大文件切块多副本存储在集群各节点。"
+        },
+        {
+          "term": "YARN",
+          "desc": "Hadoop 资源调度器，统一管理集群 CPU 与内存，给计算任务分配资源。"
+        },
+        {
+          "term": "MapReduce",
+          "desc": "Hadoop 的分布式批处理计算框架，核心思想是分而治之。"
+        },
+        {
+          "term": "Hive",
+          "desc": "SQL on Hadoop 工具，把 SQL 翻译成 MapReduce/Tez/Spark 任务执行。"
+        },
+        {
+          "term": "ZooKeeper",
+          "desc": "分布式协调服务，提供选主、配置管理、分布式锁等能力。"
+        },
+        {
+          "term": "横向扩展（Scale Out）",
+          "desc": "通过增加普通机器数量提升集群存储与计算能力，是大数据的主流扩展方式。"
+        }
+      ],
+      "kps": [
+        "大数据 4V 特征（Volume/Velocity/Variety/Value）",
+        "4V 的具体业务场景判断",
+        "分布式核心思想：横向扩展与分而治之",
+        "Hadoop 生态组件地图（存储/调度/计算/应用/协调分层）",
+        "核心组件职责（HDFS/YARN/MapReduce/Hive/HBase/ZooKeeper）",
+        "Hadoop 发展历史（Google 论文 → Nutch → Hadoop 生态演进）",
+        "大数据生态与传统技术栈的区分（组件 vs 外部依赖）",
+        "为什么必须分而治之（单机容量与磁盘 IO 的物理瓶颈）",
+        "Hadoop 3 新特性（纠删码、多 NameNode、Timeline Service v2）"
+      ]
+    },
+    {
+      "chapter_id": "s04c02",
+      "title": "4.2 HDFS 架构与原理",
+      "goal": "掌握 NameNode/DataNode 主从架构、块与副本机制、读写流程与安全模式",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "HDFS（Hadoop Distributed File System）是 Hadoop 的**分布式文件系统**：把一个大文件拆成块、分散存储在多台机器上，对外却像一台「容量无限的超级硬盘」。\n\nHDFS 采用**主从（Master/Slave）架构**：\n- **NameNode（主节点，NN）**：只存**元数据**（目录树、文件名、每个块在哪些 DataNode 上），不存数据本体。内存要求高，是集群的「大脑」。\n- **DataNode（从节点，DN）**：真正存数据块，每个 DN 就是一台普通机器上的一个「货架」，定期向 NN 发送**心跳**（默认 3 秒）报告自己活着。\n- **SecondaryNameNode（2NN）**：定期合并 NameNode 的编辑日志，辅助恢复，**不是** NN 的热备（它不能自动接管）。\n\n一句话：**NN 管「账本」（元数据），DN 管「货物」（数据块）**。"
+        },
+        {
+          "type": "text",
+          "content": "HDFS 把文件切分成**块（Block）**存储，默认块大小 **128MB**（比本地文件系统的 4KB 大得多，目的是减少寻址开销、让块足够大以便顺序读写）。\n\n**副本机制**：默认每个块存 **3 份副本**，分布在**不同机器**上（机架感知策略：第一副本在本机，第二副本在同机架另一台机器，第三副本在**不同机架**），这样：\n- 一台机器坏了，数据不丢（容错）；\n- 多副本可以就近读取（性能）。\n\n块大小和副本数都是配置项：`dfs.blocksize`、`dfs.replication`，可以在 hdfs-site.xml 中修改。副本数还可以按目录单独设置（如热数据 3 副本、冷数据 1 副本省钱）。"
+        },
+        {
+          "type": "code",
+          "lang": "xml",
+          "content": "<!-- hdfs-site.xml 常用配置示例 -->\n<configuration>\n  <!-- 默认块大小：128MB（134217728 字节） -->\n  <property>\n    <name>dfs.blocksize</name>\n    <value>134217728</value>\n  </property>\n\n  <!-- 默认副本数：3 -->\n  <property>\n    <name>dfs.replication</name>\n    <value>3</value>\n  </property>\n\n  <!-- 机架感知：配置每台机器所在机架，副本放置时跨机架 -->\n  <property>\n    <name>net.topology.script.file.name</name>\n    <value>/opt/hadoop/etc/topology.sh</value>\n  </property>\n</configuration>",
+          "caption": "块大小、副本数与机架感知配置"
+        },
+        {
+          "type": "text",
+          "content": "**写流程（三步确认）**：① 客户端向 NameNode 请求写文件，NN 返回**可写的数据块位置列表**（哪些 DN 存第一副本、第二副本、第三副本）；② 客户端按「就近原则」把数据**按块（128MB）流水式**传给第一个 DN，第一 DN 再传给第二 DN、第二传给第三 DN（**管道式复制**，避免客户端重复传 3 遍）；③ 最后一个 DN 逐级确认写入成功，客户端最终向 NN 确认，NN 更新元数据。\n\n**读流程**：客户端向 NN 要「文件 xx 的块都在哪」，NN 返回块位置列表，客户端**就近读取**（优先本机/同机架），校验数据后拼接成完整文件。\n\n**安全模式（SafeMode）**：NN 启动时先进入安全模式，此时**只读**（不允许写操作），NN 收集各 DN 汇报的块信息，直到**满足副本数的块占比达到阈值**（默认 99.9% 的块达到最小副本数）才自动退出安全模式。若长期停在安全模式，说明有大量副本缺失（如 DN 掉线）。"
+        },
+        {
+          "type": "warning",
+          "content": "**小文件是 HDFS 的头号敌人**：每个文件/目录都要在 NameNode 内存里占一条元数据记录（约 150 字节）。1000 万个 1KB 的小文件，会把 NN 内存吃掉几十 GB，还会让 MapReduce 启动大量空转 task。企业里的铁律：**能合并就合并**（SequenceFile/ORC），文件数控制在几千个以内。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- **面试必考**：① HDFS 写数据流程？② 为什么块是 128MB？③ NameNode 挂了怎么办？（单点 → 靠 HA：Active/Standby 双 NN + ZooKeeper 选主，见 4.6 章）④ 小文件怎么处理？\n- **生产坑**：NN 内存规划（元数据 × 副本开销）；磁盘满导致 DN 报错；块损坏时靠副本自动恢复。\n- **招聘要求**：能讲清楚读写流程、能说明副本与容错关系，是 Hadoop 岗位的底线要求。"
+        }
+      ],
+      "hands_on": "1. 写一个 Python 脚本：输入文件大小（字节），计算它会切成多少个 128MB 的块、共占多少存储空间（乘 3 副本），打印结果。\n2. 用纸笔画一张「客户端 → NameNode → 3 个 DataNode」的写数据时序图，标出每步传的是什么（请求/块/确认）。\n3. 打开 HDFS 官网的「HDFS Architecture」文档页，对照本章内容把架构图抄一遍。",
+      "tasks": [
+        {
+          "task_id": "s04c02t01",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：HDFS 写数据流程",
+          "question": "把 HDFS 写数据（客户端写入一个新文件）的流程按正确顺序排列。",
+          "steps": [
+            "DataNode 逐级确认写入成功，客户端向 NameNode 确认，NN 更新元数据",
+            "NameNode 检查权限并返回可写的数据块位置列表（DN1/DN2/DN3）",
+            "客户端按就近原则把数据块传给第一个 DataNode，DN1 管道式传给 DN2、DN2 传给 DN3",
+            "客户端向 NameNode 发起写文件请求"
+          ],
+          "correct_order": [
+            3,
+            1,
+            2,
+            0
+          ],
+          "order_explain": "HDFS 写数据是「请求 → 分配 → 管道写 → 确认」四步：客户端先向 NN 请求，NN 返回副本放置位置；客户端把数据按管道式依次传给 3 个 DN；全部写完后 DN 逐级确认，客户端再向 NN 确认完成，NN 才更新元数据。",
+          "analysis": "**标准解题思路**\n1. 起点：客户端向 NameNode 发起写文件请求（NN 只有元数据，不知道数据内容）。\n2. NN 校验权限与空间后，返回「块 1 的 3 个副本放哪」的位置列表。\n3. 客户端把数据传给 DN1，DN1 传给 DN2，DN2 传给 DN3——管道式复制，客户端只传一次。\n4. 三个 DN 都写完后逐级 ack，客户端向 NN 确认，NN 更新元数据（此时文件才对用户可见）。\n**易错点**：把「NN 返回位置」和「NN 存数据」搞混——NN 从不碰数据本体，只记账。\n**记忆**：请求 → 分配 → 管道写 → 确认。",
+          "enterprise_tip": "面试追问「为什么是管道式复制而不是客户端传 3 遍？」答：管道式让数据只在节点间流转，客户端带宽只消耗 1 份，写 3 副本的代价从 3×网络 IO 降到 1×。"
+        },
+        {
+          "task_id": "s04c02t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：HDFS 块与副本",
+          "question": "关于 HDFS 的块与副本，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "默认块大小是 4KB，和本地文件系统一致",
+              "correct": false,
+              "explain": "HDFS 默认块是 128MB，远大于本地文件系统的 4KB，为了减少寻址开销。"
+            },
+            {
+              "text": "默认每个块存 3 个副本，分布在不同的机器上",
+              "correct": true,
+              "explain": "正确。默认 3 副本且跨机器（最好跨机架）存放，兼顾容错与读取性能。"
+            },
+            {
+              "text": "副本数越多越好，生产上默认配置 10 份",
+              "correct": false,
+              "explain": "副本数多浪费存储且写放大，生产默认 3 份，冷数据还可以降到 1~2 份。"
+            },
+            {
+              "text": "NameNode 负责存储数据块本体",
+              "correct": false,
+              "explain": "NameNode 只存元数据，数据块本体存在 DataNode 上。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 块大小：HDFS 默认 128MB，不是 4KB。\n2. 副本：默认 3，且跨机器放置。\n3. 副本不是越多越好（成本/写放大），生产 3 份是容量与容错的平衡。\n4. NN 只存元数据。\n5. 选 B。\n**延伸**：`dfs.replication` 可按目录设置，冷数据目录设 1 副本可省 2/3 存储。",
+          "enterprise_tip": "面试题「为什么副本要跨机架放？」答：防止整机架断电/交换机故障导致数据全丢；读取时可优先就近副本。"
+        },
+        {
+          "task_id": "s04c02t03",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：HDFS 默认块大小与副本数",
+          "question": "HDFS 默认块大小是 ____ MB，默认副本数是 ____。（两个数字用空格隔开，例如：256 3）",
+          "answer": [
+            "128 3",
+            "128,3",
+            "128 3个",
+            "128 三"
+          ],
+          "hint": "先回忆 HDFS 设计目标：块为什么不能太小？默认块大小是多少？副本数要能容忍宕机。",
+          "analysis": "**标准解题思路**\n1. 默认块大小：128MB（dfs.blocksize=134217728 字节）。\n2. 默认副本数：3（dfs.replication=3）。\n3. 两个数字中间用空格隔开填：128 3。\n**延伸**：面试常问「为什么是 128MB」——太小寻址开销大，太大并行度不足，128MB 是经验平衡值。",
+          "enterprise_tip": "生产中常按数据热度调整：热数据 3 副本，冷数据 1~2 副本，能省大量存储成本——面试聊成本优化是加分项。"
+        },
+        {
+          "task_id": "s04c02t04",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "选一选：HDFS 默认块大小",
+          "question": "HDFS 的**默认块大小（Block Size）**是多少？",
+          "options": [
+            {
+              "text": "4KB",
+              "correct": false,
+              "explain": "4KB 是本地文件系统（如 ext4）的页大小；HDFS 块远大于此，否则寻址开销太大。"
+            },
+            {
+              "text": "64MB",
+              "correct": false,
+              "explain": "64MB 是 Hadoop 1.x 时代的默认值；Hadoop 2.x 起默认调整为 128MB。"
+            },
+            {
+              "text": "128MB",
+              "correct": true,
+              "explain": "正确。HDFS 默认块大小是 128MB（dfs.blocksize=134217728 字节），在寻址开销与并行度之间取得平衡。"
+            },
+            {
+              "text": "1GB",
+              "correct": false,
+              "explain": "1GB 过大，一个块只能被一个 map 任务处理，会导致并行度不足。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 直接回忆配置项 dfs.blocksize 的默认值：134217728 字节 = 128MB。\n2. 排除 4KB：那是本地文件系统的块，HDFS 为了顺序读写特意把块设大。\n3. 排除 64MB：旧版本（Hadoop 1.x）默认值，现在已是 128MB。\n4. 排除 1GB：块太大并行度不足。\n5. 选 C。\n**为什么是 128MB**：块太小 → 元数据多、寻址开销大；块太大 → 单个任务的并行度不足；128MB 是实践中的平衡值。",
+          "enterprise_tip": "面试追问「为什么块是 128MB」：块越大元数据越少（NameNode 内存压力小）、寻址开销越小，但太大并行度差；128MB 是经验平衡值，也便于 map 任务按块并行处理。"
+        },
+        {
+          "task_id": "s04c02t05",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：HDFS 默认副本数",
+          "question": "HDFS 默认每个数据块保存 ____ 份副本（请填数字）。",
+          "answer": [
+            "3",
+            "3份",
+            "3 份",
+            "三",
+            "三份",
+            "3个",
+            "3 个"
+          ],
+          "hint": "先想：副本的作用是防宕机丢数据——坏 1 台数据还在，至少需要几份？再多一份必要吗？",
+          "analysis": "**标准解题思路**\n1. HDFS 默认副本数配置项：dfs.replication = 3。\n2. 为什么是 3：兼顾容错（坏 1~2 台机器数据不丢）与存储成本（3 份占 3 倍空间）。\n3. 填 3。\n**延伸**：副本数可按目录设置——热数据 3 副本、冷数据 1~2 副本，能显著节省存储成本。",
+          "enterprise_tip": "生产上冷数据目录把 dfs.replication 降到 1~2 可省 1/3~2/3 存储成本；但热数据必须 3 副本，否则节点故障会丢数据——面试聊成本优化是加分项。"
+        },
+        {
+          "task_id": "s04c02t06",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：HDFS 读数据流程",
+          "question": "把 HDFS 读数据（客户端读取一个已有文件）的流程按正确顺序排列。",
+          "steps": [
+            "客户端向 NameNode 发起读文件请求，NN 返回该文件各块的存储位置列表（块在哪些 DataNode 上）",
+            "客户端按就近原则直接从 DataNode 并行读取所需的数据块（数据不经过 NameNode）",
+            "客户端校验各块数据的完整性，把块按顺序拼接成完整的文件"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2
+          ],
+          "order_explain": "HDFS 读数据是「请求 → 拿位置 → 就近读块 → 拼接」：客户端先向 NN 要元数据（各块位置列表），拿到后直接与 DataNode 并行读块，最后校验并拼接成完整文件。注意：读数据时 NameNode 只提供位置信息，真正的数据流发生在客户端与 DataNode 之间，不经过 NN。",
+          "analysis": "**标准解题思路**\n1. **第一步**：客户端向 NameNode 发起读请求。NN 只存元数据，返回的是「文件 xx 的块 1/2/3 分别在哪些 DataNode 上」的位置列表，不是数据本身。\n2. **第二步**：客户端拿到位置后，按**就近原则**（本机 > 同机架 > 跨机架）直接从各 DataNode 并行读取所需数据块——多副本的第二个好处就在这：可以就近选一个副本读，还能并行读多个块。\n3. **第三步**：客户端校验每块数据的完整性（如 CRC 校验），把块按顺序拼接成完整文件返回给上层应用。\n**易错点**：① 误以为读数据要经过 NameNode——NN 只给「地图」，不传输数据；② 忘记「就近读取」——副本机制不仅是容错，也是读性能的来源。\n**对照写流程**：写是「请求→分配位置→管道式复制→确认」，读是「请求→拿位置→就近读块→拼接」，两者都遵循「NN 管账本、DN 管货物」。\n**记忆**：请求 → 拿位置 → 就近读块 → 拼接。",
+          "enterprise_tip": "面试题「读一个文件 HDFS 内部发生了什么」：答三步——NN 返回块位置（元数据）、客户端就近并行读 DN（数据流）、校验拼接。追问「为什么读不经过 NN」：NN 是瓶颈点，数据全走 NN 会把它压垮，架构上数据流必须旁路。"
+        },
+        {
+          "task_id": "s04c02t07",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：块大小 128MB 的原因之一",
+          "question": "HDFS 把默认块大小设为 128MB（远大于本地文件系统的 4KB），一个重要原因是：块太小会导致读取数据时需要频繁进行____操作（两个字，指「定位数据块在磁盘上的位置」），开销巨大。",
+          "answer": [
+            "寻址",
+            "寻道",
+            "定位",
+            "寻址时间",
+            "寻道时间",
+            "定位时间",
+            "寻址开销",
+            "寻道开销"
+          ],
+          "hint": "先想：读文件前要先把磁头「定位」到数据位置，这个动作的专业叫法是什么？",
+          "analysis": "**标准解题思路**\n1. 磁盘读数据要先「寻址」：把磁头移动到数据所在的磁道/位置，这个动作有时间开销（毫秒级）。\n2. 如果块只有 4KB，读一个 1GB 的文件要寻址几十万次，大部分时间都花在「找位置」上；块设为 128MB，寻址次数骤降，每次寻址换来的顺序读写量更大，效率高得多。\n3. 所以 HDFS 块大小的设计哲学是：**用大块换取更少的寻址开销和更小的元数据量**。\n4. 填「寻址」（寻道/定位均可）。\n**易错点**：别答成「节省内存」——虽然大块也确实减少元数据条数，但「减少寻址/寻道开销」是 128MB 这个数值的直接原因。\n**延伸**：块太大也不行——一个块只能被一个 map 任务处理，块过大并行度不足；128MB 是寻址开销与并行度的经验平衡值。",
+          "enterprise_tip": "面试追问「为什么 128MB 而不是 4KB 或 1GB」：太小→寻址开销大、元数据多；太大→单个任务并行度不足；128MB 是实践中的平衡值，也是 map 任务按块并行的天然分界。"
+        },
+        {
+          "task_id": "s04c02t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：NameNode 内存为什么是瓶颈",
+          "question": "HDFS 集群能支撑的文件/块总数量，主要受限于 NameNode 的哪种资源？",
+          "options": [
+            {
+              "text": "内存：NameNode 把全部元数据（目录树、每个块的位置等）常驻内存",
+              "correct": true,
+              "explain": "正确。元数据必须全量在内存才能秒级响应，文件/块越多内存越吃紧。"
+            },
+            {
+              "text": "磁盘：NameNode 的磁盘容量决定能存多少元数据",
+              "correct": false,
+              "explain": "元数据虽落盘（fsimage/edits），但运行期必须全量在内存；磁盘不是首要瓶颈。"
+            },
+            {
+              "text": "CPU：NameNode 的核数不够",
+              "correct": false,
+              "explain": "NN 的主要开销是内存中的元数据规模，CPU 不是首要瓶颈。"
+            },
+            {
+              "text": "网络：NameNode 带宽不够",
+              "correct": false,
+              "explain": "NN 不传输数据本体，网络带宽不是它存储规模的瓶颈。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. NameNode 的职责：管理元数据（目录树、文件名、每个块在哪些 DN 上），数据本体在 DataNode。\n2. 元数据必须常驻内存：客户端每次请求都要秒级查元数据，磁盘太慢；块位置来自 DN 心跳汇报，无法靠磁盘换内存。\n3. 所以集群规模（文件数、块数）≈ NN 内存 ÷ 单条元数据大小（约 150 字节/块）。\n4. 排除干扰项：磁盘只管落盘快照、CPU/网络都不是规模瓶颈。\n5. 选 A。\n**延伸**：这也解释了小文件为什么致命——文件/块越多，NN 内存越快耗尽。",
+          "enterprise_tip": "面试题『NN 内存怎么规划』：预估文件数 × 150 字节/块 × 2（含目录与副本信息）≈ 需要的内存；生产还会给 NN 留 30% 余量并监控内存水位。"
+        },
+        {
+          "task_id": "s04c02t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：安全模式（SafeMode）",
+          "question": "NameNode 启动后进入安全模式（SafeMode）。关于安全模式，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "安全模式下 HDFS **只读**（拒绝写操作），直到满足最小副本数的数据块占比达到阈值（默认 99.9%）才自动退出",
+              "correct": true,
+              "explain": "正确。安全模式只读、禁止写入，块汇报达标后自动退出。"
+            },
+            {
+              "text": "安全模式下可以正常写入新文件",
+              "correct": false,
+              "explain": "错误。安全模式是只读状态，写操作会被拒绝。"
+            },
+            {
+              "text": "安全模式是永久状态，只能靠格式化退出",
+              "correct": false,
+              "explain": "错误。块汇报达标后自动退出；长期不退说明有大量块副本不足。"
+            },
+            {
+              "text": "安全模式只在集群升级时出现",
+              "correct": false,
+              "explain": "错误。每次 NameNode 启动都会先进入安全模式再退出。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 安全模式的触发：NameNode 每次启动都会先进入安全模式，等待 DataNode 汇报块信息。\n2. 安全模式的行为：**只读**——目录可查、文件可读，但**拒绝写操作**（防止元数据不完整时写入）。\n3. 退出条件：满足最小副本数的数据块占比达到阈值（默认 99.9%）→ 自动退出安全模式。\n4. 排除干扰项：安全模式不能写；不是永久状态；不只升级时出现。\n5. 选 A。\n**延伸**：长期停在安全模式 = 大量块副本不足（DN 掉线/坏盘）；排查用 hdfs dfsadmin -report 看块健康，恢复节点后自动退出；手动 safemode leave 是治标，根因是副本缺失。",
+          "enterprise_tip": "「NN 一直停在安全模式」= 大量块副本不足（DN 掉线/磁盘坏/网络问题），先 hdfs dfsadmin -report 看块健康，恢复节点让副本自动补齐；手动 leave 只是治标。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "NameNode 和 DataNode 的职责分别是什么？",
+          "a": "NameNode（主）只存元数据（目录树、文件名、块位置），不存数据本体；DataNode（从）真正存储数据块，定期向 NN 发心跳。一句话：NN 管账本，DN 管货物。"
+        },
+        {
+          "q": "为什么 HDFS 块默认 128MB？",
+          "a": "块太小元数据多、寻址开销大；块太大并行度不足。128MB 是兼顾元数据开销、寻址成本与并行度的经验值。"
+        },
+        {
+          "q": "简述 HDFS 写文件流程。",
+          "a": "① 客户端向 NN 请求写文件；② NN 返回副本放置位置列表；③ 客户端按就近原则把数据块传给 DN1，DN1 管道式传给 DN2、DN3；④ 全部确认后客户端向 NN 确认，NN 更新元数据。"
+        },
+        {
+          "q": "什么是安全模式？",
+          "a": "NN 启动时进入的只读状态，此时不允许写操作；NN 收集 DataNode 汇报的块信息，直到满足最小副本数的块占比达到阈值（默认 99.9%）才自动退出。"
+        },
+        {
+          "q": "为什么说小文件是 HDFS 的头号敌人？",
+          "a": "每个文件/目录都在 NN 内存占一条元数据记录（约 150 字节），千万级小文件会耗尽 NN 内存；且会让 MapReduce 启动大量空转 task，拖慢作业。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "NameNode",
+          "desc": "HDFS 主节点，只存储文件系统元数据，是集群的「大脑」。"
+        },
+        {
+          "term": "DataNode",
+          "desc": "HDFS 从节点，真正存储数据块，定期向 NameNode 发送心跳。"
+        },
+        {
+          "term": "SecondaryNameNode",
+          "desc": "定期合并 NameNode 编辑日志的辅助节点，不是热备，不能自动接管。"
+        },
+        {
+          "term": "Block（数据块）",
+          "desc": "HDFS 存储的最小单元，默认 128MB，一个文件被切成多个块分布存储。"
+        },
+        {
+          "term": "副本机制",
+          "desc": "默认每块 3 份副本跨机器存放，保证容错与读取性能。"
+        },
+        {
+          "term": "安全模式（SafeMode）",
+          "desc": "NameNode 启动后的只读状态，等待块汇报达标后自动退出。"
+        },
+        {
+          "term": "心跳（Heartbeat）",
+          "desc": "DataNode 每 3 秒向 NameNode 发送的存活信号，超时则被判为掉线。"
+        },
+        {
+          "term": "机架感知（Rack Awareness）",
+          "desc": "副本放置策略：第一副本本机、第二副本同机架、第三副本跨机架。"
+        }
+      ],
+      "kps": [
+        "HDFS 主从架构（NameNode 管元数据、DataNode 存数据块）",
+        "块与副本机制（默认 128MB、3 副本、机架感知）",
+        "为什么块是 128MB（寻址开销与并行度的平衡）",
+        "HDFS 写数据流程（请求→分配→管道写→确认）",
+        "HDFS 读数据流程（NN 返回元数据 → DN 就近并行读）",
+        "心跳与故障检测（DN 每 3 秒心跳、超时判定掉线）",
+        "安全模式（SafeMode）",
+        "小文件问题（NameNode 元数据膨胀）",
+        "NameNode 内存瓶颈原理（元数据全量常驻内存）"
+      ]
+    },
+    {
+      "chapter_id": "s04c03",
+      "title": "4.3 HDFS 命令行与客户端",
+      "goal": "掌握 hdfs dfs 常用命令，理解 HDFS 与本地文件系统的差异",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "HDFS 用起来就像一台「远程硬盘」，命令行工具是 `hdfs dfs`（老版本也写作 `hadoop fs`，两者基本等价，推荐新写法 `hdfs dfs`）。\n\n与本地文件系统对比：\n- 本地 `ls` / `mkdir` / `cat` / `rm` → HDFS 对应 `hdfs dfs -ls / -mkdir / -cat / -rm`；\n- HDFS 的路径是**逻辑路径**（如 `/user/hadoop/data`），不区分 C: D: 盘，所有节点共享同一棵目录树；\n- 本地和 HDFS 之间传数据必须显式用 `-put`（上传）`-get`（下载），不会自动互通；\n- **没有「当前盘符」概念**，但支持相对路径（默认根目录是当前用户家目录 `/user/用户名`）。"
+        },
+        {
+          "type": "code",
+          "lang": "bash",
+          "content": "# 常用命令速查（在装有 Hadoop 的机器上执行）\n\nhdfs dfs -ls /                     # 列出根目录\nhdfs dfs -ls -R /data               # 递归列出\nhdfs dfs -mkdir -p /data/logs       # 创建目录（-p 支持多级）\n\nhdfs dfs -put local.log /data/logs/    # 上传：本地 -> HDFS\nhdfs dfs -copyFromLocal a.txt /data    # 上传（等价写法）\nhdfs dfs -get /data/logs/local.log ./  # 下载：HDFS -> 本地\n\nhdfs dfs -cat /data/logs/local.log     # 查看内容（适合小文件）\nhdfs dfs -tail /data/logs/local.log    # 看文件末尾\nhdfs dfs -text /data/part-r-00000      # 查看文本（压缩也能解）\n\nhdfs dfs -rm /data/tmp.txt             # 删除文件\nhdfs dfs -rm -r /data/tmp_dir          # 递归删除目录\nhdfs dfs -mv /data/a.txt /data/b.txt   # 移动/重命名\nhdfs dfs -du -h /data                  # 查看目录占用空间\nhdfs dfs -count -h /data               # 文件数、目录数、字节数\n\nhdfs dfs -help                         # 查看全部命令帮助",
+          "caption": "HDFS 常用命令（-ls / -mkdir / -put / -get 面试必背）"
+        },
+        {
+          "type": "text",
+          "content": "几个容易混淆的点：\n- `-cat` 只能看**文本小文件**；大文件用 `-tail` 看尾部或 `-text` 流式查看。\n- `-put` 上传会**自动按 128MB 切块**，你不需要手动分块。\n- `-get` 下载时会把块重新拼成完整文件，下载回来的文件和本地文件字节一致。\n- HDFS 也有权限模型（rwx），但默认配置下权限检查很松（很多伪分布式环境甚至关掉），生产环境会结合 Kerberos 做认证。\n- `-du`（磁盘用量）与 `-count`（统计文件数）是运维排查「谁占了空间」的利器。"
+        },
+        {
+          "type": "warning",
+          "content": "**常见踩坑**：① `-mkdir` 不加 `-p` 时父目录不存在会报错；② `-rm` 删除**不进回收站**（除非配置了 trash），删错就真没了；③ 把 HDFS 当普通文件系统用本地 `cp`/`mv` 命令是无效的，必须带 `hdfs dfs -` 前缀；④ Windows 下 `\\` 分隔符不要用在 HDFS 路径里，统一用 `/`。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- 数据工程师每天都会用 HDFS 命令：上传任务输入、查看中间结果、清理临时目录、排查磁盘占用。\n- 面试高频：`hdfs dfs -put/-get/-cat/-rm` 的作用；`-rm -r` 和 `-rm` 的区别；上传一个 200MB 文件 HDFS 会切成几个块（2 块）。\n- 生产坑：误删目录、`-put` 到错误路径、忘记 `-p`、磁盘写满导致上传失败。\n- 进阶：企业常用 Web 界面（NameNode 50070/9870 端口）和 Hue 可视化浏览 HDFS，但命令行是基本功。"
+        }
+      ],
+      "hands_on": "1. 如果本机装了 Hadoop 伪分布式，执行：`hdfs dfs -mkdir -p /user/自己名字`、`hdfs dfs -put 任意文件 /user/自己名字`、`hdfs dfs -ls /user/自己名字`、`hdfs dfs -get /user/自己名字/文件 ./`，完整走一遍上传下载。\n2. 如果没装 Hadoop：用 Python 模拟一个「迷你 HDFS」——写脚本把一个大文件按 128 字节的『块』切分存储到模拟目录，再写一个类似 -cat 的命令按块顺序拼回来，体会切块与拼接。\n3. 把本章命令速查表抄一遍，并标注每条命令对应的本地命令。",
+      "tasks": [
+        {
+          "task_id": "s04c03t01",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：补全上传命令",
+          "question": "要把本地文件 `data.log` 上传到 HDFS 的 `/user/hadoop/` 目录下，请补全命令：`hdfs dfs -____ data.log /user/hadoop/`（填英文命令）。",
+          "answer": [
+            "put",
+            "-put",
+            "copyFromLocal",
+            "-copyFromLocal"
+          ],
+          "hint": "先判断方向：本地 → HDFS 是上传还是下载？回忆 4.3 节命令清单里对应的动词。",
+          "analysis": "**标准解题思路**\n1. 本地 → HDFS 是「上传」。\n2. 上传命令是 `-put`（或等价 `-copyFromLocal`）。\n3. 完整命令：`hdfs dfs -put data.log /user/hadoop/`。\n**易错点**：下载是 `-get`，方向别反。\n**延伸**：`-put` 上传后 HDFS 会自动把文件切成 128MB 块并生成 3 副本。",
+          "enterprise_tip": "面试笔试题常直接考命令：`-put` 上传、`-get` 下载、`-cat` 查看、`-rm` 删除、`-mkdir` 建目录，五个动词背熟。"
+        },
+        {
+          "task_id": "s04c03t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：-cat 命令的作用",
+          "question": "`hdfs dfs -cat /data/result.txt` 的作用是？",
+          "options": [
+            {
+              "text": "把本地文件复制到 HDFS",
+              "correct": false,
+              "explain": "上传是 -put / -copyFromLocal。"
+            },
+            {
+              "text": "查看 HDFS 上文件的内容",
+              "correct": true,
+              "explain": "正确。-cat 在 HDFS 上等同于本地 cat，输出文件内容。"
+            },
+            {
+              "text": "删除 HDFS 上的文件",
+              "correct": false,
+              "explain": "删除是 -rm。"
+            },
+            {
+              "text": "统计文件的字节数",
+              "correct": false,
+              "explain": "统计大小是 -du 或 -count。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. `-cat` 与本地 `cat` 语义一致：查看内容。\n2. 区别：本地 cat 看本地文件，hdfs dfs -cat 看 HDFS 文件。\n3. 选 B。\n**延伸**：-cat 适合小文件，大文件用 -tail 或 -text。",
+          "enterprise_tip": "面试题「怎么看 HDFS 上一个几百 GB 文件的内容？」答：-cat 会全量输出不可取，用 -tail 看尾部、-text 流式看、或直接交给 Hive/Spark 查询。"
+        },
+        {
+          "task_id": "s04c03t03",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排序：上传文件到 HDFS 的流程",
+          "question": "把「把本地文件上传到 HDFS 并验证」的正确操作顺序排列出来。",
+          "steps": [
+            "用 hdfs dfs -cat 或 -ls 验证文件已上传成功",
+            "确认本地文件存在，例如 ls -l data.log",
+            "用 hdfs dfs -put data.log /user/hadoop/ 上传",
+            "确保目标目录存在，不存在则用 hdfs dfs -mkdir -p 创建"
+          ],
+          "correct_order": [
+            1,
+            3,
+            2,
+            0
+          ],
+          "order_explain": "标准上传流程：先确认本地文件存在 → 确保 HDFS 目标目录存在（不存在先建）→ 执行 -put 上传 → 用 -ls/-cat 验证结果。先建目录再上传可避免路径错误。",
+          "analysis": "**标准解题思路**\n1. 确认本地文件存在（避免上传一个不存在的文件报错）。\n2. 确认/创建 HDFS 目标目录（`-mkdir -p`，否则 -put 会因目录不存在失败）。\n3. 执行 `hdfs dfs -put` 上传。\n4. 用 `-ls` 看文件是否出现、`-cat` 抽查内容，验证成功。\n**易错点**：跳过第 2 步直接 -put 是新手最常见的失败原因。\n**记忆**：查本地 → 建目录 → 上传 → 验证。",
+          "enterprise_tip": "生产上传数据前先 `-du` 看目标目录剩余空间，磁盘写满会导致任务失败；大数据平台一般有配额（quota）限制，超出会报错。"
+        },
+        {
+          "task_id": "s04c03t04",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "选一选：下载 HDFS 文件的命令",
+          "question": "要把 HDFS 上的文件 `/data/result.txt` 下载到本地当前目录，应使用下列哪个命令？",
+          "options": [
+            {
+              "text": "hdfs dfs -put /data/result.txt .",
+              "correct": false,
+              "explain": "-put 是上传（本地→HDFS），方向反了，下载用 -get。"
+            },
+            {
+              "text": "hdfs dfs -get /data/result.txt .",
+              "correct": true,
+              "explain": "正确。-get 把 HDFS 文件下载到本地，下载回来会按块拼成完整文件。"
+            },
+            {
+              "text": "hdfs dfs -rm /data/result.txt",
+              "correct": false,
+              "explain": "-rm 是删除 HDFS 文件，不是下载。"
+            },
+            {
+              "text": "hdfs dfs -mkdir /data/result.txt",
+              "correct": false,
+              "explain": "-mkdir 是创建目录，与下载无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 方向判断：HDFS → 本地是「下载」，命令动词是 -get。\n2. 语法：hdfs dfs -get <HDFS路径> <本地路径>。\n3. 排除：-put 方向相反；-rm 是删除；-mkdir 是建目录。\n4. 选 B。\n**易错点**：-put 和 -get 方向搞反是命令行高频错误，记口诀「put 进去、get 出来」。",
+          "enterprise_tip": "下载前先 -du 看文件大小，几百 GB 的文件别 -get 到本地（放不下）；生产上分析数据用 Hive/Spark 直接在 HDFS 上算，只有小结果集才下载。"
+        },
+        {
+          "task_id": "s04c03t05",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：上传命令的等价写法",
+          "question": "把本地文件上传到 HDFS，除了 `hdfs dfs -put`，还可以用完全等价的命令 `hdfs dfs -____`（填英文命令动词）。",
+          "answer": [
+            "copyFromLocal",
+            "-copyFromLocal",
+            "copyfromlocal",
+            "Copy From Local"
+          ],
+          "hint": "先回忆：上传除了 -put，还有一个「从本地复制过去」的等价命令，由哪几个英文单词组成？",
+          "analysis": "**标准解题思路**\n1. 上传命令有两组等价写法：-put 与 -copyFromLocal。\n2. -copyFromLocal 语义更直白：copy from local（从本地复制）。\n3. 填 copyFromLocal。\n**延伸**：下载也有等价写法 -get 与 -copyToLocal；新版本 Hadoop 中 -put 是推荐写法，但老脚本里 -copyFromLocal 很常见，都要认识。",
+          "enterprise_tip": "面试笔试题常考「上传文件的两组等价命令」：-put/-copyFromLocal、-get/-copyToLocal，能写出等价写法说明命令体系完整。"
+        },
+        {
+          "task_id": "s04c03t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：-cat 与 -get 的区别",
+          "question": "关于 `hdfs dfs -cat /data/a.txt` 与 `hdfs dfs -get /data/a.txt ./` 的区别，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "-cat 直接在终端输出文件内容、不产生本地文件；-get 把文件下载到本地生成一份文件",
+              "correct": true,
+              "explain": "正确。-cat 只查看（流式输出到终端），-get 才真正把文件下载落盘。"
+            },
+            {
+              "text": "-cat 会把文件下载到本地当前目录",
+              "correct": false,
+              "explain": "错误。-cat 不产生本地文件，下载到本地是 -get 的职责。"
+            },
+            {
+              "text": "-get 只是查看文件内容，不会在本地生成文件",
+              "correct": false,
+              "explain": "错误。-get 会把 HDFS 上的块拼成完整文件写到本地路径。"
+            },
+            {
+              "text": "两者完全等价，只是写法不同",
+              "correct": false,
+              "explain": "错误。一个查看、一个下载，语义和作用完全不同。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. `-cat` 语义与本地 `cat` 一致：把文件内容输出到终端**查看**，不产生任何本地文件，适合小文件。\n2. `-get` 语义是**下载**：从 HDFS 把文件（多个块自动拼接）拉到本地指定路径，生成真实文件，方向是 HDFS → 本地。\n3. 一句话区分：**-cat 用眼睛看，-get 用硬盘收**。\n4. 选 A。\n**易错点**：① 把 -cat 当下载用——大文件 -cat 会全量输出刷屏且不落盘；② 把 -get 当查看用——它会真的写本地文件。\n**延伸**：大文件查看用 -tail（看尾部）或 -text（流式查看、能解压），不要 -cat 全量输出。",
+          "enterprise_tip": "面试笔试题常考命令语义辨析：-put/-get 是「传输」，-cat/-tail/-text 是「查看」，-rm/-mv 是「删除/移动」——把每个动词的「方向」和「落盘行为」说清楚就不会错。"
+        },
+        {
+          "task_id": "s04c03t07",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：查看根目录文件命令",
+          "question": "要列出 HDFS **根目录**下的所有文件和目录，使用的命令是 `hdfs dfs -____ /`（填英文命令）。",
+          "answer": [
+            "ls",
+            "-ls",
+            "Ls",
+            "LS"
+          ],
+          "hint": "先回忆 Linux 列目录用什么命令？HDFS 的命令风格和 Linux 一致。",
+          "analysis": "**标准解题思路**\n1. HDFS 命令与本地命令一一对应：本地 `ls /` → HDFS `hdfs dfs -ls /`。\n2. 根目录就是 `/`，`hdfs dfs -ls /` 列出根目录下所有条目。\n3. 填 ls。\n**易错点**：① 忘记带 `hdfs dfs -` 前缀直接用本地 ls；② 相对路径默认从当前用户家目录 `/user/用户名` 开始，列根目录必须写 `/`。\n**延伸**：递归列出用 `-ls -R /data`；`-ls` 只是查看，创建目录用 `-mkdir -p`。",
+          "enterprise_tip": "登录集群第一件事通常是 `hdfs dfs -ls /` 看看目录结构；再配合 `-du -h /` 看各目录占用空间，是运维排查磁盘压力的基本功。"
+        },
+        {
+          "task_id": "s04c03t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：-put 上传的底层过程",
+          "question": "执行 `hdfs dfs -put` 上传一个 300MB 的文件到 HDFS，底层实际发生的过程是？",
+          "options": [
+            {
+              "text": "客户端把文件自动切成 3 个块（128MB + 128MB + 44MB），通过管道式复制写入 DataNode",
+              "correct": true,
+              "explain": "正确。-put 底层就是 HDFS 写流程：切块 → 管道复制 → ack 确认。"
+            },
+            {
+              "text": "整个文件原样复制到一台 DataNode 上",
+              "correct": false,
+              "explain": "HDFS 一定会切块且多副本分布式存储，不会整文件放一台机器。"
+            },
+            {
+              "text": "先压缩成一个小文件再上传",
+              "correct": false,
+              "explain": "-put 不压缩，只是切块 + 多副本写入。"
+            },
+            {
+              "text": "先上传到 NameNode，再由 NameNode 分发给各 DataNode",
+              "correct": false,
+              "explain": "NN 不碰数据本体，数据直接从客户端流向 DataNode。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. -put 就是把本地文件写入 HDFS，走的就是标准 HDFS 写流程。\n2. 切块：300MB ÷ 128MB = 2 个满块 + 44MB 余量 = 3 个块，切块在客户端自动完成。\n3. 写入：每个块按管道式复制（客户端 → DN1 → DN2 → DN3）写入 3 副本，逐级 ack 确认。\n4. 排除干扰项：不切块、不压缩、不经过 NameNode。\n5. 选 A。\n**延伸**：面试常考『上传 300MB 文件切成几个块』——128MB + 128MB + 44MB 共 3 块。",
+          "enterprise_tip": "上传大文件（几十 GB）前先用 hdfs dfs -du 确认目标目录空间；-put 速度受客户端上行带宽限制，超大文件可用并行上传工具加速。"
+        },
+        {
+          "task_id": "s04c03t09",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：HDFS 回收站配置项",
+          "question": "开启 HDFS 回收站（trash）的配置项是 `____`（在 core-site.xml 中设置；值如 1440 表示文件删除后保留 1440 分钟；填英文配置名）。",
+          "answer": [
+            "fs.trash.interval",
+            "fs.trash.interval=1440",
+            "fs trash interval",
+            "fs.trash.interval 配置"
+          ],
+          "hint": "先想：回收站功能属于 HDFS 哪类配置？配置名由「回收站」和「时间间隔」两个英文词组成。",
+          "analysis": "**标准解题思路**\n1. HDFS 默认 rm 即删、不进回收站；开启 trash 后删除的文件进入回收站、可恢复。\n2. 配置项：core-site.xml 中的 fs.trash.interval，单位分钟；1440 = 保留 1 天。\n3. 填 fs.trash.interval。\n**延伸**：删除的文件进入 /user/用户名/.Trash 目录；恢复 = 从 .Trash 里 mv 回来；回收站也占空间，过期自动清；超大目录删除时注意回收站容量。",
+          "enterprise_tip": "生产必开回收站（通常 1440 = 1 天）：误删文件可从 /user/用户名/.Trash 找回；注意回收站占用空间、需定期清理，超大目录删除时回收站也会撑爆磁盘。"
+        },
+        {
+          "task_id": "s04c03t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：HDFS 快照（Snapshot）",
+          "question": "关于 HDFS 快照（Snapshot），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "快照是目录在某一时刻的**只读镜像**，可用于误删恢复与数据保护，创建命令是 `hdfs dfs -createSnapshot`",
+              "correct": true,
+              "explain": "正确。快照是目录的时间点镜像，用于数据保护与误删恢复。"
+            },
+            {
+              "text": "快照会复制一份完整数据，存储开销翻倍",
+              "correct": false,
+              "explain": "错误。快照基于差异记录（只记录创建之后的变化），几乎不占额外空间。"
+            },
+            {
+              "text": "快照创建后目录就变成只读，无法再写入",
+              "correct": false,
+              "explain": "错误。快照是「那一刻」的镜像，目录本身仍可正常读写。"
+            },
+            {
+              "text": "快照只能由 root 用户创建",
+              "correct": false,
+              "explain": "错误。对目录开启快照功能后，有权限的用户即可创建快照。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 快照（Snapshot）：对目录做的**只读时间点镜像**，用于数据保护。\n2. 存储原理：快照只记录「创建之后的变化」（差异记录），创建本身几乎不占额外空间——不是全量复制。\n3. 使用流程：hdfs dfsadmin -allowSnapshot 目录（开启快照功能）→ hdfs dfs -createSnapshot 目录 快照名。\n4. 排除干扰项：不复制全量、不锁定目录、不限于 root。\n5. 选 A。\n**延伸**：误删/数据写坏 → 从快照恢复；快照 + 回收站是 HDFS 数据保护的左右手：回收站救「刚删的」，快照救「之前任意时间点的」。",
+          "enterprise_tip": "生产对重要表目录（如数仓分层）定期打快照，误删/写坏数据可秒级回滚；快照几乎零成本（差异记录），是 HDFS 数据保护性价比最高的手段之一。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "HDFS 上传、下载、查看、删除的命令分别是什么？",
+          "a": "上传 hdfs dfs -put（等价 -copyFromLocal）；下载 hdfs dfs -get；查看内容 hdfs dfs -cat/-text；删除 hdfs dfs -rm（目录加 -r）。"
+        },
+        {
+          "q": "-put 和 -copyFromLocal 是什么关系？",
+          "a": "完全等价，都是本地→HDFS 上传；-copyFromLocal 是语义更直白的长写法。"
+        },
+        {
+          "q": "HDFS 路径和本地路径有什么区别？",
+          "a": "HDFS 路径是逻辑路径（如 /user/hadoop/data），所有节点共享同一棵目录树，没有盘符概念；本地路径才有 C: D: 等盘符。"
+        },
+        {
+          "q": "-cat 能看大文件吗？",
+          "a": "不能。cat 会全量输出，大文件用 -tail 看尾部、-text 流式查看，或直接交给 Hive/Spark 分析。"
+        },
+        {
+          "q": "HDFS 误删文件能恢复吗？",
+          "a": "默认不进回收站，删除即不可恢复；生产上应开启 trash 机制（fs.trash.interval）并在删除前确认路径。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "hdfs dfs -put",
+          "desc": "把本地文件上传到 HDFS，等价 -copyFromLocal。"
+        },
+        {
+          "term": "hdfs dfs -get",
+          "desc": "把 HDFS 文件下载到本地，等价 -copyToLocal。"
+        },
+        {
+          "term": "hdfs dfs -cat",
+          "desc": "查看 HDFS 小文件的内容，等同于本地 cat。"
+        },
+        {
+          "term": "hdfs dfs -rm / -rm -r",
+          "desc": "删除 HDFS 文件；-r 递归删除目录。"
+        },
+        {
+          "term": "hdfs dfs -mkdir -p",
+          "desc": "创建 HDFS 目录，-p 支持多级创建。"
+        },
+        {
+          "term": "hdfs dfs -du / -count",
+          "desc": "-du 查看目录占用空间，-count 统计文件/目录/字节数。"
+        },
+        {
+          "term": "hdfs dfs -text",
+          "desc": "查看文本文件内容，能自动解压常见压缩格式。"
+        }
+      ],
+      "kps": [
+        "HDFS 命令行的基本形态（hdfs dfs / hadoop fs）与本地文件系统的差异",
+        "查看目录：-ls / -ls -R",
+        "创建目录：-mkdir -p",
+        "上传：-put / -copyFromLocal",
+        "下载：-get / -copyToLocal",
+        "查看内容：-cat / -tail / -text",
+        "删除与移动：-rm / -rm -r / -mv",
+        "空间与文件数统计：-du / -count",
+        "-put 上传的底层原理（切块 + 管道式复制）",
+        "回收站（trash）与快照（snapshot）：HDFS 数据保护机制"
+      ]
+    },
+    {
+      "chapter_id": "s04c04",
+      "title": "4.4 MapReduce 原理与编程",
+      "goal": "理解 Mapper/Reducer/Shuffle 过程，掌握 WordCount 案例与性能瓶颈",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "MapReduce 是 Google 提出的**分布式计算模型**，核心就四个字：**分而治之**。把一个大任务拆成成千上万个**互不依赖的小任务**，放到集群各节点并行执行，再合并结果。\n\n它只有两个阶段：\n- **Map（映射）阶段**：输入一行（k,v），输出若干中间结果（k',v'）。每个 map 任务独立处理自己的数据，互不通信。\n- **Reduce（归约）阶段**：把相同 key 的中间结果**分组**后聚合（求和、计数、取最大……）。\n\n中间夹着一个关键的 **Shuffle（洗牌）阶段**：系统自动把 map 输出的数据按 key 排序、分区、传输到对应 reduce 节点——「相同 key 的数据被送到同一个 reducer」。\n\n经典案例 **WordCount（词频统计）**：\n- Map：每行拆成单词，输出 `(单词, 1)`。\n- Shuffle：相同的单词自动归到一组。\n- Reduce：对每个单词把所有的 1 加起来，输出 `(单词, 总次数)`。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "# WordCount 逻辑（伪代码，真实是 Java/Python 的 MapReduce 程序）\n\ndef map(line):\n    # 输入：文件的一行文本\n    for word in line.split():\n        emit(word, 1)        # 输出中间结果 (单词, 1)\n\ndef reduce(word, values):\n    # 输入：相同单词的所有 1（Shuffle 已分组）\n    total = sum(values)\n    emit(word, total)        # 输出 (单词, 总次数)\n\n# 以句子 'hadoop spark hadoop hive' 为例：\n# Map 输出:   (hadoop,1) (spark,1) (hadoop,1) (hive,1)\n# Shuffle 分组: hadoop->[1,1]   spark->[1]   hive->[1]\n# Reduce 输出: (hadoop,2) (spark,1) (hive,1)",
+          "caption": "WordCount：map 产出 (word,1)，shuffle 按 key 分组，reduce 求和"
+        },
+        {
+          "type": "text",
+          "content": "一个 MapReduce 作业（Job）的执行流程：\n1. **InputSplit 分片**：输入文件按块切分，每个分片对应一个 map 任务；\n2. **Map 阶段**：各节点并行执行 map，输出写到**本地磁盘**（不是内存）；\n3. **Shuffle 阶段**：map 输出按 key 分区、排序、溢写（spill）落盘、合并；\n4. **Reduce 阶段**：从各 map 节点**拉取**自己分区的数据，再次排序合并，执行 reduce 逻辑；\n5. **输出**：reduce 结果写回 HDFS。\n\n**为什么 MapReduce 慢？** 因为每一步几乎都在**读写磁盘**：map 输出落盘 → shuffle 落盘 → reduce 输入落盘。一个简单任务可能产生好几轮磁盘 IO，加上启动 JVM 的开销（每个 task 一个进程），在 TB 级数据上跑批动辄几十分钟。这也是后来 **Spark（内存计算）** 出现的原因——Spark 尽量把中间结果留在内存，比 MR 快 10~100 倍。"
+        },
+        {
+          "type": "warning",
+          "content": "**Shuffle 是性能黑洞**（面试高频考点）：Shuffle 是 MapReduce 最耗时的环节——要排序、要落盘、要跨节点传输。所以：\n- 能减少 shuffle 数据量就减少（map 端先做部分聚合，如 Combiner）；\n- 数据倾斜（某个 key 数据特别多）会让单个 reducer 成为瓶颈（详见 5.6 章）；\n- 记住：**map 输出在本地磁盘，reduce 输入要跨网络拉取**，这两处都是 IO 大户。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- 现代企业**几乎不直接用 MapReduce 写业务**（都用 Hive SQL 或 Spark），但 MapReduce 是理解分布式计算的「九九乘法表」：Hive 的 SQL 会被翻译成 MR/Tez 任务，Spark 的 shuffle 思想也源于 MR。\n- **面试必问**：① 讲一下 WordCount 的 map/reduce 过程？② Map 输出存在哪？③ 为什么 MR 慢？④ Shuffle 里发生了什么？\n- **招聘要求**：能徒手画 MR 执行流程图（分片 → map → shuffle → reduce → 输出）是硬通货。\n- 本平台用**纯 Python 模拟** MR 思想，帮你把概念落地成代码。"
+        }
+      ],
+      "hands_on": "1. 在本地 Python 中，把本章的 WordCount 伪代码改写成真实可运行的 Python 脚本（先 map 生成 (word,1)，再字典聚合，再按单词排序输出），用三行英文句子测试。\n2. 画一张 MapReduce 执行流程图：输入 → 分片 → map（本地磁盘）→ shuffle（排序/分区/落盘/传输）→ reduce（聚合）→ 输出 HDFS，标出每一步的『数据存在哪』。\n3. 思考题：如果一篇文章 90% 都是单词 the，WordCount 会出什么问题？（提示：数据倾斜，单个 reducer 处理 90% 数据）——把答案写在笔记里。",
+      "tasks": [
+        {
+          "task_id": "s04c04t01",
+          "type": "python",
+          "difficulty": 3,
+          "title": "纯 Python 模拟 WordCount",
+          "question": "模拟 MapReduce 的 WordCount：给定单词列表 `words = ['hadoop', 'spark', 'hadoop', 'hive', 'spark', 'hadoop']`。\n① 先模拟 **map 阶段**：把每个单词变成 `(word, 1)`；\n② 再模拟 **reduce 阶段**：用字典聚合，相同单词的计数累加；\n③ 最后**按单词字典序**输出 `单词 次数` 格式（每行一个），例如 `hadoop 3`。\n只允许使用 Python 标准库。",
+          "code_context": "words = ['hadoop', 'spark', 'hadoop', 'hive', 'spark', 'hadoop']\n\n# ===== 在这里编写代码 =====\n# ① map：生成 (word, 1) 列表\n# ② reduce：字典聚合计数\n# ③ 按单词排序输出 'word count'\n",
+          "expected_output": "hadoop 3\nhive 1\nspark 2",
+          "reference": "words = ['hadoop', 'spark', 'hadoop', 'hive', 'spark', 'hadoop']\n\n# ① map 阶段：每个单词 -> (word, 1)\nmapped = [(w, 1) for w in words]\n\n# ② reduce 阶段：字典聚合\ncounts = {}\nfor word, n in mapped:\n    counts[word] = counts.get(word, 0) + n\n\n# ③ 按单词排序输出\nfor word in sorted(counts):\n    print(word, counts[word])",
+          "hint": "按题目三步走：① 每个单词怎么变成 (word, 1)？② 字典聚合时怎么取旧值累加？③ 输出顺序？",
+          "analysis": "**标准解题思路**\n1. **map**：`[(w, 1) for w in words]` 生成 6 个二元组：[(hadoop,1),(spark,1),(hadoop,1),(hive,1),(spark,1),(hadoop,1)]。\n2. **reduce**：遍历 mapped，用字典 `counts[word] = counts.get(word, 0) + n` 聚合 → {hadoop:3, spark:2, hive:1}。\n3. **排序输出**：`for word in sorted(counts): print(word, counts[word])` → 依次输出 hadoop 3 / hive 1 / spark 2。\n**易错点**：① 必须排序（不排序输出顺序随机，比对不通过）；② 输出是「单词 次数」同一行，用 print(word, counts[word]) 而不是两个 print；③ 不要 import 任何第三方库。\n**对照真实 MR**：mapped 就是 map 输出，dict 聚合就是 reduce，sorted 相当于 shuffle 的排序。",
+          "enterprise_tip": "面试会让你「手写一个 WordCount」：单机版就是上面这段代码；分布式版要说清楚 map 输出 (k,v)、shuffle 按 key 分组、reduce 求和，以及 Combiner 在 map 端预聚合减少 shuffle 数据量。"
+        },
+        {
+          "task_id": "s04c04t02",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：MapReduce 执行阶段",
+          "question": "把 MapReduce 作业的执行阶段按正确顺序排列。",
+          "steps": [
+            "Reduce 阶段：相同 key 的中间结果聚合，输出最终结果",
+            "Map 阶段：各节点并行执行 map，输出中间结果到本地磁盘",
+            "输入分片（InputSplit）：输入文件按块切分，确定 map 任务数",
+            "Shuffle 阶段：中间结果按 key 排序、分区、跨节点传输到对应 reducer",
+            "输出：reduce 结果写回 HDFS"
+          ],
+          "correct_order": [
+            2,
+            1,
+            3,
+            0,
+            4
+          ],
+          "order_explain": "MR 严格按「分片 → map → shuffle → reduce → 输出」执行：先把输入切成多个分片决定 map 数量；map 并行处理并写本地磁盘；shuffle 负责按 key 排序分组并传输；reduce 拿到同 key 数据后聚合；最终结果写回 HDFS。",
+          "analysis": "**标准解题思路**\n1. **输入分片**：框架把输入文件按块切成 N 个分片，一个分片 = 一个 map 任务，所以分片最先。\n2. **Map**：每个分片独立执行 map，输出 (k,v) 中间结果，先写**本地磁盘**。\n3. **Shuffle**：中间结果按 key 排序、分区，通过网络传输到对应 reducer 节点——这是 map 和 reduce 之间的桥梁。\n4. **Reduce**：reducer 收到同 key 数据后合并排序，执行聚合逻辑。\n5. **输出**：结果写回 HDFS。\n**易错点**：shuffle 不是独立阶段而是 map 输出到 reduce 输入的「过程」，但排序分组的功能发生在它身上。\n**记忆**：分片 → map → shuffle → reduce → 输出。",
+          "enterprise_tip": "面试画图题：把五个阶段画成流程图并标注『数据在哪』——分片在 HDFS、map 输出在本地磁盘、shuffle 在磁盘+网络、reduce 输出回 HDFS。能标对『落盘位置』直接加分。"
+        },
+        {
+          "task_id": "s04c04t03",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：MapReduce 为什么慢",
+          "question": "MapReduce 被称为『慢』的最主要原因是？",
+          "options": [
+            {
+              "text": "编程语言 Java 本身性能差",
+              "correct": false,
+              "explain": "Java 性能并不差，瓶颈不在语言。"
+            },
+            {
+              "text": "中间结果大量落盘（磁盘 IO），且每次任务启动 JVM 开销大",
+              "correct": true,
+              "explain": "正确。map 输出、shuffle、reduce 输入都涉及磁盘读写，加上每个 task 一个 JVM 进程，整体 IO 开销巨大。"
+            },
+            {
+              "text": "它只能处理文本文件",
+              "correct": false,
+              "explain": "MR 能处理多种格式，这不是慢的原因。"
+            },
+            {
+              "text": "集群节点太少",
+              "correct": false,
+              "explain": "节点多少影响吞吐，但不是 MR 框架本身慢的根本原因。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 回忆 MR 执行流程：map 输出先写本地磁盘，shuffle 落盘+跨节点传输，reduce 输入又要读盘。\n2. 每一轮都是磁盘 IO，磁盘比内存慢几个数量级，这就是主要瓶颈。\n3. 此外每个 task 启动独立 JVM，小任务时启动开销占比很大。\n4. 选 B。\n**延伸**：Spark 把中间结果放内存，所以快 10~100 倍，但 shuffle 仍需落盘。",
+          "enterprise_tip": "面试题『为什么 Spark 比 MR 快？』核心答三点：① 中间结果尽量驻留内存；② DAG 复用、减少落盘次数；③ 更轻量的线程模型（相对每 task 一个 JVM）。"
+        },
+        {
+          "task_id": "s04c04t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Shuffle 阶段的作用",
+          "question": "在 MapReduce 中，**Shuffle（洗牌）阶段**的核心作用是下列哪一项？",
+          "options": [
+            {
+              "text": "把输入文件切分成多个分片，决定 map 任务数量",
+              "correct": false,
+              "explain": "那是输入分片（InputSplit）的工作，发生在 map 之前，不属于 Shuffle。"
+            },
+            {
+              "text": "把 map 输出的中间结果按 key 排序、分组，并传输到对应的 reduce 节点",
+              "correct": true,
+              "explain": "正确。Shuffle 保证「相同 key 的数据进入同一个 reducer」，是 map 与 reduce 之间的桥梁。"
+            },
+            {
+              "text": "把 reduce 的最终结果写回 HDFS",
+              "correct": false,
+              "explain": "写回 HDFS 是作业的输出阶段，发生在 reduce 之后。"
+            },
+            {
+              "text": "在 map 端直接输出最终统计结果",
+              "correct": false,
+              "explain": "map 只输出中间键值对，最终聚合由 reduce 完成。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Shuffle 的位置：介于 map 输出与 reduce 输入之间，是「中间结果流转」的过程。\n2. 它的三件事：按 key 排序 → 按 key 分区 → 跨节点传输到对应 reducer（相同 key 归一组）。\n3. 排除干扰项：分片是 InputSplit、写回 HDFS 是输出阶段、map 不产最终结果。\n4. 选 B。\n**延伸**：Shuffle 是 MR 最耗时的环节（排序+落盘+网络传输），也是面试高频考点；Spark 的 shuffle 思想与之同源。",
+          "enterprise_tip": "面试题「Shuffle 里发生了什么」：排序（sort）、分区（partition）、溢写落盘（spill）、合并（merge）、跨节点拉取（fetch）。能说出这五步并指出哪一步最耗时，直接加分。"
+        },
+        {
+          "task_id": "s04c04t05",
+          "type": "python",
+          "difficulty": 3,
+          "title": "纯 Python 模拟 reduceByKey",
+          "question": "模拟 Spark 中 `reduceByKey` 的思想：给定 `pairs` 列表（元素是 `(word, 1)` 二元组），请**把相同 word 的计数求和**，并按 **word 的字母序**逐行输出 `word count` 格式（例如 `hadoop 3`）。\n只允许使用 Python 标准库。",
+          "code_context": "pairs = [('hadoop', 1), ('spark', 1), ('hadoop', 1), ('hive', 1), ('spark', 1), ('hadoop', 1), ('flink', 1)]\n\n# ===== 在这里编写代码 =====\n# ① 聚合：相同 word 的计数累加（模拟 reduceByKey）\n# ② 按 word 字母序输出 'word count'\n",
+          "reference": "pairs = [('hadoop', 1), ('spark', 1), ('hadoop', 1), ('hive', 1), ('spark', 1), ('hadoop', 1), ('flink', 1)]\n\n# ① 聚合：模拟 reduceByKey，相同 word 的 value 求和\ncounts = {}\nfor word, n in pairs:\n    counts[word] = counts.get(word, 0) + n\n\n# ② 按 word 字母序输出 'word count'\nfor word in sorted(counts):\n    print(word, counts[word])\n",
+          "expected_output": "flink 1\nhadoop 3\nhive 1\nspark 2",
+          "hint": "回忆 reduceByKey 本质：相同 key 的 value 怎么合并？取旧值累加用哪个方法？输出顺序？",
+          "analysis": "**标准解题思路**\n1. **理解输入**：pairs 是 7 个 (word, 1) 二元组，其中 hadoop 出现 3 次、spark 2 次、hive 1 次、flink 1 次。\n2. **聚合（模拟 reduceByKey）**：遍历 pairs，用字典累加——counts[word] = counts.get(word, 0) + n，得到 {hadoop:3, spark:2, hive:1, flink:1}。\n3. **排序输出**：for word in sorted(counts) 按字母序遍历，print(word, counts[word]) 输出一行「单词 次数」。\n4. 输出顺序：flink → hadoop → hive → spark（字母序）。\n**易错点**：① 必须排序，不排序输出顺序不确定，比对不通过；② 一行输出单词和次数，用 print(word, counts[word])；③ 不要 import 第三方库，字符串用 ASCII 引号。\n**对照真实 Spark**：dict 聚合等价于 reduceByKey 的「相同 key 求和」，sorted 等价于 shuffle 的按 key 排序。",
+          "enterprise_tip": "面试让你「手写 reduceByKey 的单机版」：先按 key 分组（dict.get 累加）再排序输出，就是上面这段代码；分布式版则要说清 shuffle 按 key 分组 + reduce 求和，并提到 map 端 Combiner 预聚合可减少 shuffle 数据量。"
+        },
+        {
+          "task_id": "s04c04t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Shuffle 阶段的数据传输",
+          "question": "在 MapReduce 的 Shuffle 阶段，**reducer 获取自己负责的 key 的数据**的方式是？",
+          "options": [
+            {
+              "text": "各 map 节点把中间结果按 key 分区后落盘，reducer 通过网络从对应分区拉取（fetch）",
+              "correct": true,
+              "explain": "正确。map 输出按 key 分区写到本地磁盘，每个 reducer 主动去各 map 节点拉取属于自己分区的数据。"
+            },
+            {
+              "text": "所有中间结果先统一汇总到 NameNode，再由 reducer 去 NameNode 领取",
+              "correct": false,
+              "explain": "错误。NameNode 不碰数据本体，只存元数据，中间结果不可能经过它。"
+            },
+            {
+              "text": "map 与 reduce 在同一节点顺序执行，无需任何网络传输",
+              "correct": false,
+              "explain": "错误。map 和 reduce 通常分布在不同节点，shuffle 必然涉及跨节点传输。"
+            },
+            {
+              "text": "reducer 直接读取 HDFS 上 map 的完整输出",
+              "correct": false,
+              "explain": "错误。map 输出先落在本地磁盘（不是 HDFS），reducer 是按分区拉取，不是读完整输出。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Shuffle 的完整链路：map 输出先排序、按 key **分区**（partition）、溢写落盘（spill）到**本地磁盘**；\n2. 每个 reducer 对应一个分区号，reducer 启动后主动向各 map 节点**拉取（fetch）**自己分区的那部分数据，再做合并排序；\n3. 所以 reducer 拿数据的动作是「主动拉取」，数据源是各 map 节点的本地磁盘，传输走网络，**不经过 NameNode**。\n4. 选 A。\n**易错点**：① 以为数据经过 NameNode——NN 只管元数据；② 以为 reducer 读 HDFS——map 中间结果在本地磁盘，只有最终结果才写 HDFS。\n**面试五步**：排序（sort）→ 分区（partition）→ 溢写（spill）→ 合并（merge）→ 拉取（fetch），其中拉取与落盘都是 IO 大户，这就是 Shuffle 被称为「性能黑洞」的原因。",
+          "enterprise_tip": "面试题「Shuffle 里发生了什么」：能说出 sort/partition/spill/merge/fetch 五步并指出「reducer 主动拉取 + 跨节点网络传输」最耗时，直接加分；Spark 的 shuffle 思想与 MR 同源。"
+        },
+        {
+          "task_id": "s04c04t07",
+          "type": "python",
+          "difficulty": 2,
+          "title": "纯 Python 模拟 Map 阶段：句子切词",
+          "question": "模拟 MapReduce 的 **map 阶段**：给定句子 `sentence = 'hadoop spark hadoop hive'`，请把它**按空格切词**，为每个单词输出一行 `单词 1`（即模拟 map 输出的中间结果 (word, 1)），**按单词在句子中出现的顺序**输出。\n注意：map 阶段**不做**计数合并，重复出现的单词也要各输出一行。\n只允许使用 Python 标准库。",
+          "code_context": "sentence = 'hadoop spark hadoop hive'\n\n# ===== 在这里编写代码 =====\n# ① 用 split() 把句子切成单词\n# ② 每个单词输出一行 'word 1'（模拟 map 输出 (word, 1)）\n",
+          "expected_output": "hadoop 1\nspark 1\nhadoop 1\nhive 1",
+          "reference": "sentence = 'hadoop spark hadoop hive'\n\nfor word in sentence.split():\n    print(word, 1)",
+          "hint": "先想：map 阶段只负责「切词 + 产出 (word,1)」，计数合并该在这里做吗？切词用什么方法？",
+          "analysis": "**标准解题思路**\n1. **切词**：`sentence.split()` 按空白把句子切成单词列表 ['hadoop', 'spark', 'hadoop', 'hive']。\n2. **模拟 map 输出**：遍历每个单词，print(word, 1) 输出一行「单词 1」，即 map 阶段的中间结果 (word, 1)。\n3. **不做合并**：hadoop 出现两次就输出两行 hadoop 1——真实 MR 中 map 输出就是逐词产出 (k,v)，计数累加发生在 shuffle 分组之后的 reduce 阶段。\n4. 输出顺序按单词出现顺序，天然确定。\n**易错点**：① 用字典聚合把 hadoop 合并成 2——那就把 reduce 的活提前干了，不是本题要的 map 阶段；② 输出格式写成 'hadoop,1' 或 'word:1' 都与比对格式不符。\n**对照真实 MR**：这个 for 循环就是 map 函数的核心逻辑；shuffle 会把两个 hadoop 归到一组，reduce 再求和得 hadoop 2。",
+          "enterprise_tip": "面试手写 WordCount 时先写 map 再写 reduce：map 就是「切词 + 输出 (word,1)」，reduce 就是「同 key 求和」——把阶段边界说清楚，证明你真懂 MR 模型而不是背代码。"
+        },
+        {
+          "task_id": "s04c04t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Map 与 Reduce 之间的数据传输",
+          "question": "MapReduce 中，Map 任务输出的中间数据是如何到达 Reduce 任务的？",
+          "options": [
+            {
+              "text": "通过 Shuffle：map 输出先排序分区落本地磁盘，reduce 启动后按分区通过网络拉取",
+              "correct": true,
+              "explain": "正确。Shuffle 的『拉取（fetch）』就是 map 与 reduce 之间的数据传输通道。"
+            },
+            {
+              "text": "map 直接写入 HDFS，reduce 从 HDFS 读取",
+              "correct": false,
+              "explain": "map 中间结果在本地磁盘，只有最终结果才写 HDFS。"
+            },
+            {
+              "text": "所有中间数据先汇总到 NameNode 再分发给 reduce",
+              "correct": false,
+              "explain": "NN 只存元数据，不承担数据传输。"
+            },
+            {
+              "text": "map 与 reduce 必须运行在同一节点，通过共享内存传递",
+              "correct": false,
+              "explain": "任务分散在不同节点，必须走网络传输（shuffle 拉取）。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. map 输出先写本地磁盘（不是 HDFS），按 key 分区、分区内排序。\n2. reduce 启动后主动向各 map 节点**拉取**属于自己分区的数据（fetch），走网络传输。\n3. 拉来的数据归并排序、分组后交给 reduce 函数——这一整套就是 Shuffle。\n4. 排除干扰项：中间结果不写 HDFS、不经过 NameNode、map/reduce 不在同一节点。\n5. 选 A。\n**延伸**：Shuffle 是 MR 最耗时的环节（落盘 + 网络），也是 Spark shuffle 思想的源头。",
+          "enterprise_tip": "面试题『MR 慢在哪』：map 输出落盘、shuffle 跨节点网络传输、reduce 输入读盘——三处 IO；能指出『reduce 端主动拉取』是网络大户就到位了。"
+        },
+        {
+          "task_id": "s04c04t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：MR 推测执行",
+          "question": "MapReduce 的**推测执行（Speculative Execution）**机制的作用是？",
+          "options": [
+            {
+              "text": "当某个 task 明显比其他 task 慢（节点故障/负载高导致）时，在另一节点启动**相同任务的副本**，先完成的副本作为结果",
+              "correct": true,
+              "explain": "正确。推测执行在别的节点跑一个相同任务的副本，用先完成的那个，对抗慢节点。"
+            },
+            {
+              "text": "在执行前预先估算每个 task 的运行时间用于排队",
+              "correct": false,
+              "explain": "错误。那是资源预估/调度的事，不是推测执行。"
+            },
+            {
+              "text": "把 map 阶段的结果提前送到 reduce 阶段",
+              "correct": false,
+              "explain": "错误。map 结果传输是 shuffle 的职责。"
+            },
+            {
+              "text": "把多个小任务合并成一个大任务执行",
+              "correct": false,
+              "explain": "错误。那是任务合并（如小文件合并）的思路，与推测执行无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 背景问题：集群中某台机器变慢/故障，跑在它上面的 task 会拖慢整个作业。\n2. 推测执行：框架监测到某 task 进度明显落后时，在**另一节点**启动一个相同任务的副本，两个任务谁先完成就用谁的结果，另一个被 kill。\n3. 作用：对抗「慢节点」，提升作业完成稳定性。\n4. 排除干扰项：不是估算时间、不是提前 reduce、不是合并任务。\n5. 选 A。\n**延伸**：数据倾斜时推测执行反而有害（慢任务被反复投机、浪费资源）——生产上先关推测执行再治理倾斜；参数 mapreduce.map.speculative / mapreduce.reduce.speculative。",
+          "enterprise_tip": "推测执行能救「被慢节点拖住」的任务，但数据倾斜时反而浪费资源（慢任务被反复投机）；生产倾斜场景常关闭 mapreduce.map.speculative 并先治理倾斜。"
+        },
+        {
+          "task_id": "s04c04t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Map 端 Join 的实现",
+          "question": "MR 的 **Map 端 Join**（小表 join 大表）是如何实现的？",
+          "options": [
+            {
+              "text": "把**小表**通过 DistributedCache 分发到每个 map 节点并加载进内存，map 边读大表边查内存中的小表完成 join，**避免 shuffle**",
+              "correct": true,
+              "explain": "正确。小表广播进 map 内存，大表只扫一遍，免去 shuffle。"
+            },
+            {
+              "text": "把大表广播给所有 reduce 节点",
+              "correct": false,
+              "explain": "错误。广播的是小表（大表广播内存装不下），而且 Map 端 Join 根本不需要 reduce。"
+            },
+            {
+              "text": "Map 端 Join 只适用于两张表一样大的场景",
+              "correct": false,
+              "explain": "错误。恰恰相反，它要求「一小一大」，小表必须能装进单节点内存。"
+            },
+            {
+              "text": "Map 端 Join 仍然要经过完整的 shuffle",
+              "correct": false,
+              "explain": "错误。这正是它省 shuffle、省网络 IO 的意义所在。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 需求：小表（如维度表）join 大表（如事实表），若走常规流程要 shuffle 大表数据，代价大。\n2. Map 端 Join 思路：把**小表**提前分发到所有 map 节点（DistributedCache），map 启动时加载进内存。\n3. map 读大表时，直接查内存中的小表完成匹配，**不需要 shuffle**——大表只扫一遍。\n4. 前提：小表必须能放进单节点内存（几 MB ~ 几百 MB 级别）。\n5. 选 A。\n**延伸**：Hive 的 hive.auto.convert.join 自动把小表 join 转成 map join；Spark 的 broadcast join 是同一思想。面试答「map join 免 shuffle、适合一大一小」是标准答案。",
+          "enterprise_tip": "数仓 join 优化第一招「小表驱动大表 + map join」：Hive 的 hive.auto.convert.join 自动做这层优化；小表内存放不下时先过滤、裁剪再广播。"
+        },
+        {
+          "task_id": "s04c04t11",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：MR 计数器",
+          "question": "MapReduce 中，通过 `job.getCounters()` 获取的作业统计信息（如处理的记录数、字节数、失败数）称为 ____（英文单词，直译「计数器」）。",
+          "answer": [
+            "Counter",
+            "Counters",
+            "计数器",
+            "counter"
+          ],
+          "hint": "先回忆：MR 里记录作业统计信息（记录数、字节数）的对象叫什么？",
+          "analysis": "**标准解题思路**\n1. 计数器（Counter）：MR 框架内置的统计机制，记录作业运行中的各类计数（输入/输出记录数、字节数、失败数等）。\n2. 使用：Map/Reduce 代码里 context.getCounter(组名, 计数名).increment(1)；提交后 job.getCounters() 读取。\n3. 作用：验证数据处理量、监控作业质量、调试。\n4. 填 Counter。\n**延伸**：生产里「校验输入 1000 万行、输出 999 万行、过滤 1 万行」靠计数器对齐；比解析日志可靠得多。",
+          "enterprise_tip": "生产用计数器验证任务质量：处理了多少行、跳过多少脏数据写进计数器，比 grep 日志靠谱；监控平台常采集 job counters 做任务质量告警。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "Map 阶段和 Reduce 阶段分别做什么？",
+          "a": "Map 把输入行拆成中间键值对 (k,v)（如 (word,1)）；Reduce 把相同 key 的中间值聚合（如求和）。中间由 Shuffle 负责按 key 分组传输。"
+        },
+        {
+          "q": "Shuffle 阶段发生了什么？",
+          "a": "把 map 输出的中间结果按 key 排序、分区、溢写落盘，再跨节点传输到对应 reducer；是 MR 最耗时的环节。"
+        },
+        {
+          "q": "为什么 MapReduce 慢？",
+          "a": "中间结果大量落盘（map 输出、shuffle、reduce 输入都要磁盘 IO），且每个 task 启动独立 JVM 开销大；Spark 把中间结果放内存所以快得多。"
+        },
+        {
+          "q": "Combiner 是什么？有什么用？",
+          "a": "在 map 端先做一次局部聚合的优化器，减少 shuffle 传输的数据量，逻辑一般与 reducer 相同（如求和）。"
+        },
+        {
+          "q": "什么是数据倾斜？对 MR 有什么影响？",
+          "a": "某个 key 的数据量远大于其他 key，导致个别 reducer 扛 90% 数据、其他 reducer 空闲，整个作业被最慢任务拖死。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Map",
+          "desc": "映射阶段，把输入拆成中间键值对，各任务独立并行执行。"
+        },
+        {
+          "term": "Reduce",
+          "desc": "归约阶段，把相同 key 的中间值聚合，输出最终结果。"
+        },
+        {
+          "term": "Shuffle",
+          "desc": "map 与 reduce 之间的数据流转：排序、分区、落盘、跨节点传输。"
+        },
+        {
+          "term": "InputSplit（分片）",
+          "desc": "输入文件按块切分出的处理单元，一个分片对应一个 map 任务。"
+        },
+        {
+          "term": "WordCount",
+          "desc": "词频统计，MapReduce 的经典入门案例。"
+        },
+        {
+          "term": "Combiner",
+          "desc": "map 端的局部聚合器，用于减少 shuffle 数据量。"
+        },
+        {
+          "term": "键值对（Key-Value）",
+          "desc": "MapReduce 中数据的基本形态，map 输出 (k,v)，reduce 按 k 聚合。"
+        },
+        {
+          "term": "本地磁盘",
+          "desc": "map 输出中间结果的落盘位置，是 MR 性能瓶颈之一。"
+        }
+      ],
+      "kps": [
+        "MapReduce 分而治之思想与两阶段模型（Map/Reduce）",
+        "Map 阶段：输入 (k,v) → 输出中间 (k',v')",
+        "Shuffle 阶段：排序、分区、落盘、传输（相同 key 进同一 reducer）",
+        "Reduce 阶段：同 key 分组聚合",
+        "WordCount 案例（map 出 (word,1)，shuffle 分组，reduce 求和）",
+        "作业执行流程（InputSplit → map → shuffle → reduce → 输出）",
+        "为什么 MapReduce 慢（磁盘 IO、JVM 开销）",
+        "Combiner 与数据倾斜等性能点",
+        "Map 与 Reduce 之间的数据传输（Shuffle 网络传输原理）",
+        "任务优化机制：推测执行、Map 端 Join（DistributedCache 小表广播）、计数器（Counter）"
+      ]
+    },
+    {
+      "chapter_id": "s04c05",
+      "title": "4.5 YARN 资源调度",
+      "goal": "掌握 ResourceManager/NodeManager/Container 架构与三种调度器，理解任务提交流程",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "一个 Hadoop 集群是**多租户共享**的：Hive 要跑 SQL、Spark 要跑批、Flink 要跑流、MapReduce 要跑任务——它们都抢同一批机器的 CPU 和内存。如果没人管，任务之间会互相饿死或把机器打爆。\n\n**YARN（Yet Another Resource Negotiator，资源协调器）** 就是 Hadoop 的「**资源调度中心**」：谁想跑任务，都得先向 YARN 申请资源，YARN 统一分配并**隔离**（一个任务的资源不能被别人抢走）。\n\n一句话：**HDFS 管「数据怎么存」，YARN 管「计算资源怎么分」**。"
+        },
+        {
+          "type": "text",
+          "content": "YARN 也是主从架构：\n- **ResourceManager（RM，主）**：全局唯一，负责**资源分配与任务调度**，内部有两个核心组件：**Scheduler（调度器）** 只管分配资源，**ApplicationsManager（应用管理器）** 负责接收任务、启动/监控 ApplicationMaster。\n- **NodeManager（NM，从）**：每台机器一个，负责本机资源（CPU/内存）管理、启动容器、监控容器状态，并向 RM 心跳汇报。\n- **ApplicationMaster（AM）**：**每个应用一个**，是「任务的小管家」：向 RM 申请容器、把任务分给各容器执行、监控进度、失败重试。\n- **Container**：资源分配的最小单位（若干 CPU + 内存），一个容器跑一个 task（map/reduce 等）。\n\n提交流程（以提交一个 MR 任务为例）：客户端提交 → RM 收到并让 AM 启动 → AM 向 RM 申请 N 个 Container → RM 通知对应 NM 启动容器 → 容器里跑 map/reduce 任务 → 全部完成 AM 向 RM 注销，任务结束。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "三种调度器对比：\n\n| 调度器 | 特点 | 适用场景 |\n|---|---|---|\n| FIFO（先来先服务） | 一个队列，先进先出，简单 | 单用户、小集群测试 |\n| 容量调度（Capacity） | 按队列划分资源百分比，队列间隔离，队列内 FIFO | **生产首选（默认）** |\n| 公平调度（Fair） | 所有运行任务**动态平分**资源，无任务时资源可借出 | 多用户、任务多且短的场景 |\n\n生产默认是**容量调度器**：把集群资源按比例分给不同业务线（如 数据仓库 60%、实时 30%、临时 10%），每个队列的资源互相隔离，避免一个业务吃光全集群。\n\n容量调度器配置示例（capacity-scheduler.xml）：\n\n<configuration>\n  <!-- 根队列下分三个子队列 -->\n  <property>\n    <name>yarn.scheduler.capacity.root.queues</name>\n    <value>dws,realtime,temp</value>\n  </property>\n  <!-- dws 队列占 60% 资源 -->\n  <property>\n    <name>yarn.scheduler.capacity.root.dws.capacity</name>\n    <value>60</value>\n  </property>\n  <!-- realtime 队列占 30% -->\n  <property>\n    <name>yarn.scheduler.capacity.root.realtime.capacity</name>\n    <value>30</value>\n  </property>\n</configuration>",
+          "caption": "三种调度器对比与容量调度配置"
+        },
+        {
+          "type": "warning",
+          "content": "**容器 = 最小资源单元**。分配时按「核数 + 内存」描述（如 1 核 2GB），容器之间由 NM 用 cgroup 等机制隔离，防止一个任务把机器内存打满影响其他任务。调参（yarn.nodemanager.resource.memory-mb 等）是运维高频工作：内存配大了任务排队，配小了任务 OOM 反复重试。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- 面试题：① RM 挂了会怎样？（已运行任务不受影响，新任务无法提交，靠 RM HA 恢复）② 三种调度器区别？③ AM 的作用？④ 一个 MR 任务在 YARN 上怎么跑？\n- 生产：大公司集群上千台，按业务线划分队列、设置用户 ACL、配额，是平台治理的核心。\n- 招聘要求：能讲清楚『提交一个任务到 YARN 上发生了什么』的完整链路。\n- 常见坑：队列资源配比不当导致『明明有空闲机器任务却排队』；容器内存配小导致 task OOM 反复重试。"
+        }
+      ],
+      "hands_on": "1. 用 Python 写一个『迷你容量调度器』：定义三个队列（dws 60%、realtime 30%、temp 10%）和一批任务（每个任务带队列名和所需内存），模拟：按队列比例分配总内存，队列内任务按提交顺序排队，打印每个任务分到的内存或排队情况。\n2. 画一张『客户端 → RM → AM → NM → Container』的任务提交流程图。\n3. 搜索招聘网站的『大数据开发』岗位 JD，找出 3 条提到 YARN 的，把相关要求抄下来。",
+      "tasks": [
+        {
+          "task_id": "s04c05t01",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：生产环境调度器",
+          "question": "某公司想把集群资源按业务线划分（数仓 60%、实时 30%、临时 10%），各业务线资源互不侵占，应选用哪种调度器？",
+          "options": [
+            {
+              "text": "FIFO 调度器",
+              "correct": false,
+              "explain": "FIFO 是单队列先来先服务，无法按业务线划分资源。"
+            },
+            {
+              "text": "容量调度器（Capacity Scheduler）",
+              "correct": true,
+              "explain": "正确。容量调度器按队列划分资源百分比并隔离，正好满足按业务线分资源的需求。"
+            },
+            {
+              "text": "公平调度器（Fair Scheduler）",
+              "correct": false,
+              "explain": "公平调度是让运行中的任务动态平分资源，不是按固定比例划分队列。"
+            },
+            {
+              "text": "单机调度器",
+              "correct": false,
+              "explain": "YARN 没有叫『单机调度器』的组件。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 需求关键词：按业务线划分比例 + 资源互不侵占（隔离）。\n2. FIFO：单队列，无法划分。\n3. 公平调度：动态平分，无固定比例队列。\n4. 容量调度：按队列划分 capacity 百分比、队列间隔离——完全匹配需求。\n5. 选 B。\n**延伸**：公平调度适合『任务多、短、无明确业务优先级』的场景。",
+          "enterprise_tip": "面试题『你们公司 YARN 怎么分资源的？』参考答案：容量调度，root 下按业务分 dws/realtime/temp 队列，比例 60/30/10，配 ACL 控制谁能提交。"
+        },
+        {
+          "task_id": "s04c05t02",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：向 YARN 提交任务流程",
+          "question": "把『向 YARN 提交一个 MapReduce 任务』的完整流程按顺序排列。",
+          "steps": [
+            "ApplicationMaster 向 RM 申请 N 个 Container，RM 调度后通知对应 NodeManager 启动容器",
+            "客户端把任务提交给 ResourceManager",
+            "容器内执行 map/reduce 任务，AM 监控进度并在失败时重试",
+            "RM 启动该任务的 ApplicationMaster（AM），AM 在某个 NM 上运行",
+            "所有任务完成后，AM 向 RM 注销，任务结束释放资源"
+          ],
+          "correct_order": [
+            1,
+            3,
+            0,
+            2,
+            4
+          ],
+          "order_explain": "提交流程：客户端提交 → RM 启动 AM → AM 申请容器 → 容器跑任务 → 完成注销。核心是『客户端只跟 RM 打交道，真正的干活协调者是每个应用自己的 AM』。",
+          "analysis": "**标准解题思路**\n1. **提交**：客户端把 job 交给 RM（RM 是集群唯一的『入口』）。\n2. **启动 AM**：RM 为这个任务分配一个 ApplicationMaster，让它在某个 NM 上运行。\n3. **申请容器**：AM 按任务需要的并行度向 RM 申请 N 个 Container，RM 通过调度器决定分配，并通知对应 NM 启动容器。\n4. **执行**：各容器分别跑 map/reduce，AM 负责监控进度、失败重试。\n5. **完成**：全部完成后 AM 向 RM 注销并释放容器，资源归还集群。\n**易错点**：把 AM 和 RM 混为一谈——RM 是全集群唯一，AM 是每个应用一个。\n**记忆**：提交 → 起 AM → 申容器 → 跑任务 → 注销。",
+          "enterprise_tip": "面试追问『为什么每个应用要单独一个 AM？』答：AM 让 YARN 支持多种计算框架（MR/Spark/Flink 各写各的 AM），实现『通用资源调度 + 框架无关』——这是 YARN 的核心设计。"
+        },
+        {
+          "task_id": "s04c05t03",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：YARN 主从节点",
+          "question": "YARN 中，全局唯一的资源调度主节点是 ____；每台机器上负责本机资源管理的从节点是 ____。（两个英文缩写用空格隔开，例如：AA BB）",
+          "answer": [
+            "RM NM",
+            "RM, NM",
+            "ResourceManager NodeManager",
+            "rm nm"
+          ],
+          "hint": "先回忆 YARN 架构：全局调度主节点和单机资源管理从节点各叫什么？再取首字母。",
+          "analysis": "**标准解题思路**\n1. 主节点：ResourceManager，缩写 RM，全局唯一。\n2. 从节点：NodeManager，缩写 NM，每台机器一个。\n3. 填空：RM NM。\n**延伸**：容易混淆的三个缩写——RM（资源调度）、NM（节点管理）、AM（应用管理）；HDFS 那边还有 NN/DN。面试时口误把 RM 说成 NN 会扣分。",
+          "enterprise_tip": "面试题『YARN 的 RM 和 HDFS 的 NN 有什么区别？』答：RM 管计算资源（CPU/内存），NN 管存储元数据（文件/块），一个管算一个管存。"
+        },
+        {
+          "task_id": "s04c05t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：容量调度器与公平调度器的区别",
+          "question": "关于容量调度器（Capacity Scheduler）与公平调度器（Fair Scheduler）的区别，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "容量调度器按队列固定比例划分资源，公平调度器让运行中的任务动态平分资源",
+              "correct": true,
+              "explain": "正确。容量调度按队列配置百分比并隔离；公平调度按任务动态平分，任务多每个分得就少。"
+            },
+            {
+              "text": "公平调度器按队列划分固定比例，容量调度器让任务动态平分",
+              "correct": false,
+              "explain": "说反了。按队列固定比例是容量调度的特点，动态平分是公平调度的特点。"
+            },
+            {
+              "text": "两者完全相同，只是名字不同",
+              "correct": false,
+              "explain": "两者资源分配策略不同：容量是队列配额制，公平是任务平分制。"
+            },
+            {
+              "text": "容量调度器只能有一个队列",
+              "correct": false,
+              "explain": "容量调度器的核心能力恰恰是划分多个队列并按比例分配资源。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 容量调度：把集群资源按队列划分百分比（如数仓 60%、实时 30%），队列间隔离，是生产默认。\n2. 公平调度：运行中的任务动态平分资源，任务多每个分得少，无任务时资源可借出。\n3. 核心区别：容量调度是「按队列配额」，公平调度是「按任务平分」。\n4. 选 A。\n**延伸**：FIFO 是单队列先来先服务；生产默认容量调度，多用户短任务场景用公平调度。",
+          "enterprise_tip": "面试题「你们集群用什么调度器、怎么配的」：答容量调度，root 下分 dws/realtime/temp 三个队列按 60/30/10 配比，再加 ACL 控制谁能提交——这就是平台资源治理的日常。"
+        },
+        {
+          "task_id": "s04c05t05",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：YARN 应用资源管理组件",
+          "question": "YARN 中，**每个应用程序**都会启动一个 ____（英文缩写 AM），负责向 ResourceManager 申请 Container 资源、把任务分发给各容器执行并监控进度。请填写英文名称。",
+          "answer": [
+            "ApplicationMaster",
+            "AM",
+            "Application Master",
+            "application master",
+            "appmaster"
+          ],
+          "hint": "先想：每个应用启动的、负责申请资源和监控进度的组件，英文全称由哪两个单词组成？",
+          "analysis": "**标准解题思路**\n1. YARN 中与「应用资源管理」相关的组件：RM（全局）、NM（每节点）、AM（每应用）、Container（资源单元）。\n2. 每个应用一个 AM：向 RM 申请容器、分发任务、监控进度、失败重试。\n3. 填 ApplicationMaster（AM）。\n**易错点**：AM 与 RM 混淆——RM 是全集群唯一，AM 是每个应用一个；AM 使 YARN 支持多种计算框架（MR/Spark/Flink 各写各的 AM）。",
+          "enterprise_tip": "面试追问「为什么 YARN 能同时跑 MR 和 Spark」：因为每种框架实现自己的 ApplicationMaster，YARN 只负责通用资源调度——这是 YARN 的核心设计思想。"
+        },
+        {
+          "task_id": "s04c05t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：多用户短任务场景调度器",
+          "question": "某公司多个部门共用同一个 YARN 集群，任务**多且短、没有明确的业务优先级**，希望运行中的任务能**动态平分**集群资源（任务少时分得多、任务多时分得少）。应选用哪种调度器？",
+          "options": [
+            {
+              "text": "公平调度器（Fair Scheduler）",
+              "correct": true,
+              "explain": "正确。公平调度让运行中的任务动态平分资源，正是多用户短任务场景的典型选择。"
+            },
+            {
+              "text": "容量调度器（Capacity Scheduler）",
+              "correct": false,
+              "explain": "容量调度按队列固定比例划分并隔离资源，适合按业务线配比的场景，不是「动态平分」。"
+            },
+            {
+              "text": "FIFO 调度器",
+              "correct": false,
+              "explain": "FIFO 单队列先来先服务，不能动态平分资源。"
+            },
+            {
+              "text": "单机调度器",
+              "correct": false,
+              "explain": "YARN 没有名为「单机调度器」的组件。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 读题关键词：「任务多且短」「没有明确的业务优先级」「动态平分资源」——三点都指向**公平调度**。\n2. 公平调度：所有运行中的任务动态平分集群资源，任务多每个分得少、任务少每个分得多，适合多用户、任务多且短的场景。\n3. 对照排除：容量调度是按队列固定百分比（如数仓 60%、实时 30%）且队列间隔离，适合有明确业务线配比的场景；FIFO 单队列无法平分。\n4. 选 A。\n**记忆**：**容量调度分队列、公平调度分任务**——要「按业务线配比」选容量，要「任务动态平分」选公平。\n**延伸**：生产默认是容量调度器；公平调度在资源紧张时会公平地给每个任务一份，避免个别大任务饿死小任务。",
+          "enterprise_tip": "面试题「你们集群用哪种调度器、为什么」：容量调度按业务线划队列（dws/realtime/temp）保证隔离；若你们是统一平台、任务多且短、无明确优先级，可论证换公平调度的收益——能讲出选型理由比背概念值钱。"
+        },
+        {
+          "task_id": "s04c05t07",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：NodeManager 的职责",
+          "question": "YARN 中，每台机器上负责**本机 CPU/内存资源管理、启动与监控容器、并向 ResourceManager 定期心跳汇报**的从节点组件是 ____（填英文缩写）。",
+          "answer": [
+            "NM",
+            "NodeManager",
+            "Nodemanager",
+            "Node Manager",
+            "node manager",
+            "nodemanager"
+          ],
+          "hint": "先回忆 YARN 从节点的职责：负责本机资源管理与容器监控的组件叫什么？",
+          "analysis": "**标准解题思路**\n1. YARN 主从架构：RM（全局资源调度）+ NM（每台机器一个）。\n2. NodeManager 的职责三件套：① 管理本机 CPU/内存资源；② 启动并监控本机上的 Container；③ 向 RM 心跳汇报本机资源与容器状态。\n3. 填 NM（或全称 NodeManager）。\n**易错点**：把 NM 和 AM 搞混——NM 是每台机器一个的常驻从节点；AM 是每个应用一个的「任务小管家」，向 RM 申请容器。三者关系：AM 向 RM 申请容器 → RM 通知对应 NM 启动容器 → NM 在本机拉起并监控。\n**对照记忆**：HDFS 的 DN 存数据、YARN 的 NM 管资源，两个「从节点」职责完全不同，面试口误会扣分。",
+          "enterprise_tip": "面试题「NM 和 RM 什么关系」：NM 每 3 秒向 RM 心跳上报本机资源（可用内存/核数/运行中的容器），RM 据此做全局调度决策——心跳是分布式系统「探活 + 汇报」的标准手段。"
+        },
+        {
+          "task_id": "s04c05t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Container 的底层隔离机制",
+          "question": "YARN 中，Container 之间『资源隔离、互不干扰』的底层实现机制是？",
+          "options": [
+            {
+              "text": "Linux 的 cgroup 等机制限制每个容器的 CPU 与内存使用上限",
+              "correct": true,
+              "explain": "正确。NodeManager 用 cgroup 把容器的 CPU/内存配额写死，防止一个任务打爆机器。"
+            },
+            {
+              "text": "每个 Container 启动一个独立的虚拟机",
+              "correct": false,
+              "explain": "Container 是进程级资源单元，不是虚拟机，启动成本低得多。"
+            },
+            {
+              "text": "通过数据库锁保证容器轮流独占 CPU",
+              "correct": false,
+              "explain": "资源隔离靠 cgroup 限额，不是锁。"
+            },
+            {
+              "text": "容器之间不做任何隔离，只是逻辑划分",
+              "correct": false,
+              "explain": "没有隔离，一个任务就能把机器资源吃光影响所有任务，YARN 的隔离设计就落空了。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Container 是什么：YARN 资源分配的最小单位（若干 CPU + 内存），一个容器跑一个 task。\n2. 隔离的底层：NodeManager 用 **Linux cgroup** 限制每个容器进程组的 CPU 配额与内存上限——超额会被限制或杀掉，不影响其他容器。\n3. 为什么需要：多租户共享集群，一个任务的资源不能被别人抢走，也不能打爆机器。\n4. 排除干扰项：不是虚拟机（太重）、不是锁、不是无隔离。\n5. 选 A。\n**延伸**：容器内存配小了任务 OOM 反复重试、配大了资源排队——调 yarn.nodemanager.resource.memory-mb 是运维高频活。",
+          "enterprise_tip": "面试题『容器内存怎么配』：按 yarn.nodemanager.resource.memory-mb 总量减去系统预留，再按队列分配；容器 OOM 时看 cgroup 是否触发 kill——底层机制了解清楚，调参才有依据。"
+        },
+        {
+          "task_id": "s04c05t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：容量调度的弹性与抢占",
+          "question": "容量调度器下，数仓队列空闲、实时队列资源不足时，实时任务可以「借用」数仓队列的空闲资源；当数仓队列需要回收时，这个机制称为？",
+          "options": [
+            {
+              "text": "容量调度器的资源弹性借出 + **抢占（Preemption）**：队列空闲资源可被其他队列使用，超额部分在需要时被抢占回收",
+              "correct": true,
+              "explain": "正确。队列间弹性借出 + 抢占回收是容量调度器的核心治理机制。"
+            },
+            {
+              "text": "这是 FIFO 调度器的特性",
+              "correct": false,
+              "explain": "错误。FIFO 是单队列，不存在队列间借出与抢占。"
+            },
+            {
+              "text": "抢占是默认开启且无需配置的",
+              "correct": false,
+              "explain": "错误。抢占需要配置 yarn.resourcemanager.scheduler.monitor.enable 等参数，不是默认开启。"
+            },
+            {
+              "text": "把两个队列合并成一个队列",
+              "correct": false,
+              "explain": "错误。合并队列会破坏业务线隔离，不是资源治理手段。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 容量调度器的队列有 capacity（保证容量）与 maximum-capacity（上限），队列空闲时资源可被其他队列**借用**（弹性）。\n2. 当队列需要回收被借出的资源时，调度器的监控器通过**抢占（Preemption）**杀掉/回收超额任务——这就是题目描述的场景。\n3. 前提：抢占需配置开启（yarn.resourcemanager.scheduler.monitor.enable=true + ProportionalCapacityPreemptionPolicy 等）。\n4. 排除干扰项：不是 FIFO 的特性；不是默认开启；不是合并队列。\n5. 选 A。\n**延伸**：抢占的代价：被抢占的 task 重新执行、浪费已算结果——生产上对「实时/核心」队列开抢占、对批量队列谨慎；面试答「弹性借出 + 抢占回收」是完整答案。",
+          "enterprise_tip": "生产资源治理核心：队列容量比例 + 弹性借出 + 抢占开关 + 用户 ACL；抢占有代价（被抢占的 task 重新执行），一般只对优先级明确的核心队列开启。"
+        },
+        {
+          "task_id": "s04c05t10",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：YARN 日志聚合",
+          "question": "把每个容器（task）的日志**统一收集到 HDFS** 集中存储、便于用 `yarn logs` 一条命令查看的配置项是 `____`（yarn-site.xml 中设为 true；填英文配置名）。",
+          "answer": [
+            "yarn.log-aggregation-enable",
+            "yarn.log-aggregation-enable=true",
+            "log-aggregation-enable"
+          ],
+          "hint": "先想：日志聚合功能在哪个配置文件？配置名由「日志聚合」和「启用」两个英文词组成。",
+          "analysis": "**标准解题思路**\n1. 问题背景：task 日志默认写在所在节点本地磁盘，任务结束/节点回收后日志难找。\n2. 日志聚合（Log Aggregation）：把每个容器（task）的日志统一收集到 HDFS 集中存放。\n3. 配置：yarn-site.xml 中 yarn.log-aggregation-enable=true（以及 yarn.log-aggregation.retain-seconds 保留时间）。\n4. 查看：yarn logs -applicationId <id> 一条命令拉取全部容器日志。\n5. 填 yarn.log-aggregation-enable。\n**延伸**：不开聚合时，可在节点本地 yarn.nodemanager.log-dirs 找日志，但节点故障日志就丢了；开聚合后任务失败排查效率大幅提升。",
+          "enterprise_tip": "任务失败排查全靠日志聚合：开 enable 后 yarn logs -applicationId 一条命令拉全部容器日志；不开则日志散落在各节点本地，节点一回收就没了。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "YARN 中 RM、NM、AM、Container 各自职责？",
+          "a": "RM 全局资源调度；NM 每台机器管理本机资源并启动容器；AM 每个应用一个，向 RM 申请资源、管理任务；Container 是资源分配的最小单位（CPU+内存）。"
+        },
+        {
+          "q": "三种调度器的区别？",
+          "a": "FIFO 单队列先来先服务；容量调度按队列比例划分并隔离（生产默认）；公平调度让运行中任务动态平分资源。"
+        },
+        {
+          "q": "一个 MR 任务在 YARN 上怎么跑？",
+          "a": "客户端提交给 RM → RM 启动该应用的 AM → AM 向 RM 申请 N 个 Container → RM 通知对应 NM 启动容器 → 容器跑 map/reduce → 完成后 AM 注销释放资源。"
+        },
+        {
+          "q": "RM 挂了会怎样？",
+          "a": "已运行的任务不受影响，但新任务无法提交；生产上 RM 也做 HA（Active/Standby），故障自动切换。"
+        },
+        {
+          "q": "Container 是什么？为什么需要隔离？",
+          "a": "Container 是 YARN 资源分配的最小单位（若干核+内存），NM 用 cgroup 等机制隔离，防止一个任务把机器资源打满影响其他任务。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "ResourceManager（RM）",
+          "desc": "YARN 主节点，全局唯一的资源调度中心。"
+        },
+        {
+          "term": "NodeManager（NM）",
+          "desc": "YARN 从节点，每台机器一个，负责本机资源管理与容器启停。"
+        },
+        {
+          "term": "ApplicationMaster（AM）",
+          "desc": "每个应用一个，向 RM 申请资源并管理该应用的 task 执行。"
+        },
+        {
+          "term": "Container",
+          "desc": "YARN 资源分配的最小单位，描述一组 CPU 与内存。"
+        },
+        {
+          "term": "容量调度器（Capacity Scheduler）",
+          "desc": "按队列划分资源百分比并隔离的调度器，生产默认。"
+        },
+        {
+          "term": "公平调度器（Fair Scheduler）",
+          "desc": "让运行中的任务动态平分集群资源的调度器。"
+        },
+        {
+          "term": "FIFO 调度器",
+          "desc": "单队列先来先服务的调度器，适合单用户小集群。"
+        },
+        {
+          "term": "YARN",
+          "desc": "Yet Another Resource Negotiator，Hadoop 的统一资源调度框架。"
+        }
+      ],
+      "kps": [
+        "YARN 的定位（资源调度中心、多租户共享）",
+        "ResourceManager：Scheduler + ApplicationsManager",
+        "NodeManager：本机资源管理与容器启停",
+        "ApplicationMaster：每应用一个，申请资源、监控任务",
+        "Container：资源最小单元与隔离",
+        "任务提交流程（提交→启 AM→申请容器→执行→注销）",
+        "三种调度器（FIFO/容量/公平）与选型",
+        "容量调度器的队列配置",
+        "Container 资源隔离的底层机制（Linux cgroup）",
+        "队列资源抢占（Preemption）与日志聚合（Log Aggregation）"
+      ]
+    },
+    {
+      "chapter_id": "s04c06",
+      "title": "4.6 集群部署与高可用",
+      "goal": "掌握集群部署五步流程与 HA 高可用原理，能排查常见故障",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "生产部署一套 Hadoop 集群的**标准五步**：\n1. **规划**：确定节点角色分工——通常 3 台起步：1 台主节点（NN+RM）、2 台从节点（DN+NM）；大集群主节点单独、从节点几十~几百台。同时规划主机名、IP、磁盘挂载、内存。\n2. **免密登录**：配置 SSH 密钥，让主节点能免密登录所有从节点（`ssh-keygen` 生成密钥 + `ssh-copy-id` 分发），这是分布式部署/启停的前提。\n3. **配置**：修改 core-site.xml、hdfs-site.xml、yarn-site.xml、mapred-site.xml 等，写清楚 NN 地址、副本数、资源参数。\n4. **启动**：先 `hdfs namenode -format` 格式化（仅首次），再 `start-dfs.sh` 启动 HDFS、`start-yarn.sh` 启动 YARN。\n5. **验证**：`jps` 查看各节点进程是否齐全，浏览器访问 NN 的 Web 页面看集群状态，跑一个 WordCount 或上传文件验证读写。\n\n企业常用 **CDH/CDP** 等发行版 + **Cloudera Manager** 图形化部署管理，也有 **Ambari**（HDP），但手工部署的原理必须懂。"
+        },
+        {
+          "type": "code",
+          "lang": "bash",
+          "content": "# 部署核心命令速览（以 3 节点集群为例）\n\n# 1. 免密登录：在主节点生成密钥并分发到所有节点\nssh-keygen -t rsa -P '' -f ~/.ssh/id_rsa\nssh-copy-id hadoop@node01\nssh-copy-id hadoop@node02\nssh-copy-id hadoop@node03\n\n# 2. 首次启动前格式化 NameNode（只在第一次！）\nhdfs namenode -format\n\n# 3. 启动 HDFS 与 YARN\nstart-dfs.sh\nstart-yarn.sh\n\n# 4. 验证：各节点进程\njps\n# 主节点应有：NameNode SecondaryNameNode ResourceManager\n# 从节点应有：DataNode NodeManager\n\n# 5. 验证读写：上传下载一个文件\nhdfs dfs -mkdir -p /test\nhdfs dfs -put /etc/hosts /test/\nhdfs dfs -cat /test/hosts",
+          "caption": "从格式化到启动验证的核心命令"
+        },
+        {
+          "type": "text",
+          "content": "**单点故障**：NameNode 只有一个时，它挂了整个集群就不可用（元数据是唯一账本）。**HA（High Availability，高可用）** 方案：\n- **双 NameNode**：**Active（活跃）** 和 **Standby（备用）**，两者元数据保持同步，Active 挂了 Standby 秒级接管。\n- **JournalNode（JN）**：Active NN 把每次元数据修改（EditLog）实时写入一组 JournalNode（通常 3 个，多数派写入），Standby NN 从 JN 读日志保持同步——**JN 是双 NN 之间的『同步通道』**。\n- **ZooKeeper（ZK）**：分布式协调器，负责**自动选主**——Active NN 挂掉后，ZK 让 Standby 自动升级为 Active；ZK 还防止**脑裂**（两个 NN 同时认为自己是 Active 的极端情况，通过 fencing 机制踢掉旧的）。\n- 客户端通过 **ZKFailoverController** 感知当前 Active 是哪个。\n\n一句话：**ZooKeeper 选主 + JournalNode 同步 + Active/Standby 双 NN = HDFS 高可用**。ResourceManager 也有类似的 HA 方案。"
+        },
+        {
+          "type": "warning",
+          "content": "**生产常见故障**：\n- **磁盘满**：DataNode 写不了数据，块副本数低于阈值，集群进入异常状态。排查：`df -h` 看各节点磁盘，清理日志/临时数据，或扩容。\n- **DataNode 掉线**：心跳超时（默认 10 分钟判定 dead），NN 会把该 DN 上的块**重新复制**到其他节点补齐副本。排查：看 DN 日志（磁盘满、内存不足、网络抖动都会引起）。\n- **NameNode 元数据损坏**：edits/fsimage 损坏，靠 SecondaryNameNode 或 HA 的 Standby 恢复。\n- **小文件堆积**：见 4.2 章，会拖垮 NN 内存。\n排查套路：先 `jps` 看进程 → 再看对应日志（hadoop-xxx.log）→ 用 `hdfs dfsadmin -report` 看集群/节点健康 → 对症处理。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- **生产集群规模**：小公司 5~20 台，中型 50~200 台，大厂上千台；每台 16~64 核、64~256GB 内存、4~12TB 磁盘。\n- **面试必问**：① 部署一个集群的流程？② HA 为什么需要 ZooKeeper 和 JournalNode？③ Active NN 挂了会发生什么？④ 集群常见故障怎么排查？\n- **招聘要求**：『有集群搭建/运维经验』是高级岗硬条件；初级岗至少能把 HA 原理讲清楚。\n- **常见坑**：格式化 NN 前忘记备份元数据；HA 中误停 ZooKeeper 导致选主失败；`dfs.replication` 配错导致副本告警。"
+        }
+      ],
+      "hands_on": "1. 在笔记本上画一张 HA 架构图：Active NN / Standby NN / 3 个 JournalNode / ZooKeeper 集群 / 客户端，用箭头标出元数据同步方向与选主关系。\n2. 如果条件允许，在一台 Linux 机器（或虚拟机）上按本章五步部署 Hadoop 伪分布式，用 jps 验证进程并上传一个文件。\n3. 用 Python 写一个『心跳模拟』脚本：模拟 3 个 DataNode 每 3 秒发心跳，其中 1 个随机掉线，主进程检测到 10 秒无心跳就打印『DN2 已判定掉线，副本开始补全』。\n4. 整理一份『集群故障排查清单』：故障现象 → 检查命令 → 常见原因，抄到笔记。",
+      "tasks": [
+        {
+          "task_id": "s04c06t01",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：搭建 HDFS HA 集群流程",
+          "question": "把『搭建一套 HDFS HA 高可用集群』的流程按正确顺序排列。",
+          "steps": [
+            "部署 ZooKeeper 集群并启动（提供选主能力）",
+            "配置双 NameNode（Active/Standby）、JournalNode 与自动故障转移参数",
+            "规划节点角色：主节点、备节点、JournalNode、DataNode 分布",
+            "启动集群：先启动 ZK 和 JN，再启动两个 NN（Standby 执行 bootstrapStandby）和全部 DN",
+            "配置节点间 SSH 免密登录",
+            "验证：kill 掉 Active NN，观察 Standby 是否自动接管，业务是否恢复"
+          ],
+          "correct_order": [
+            2,
+            4,
+            0,
+            1,
+            3,
+            5
+          ],
+          "order_explain": "HA 搭建顺序：先规划角色 → 配免密 → 先搭好依赖的 ZooKeeper → 配置双 NN/JN → 按依赖顺序启动（ZK→JN→NN/DN）→ 最后做故障切换演练验证。ZooKeeper 是选主依赖，必须先于 NN 就绪。",
+          "analysis": "**标准解题思路**\n1. **规划**：确定 Active NN、Standby NN、3 个 JournalNode、N 个 DataNode 各自在哪台机器，这是所有配置的前提。\n2. **免密**：主节点要能免密 SSH 到所有节点，后续启停、同步都靠它。\n3. **ZooKeeper**：HA 的选主依赖 ZK 集群，必须先部署启动（NN 启动时要注册到 ZK）。\n4. **配置**：hdfs-site.xml 里配置 nameservice、双 NN 地址、JN 地址、自动故障转移（ZKFC）。\n5. **启动**：按依赖顺序：先 ZK、JN，再格式化并启动两个 NN（Standby 首次要 bootstrapStandby 拉取元数据），最后启动全部 DN；RM HA 同理。\n6. **验证**：手动 kill Active NN，观察 Standby 是否自动变 Active、业务是否秒级恢复——不演练的 HA 等于没有 HA。\n**易错点**：忘记先启动 ZK 就启动 NN；Standby NN 没有 bootstrapStandby 导致元数据不同步。\n**记忆**：规划 → 免密 → ZK → 配置 → 启动 → 演练。",
+          "enterprise_tip": "面试题『HA 集群你做过故障演练吗？』加分答法：定期 kill 主 NN、拔网线、停 ZK 模拟脑裂，验证自动切换时间（目标 < 60 秒）与数据一致性。"
+        },
+        {
+          "task_id": "s04c06t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：HA 元数据同步",
+          "question": "在 HDFS HA 架构中，Standby NameNode 与 Active NameNode 保持元数据同步，主要依靠下列哪个组件？",
+          "options": [
+            {
+              "text": "DataNode 之间的心跳",
+              "correct": false,
+              "explain": "DN 心跳是向 NN 报告块信息，不负责双 NN 间元数据同步。"
+            },
+            {
+              "text": "JournalNode 集群（多数派写入 EditLog）",
+              "correct": true,
+              "explain": "正确。Active NN 把 EditLog 写入 JournalNode，Standby NN 从 JN 读取日志持续同步。"
+            },
+            {
+              "text": "SecondaryNameNode 定期合并",
+              "correct": false,
+              "explain": "2NN 只做日志合并辅助恢复，不是 HA 的实时同步通道。"
+            },
+            {
+              "text": "MapReduce 的输出",
+              "correct": false,
+              "explain": "MR 是计算框架，与元数据同步无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. HA 要双 NN 元数据一致，需要一个『实时同步通道』。\n2. JournalNode：Active 写 EditLog（多数派，3 个 JN 写 2 个成功即算成功），Standby 持续读 JN 回放日志。\n3. 2NN 是单 NN 时代的辅助角色，不参与 HA。\n4. 选 B。\n**延伸**：ZooKeeper 负责『谁当 Active』的选主与防脑裂，JN 负责『数据怎么同步』，两者分工不同。",
+          "enterprise_tip": "面试高频对比：ZooKeeper 管选主、JournalNode 管同步、ZKFC 管监控与切换——三者的职责各用一句话说清楚是加分项。"
+        },
+        {
+          "task_id": "s04c06t03",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "多选：集群故障处理",
+          "question": "集群出现『部分 DataNode 掉线、副本数不足』的告警，以下处理措施**合理**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "用 jps 和日志查看掉线 DN 的具体原因（磁盘满/网络/内存）",
+              "correct": true,
+              "explain": "正确。先定位根因再处理，是故障排查第一步。"
+            },
+            {
+              "text": "用 df -h 检查该节点磁盘，磁盘满则清理或扩容",
+              "correct": true,
+              "explain": "正确。磁盘满是 DN 掉线最常见原因之一。"
+            },
+            {
+              "text": "重启该 DN 进程并观察是否恢复心跳",
+              "correct": true,
+              "explain": "正确。恢复节点后 DN 重新注册，NN 会自动补齐副本。"
+            },
+            {
+              "text": "直接把掉线 DN 从集群里删掉，什么都不用管",
+              "correct": false,
+              "explain": "错误。直接删除会丢失该节点上的副本，应先尝试恢复，确认机器永久损坏才走下线流程（先迁移数据再下线）。"
+            },
+            {
+              "text": "把 dfs.replication 改成 1，省得副本告警",
+              "correct": false,
+              "explain": "错误。降低副本数是用数据安全换『眼不见心不烦』，治标不治本，绝不能在生产这么干。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. **先诊断**：jps 看进程在不在，看 DN 日志、df -h 看磁盘、ping/网络检查——定位根因。\n2. **按因处理**：磁盘满→清理/扩容；内存不足→调参/加内存；网络抖动→检查交换机。\n3. **恢复观察**：重启 DN，观察心跳与 `hdfs dfsadmin -report` 中副本是否恢复。\n4. **排除错误项**：直接删节点会丢副本；改 replication=1 牺牲数据安全。\n5. 选前三个。\n**延伸**：NN 判定 DN 掉线默认 10 分钟，期间会自动把该节点副本在其他节点补全。",
+          "enterprise_tip": "面试题『节点磁盘满了怎么办？』分层答：先 df -h 确认 → 清理可删的日志/临时文件（保留任务中间结果）→ 仍不够则挂新盘或下线换盘 → 全程观察 dfsadmin -report 副本健康。"
+        },
+        {
+          "task_id": "s04c06t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：HA 中 ZooKeeper 的作用",
+          "question": "在 HDFS 高可用（HA）架构中，**ZooKeeper** 的核心作用是下列哪一项？",
+          "options": [
+            {
+              "text": "存储文件的数据块",
+              "correct": false,
+              "explain": "数据块存在 DataNode 上，ZooKeeper 不存业务数据。"
+            },
+            {
+              "text": "自动选主：Active NameNode 故障时让 Standby 升级为 Active，并防止脑裂",
+              "correct": true,
+              "explain": "正确。ZooKeeper 维护 NN 的活性状态并自动选主，通过 fencing 机制防止双主脑裂。"
+            },
+            {
+              "text": "同步两个 NameNode 的编辑日志（EditLog）",
+              "correct": false,
+              "explain": "EditLog 的同步通道是 JournalNode 集群，不是 ZooKeeper。"
+            },
+            {
+              "text": "替代 NameNode 管理元数据",
+              "correct": false,
+              "explain": "元数据仍在 NameNode 内存中，ZooKeeper 只负责协调与选主。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. HA 三件套分工：ZooKeeper 管**选主**、JournalNode 管**同步**、ZKFC 管**监控切换**。\n2. ZooKeeper 的作用：记录 Active/Standby 状态，Active 故障时自动让 Standby 升级；fencing 机制把旧 Active 踢下线，防止脑裂（双主）。\n3. 排除：数据块在 DN、EditLog 同步靠 JN、元数据在 NN。\n4. 选 B。\n**延伸**：一句话——ZooKeeper 选主 + JournalNode 同步 + 双 NN = HDFS 高可用。",
+          "enterprise_tip": "面试高频对比：ZooKeeper 管「谁当老大」（选主/防脑裂）、JournalNode 管「账本怎么同步」、ZKFC 管「盯着老大，挂了就切换」——三者各用一句话讲清是加分项。"
+        },
+        {
+          "task_id": "s04c06t05",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "多选：集群常见故障与处理",
+          "question": "以下「集群故障现象 → 处理措施」的组合，处理方式**合理**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "DataNode 磁盘满导致写失败 → 用 df -h 定位磁盘，清理日志/临时数据或扩容",
+              "correct": true,
+              "explain": "正确。磁盘满是 DN 故障最常见原因，先定位再清理/扩容。"
+            },
+            {
+              "text": "NameNode 长期停留在安全模式 → 检查副本缺失的块，恢复掉线的 DataNode",
+              "correct": true,
+              "explain": "正确。安全模式不退通常意味着大量块副本不足，恢复节点后 NN 会自动补齐副本并退出安全模式。"
+            },
+            {
+              "text": "小文件堆积拖垮 NameNode 内存 → 合并小文件并控制写入端文件数",
+              "correct": true,
+              "explain": "正确。小文件合并（重写/合并参数）+ 源头控制是标准治理手段。"
+            },
+            {
+              "text": "元数据损坏 → 直接格式化 NameNode 重建",
+              "correct": false,
+              "explain": "格式化会清空全部元数据，等于数据全丢；应优先用 HA 的 Standby 或备份恢复。"
+            },
+            {
+              "text": "集群负载过高 → 立刻停掉所有运行中的任务",
+              "correct": false,
+              "explain": "一刀切停任务会中断业务，应排队/扩容/优化 SQL，而不是全停。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 故障处理总原则：先定位根因，再对症处理，最后观察验证。\n2. 磁盘满 → df -h 定位清理/扩容；安全模式不退 → 恢复 DN 让副本补齐；小文件堆积 → 合并+控制源头——前三项处理合理。\n3. 排除：格式化 NN 是数据灾难级别的操作，绝不能用来「修复」元数据；全停任务是制造更大事故。\n4. 选前三项。\n**延伸**：排查套路——jps 看进程 → 看日志 → hdfs dfsadmin -report 看集群健康 → 对症处理。",
+          "enterprise_tip": "面试场景题「集群告警你怎么处理」：按「先止血、再排查、后根治、末复盘」四步答——先恢复服务可用，再查根因，最后沉淀到监控与规范，避免同类故障再发生。"
+        },
+        {
+          "task_id": "s04c06t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：JournalNode 的多数派写入",
+          "question": "HDFS HA 架构中通常部署 **3 个 JournalNode**。关于 JournalNode 的**多数派写入机制**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Active NameNode 把 EditLog 写入 JournalNode 集群，3 个中成功 2 个（多数派）即算提交成功",
+              "correct": true,
+              "explain": "正确。多数派写入保证大部分 JN 存活时就能提交，兼顾一致性与可用性。"
+            },
+            {
+              "text": "必须 3 个 JournalNode 全部写入成功才算提交成功",
+              "correct": false,
+              "explain": "错误。任一 JN 故障就阻塞全部写入，与 HA 目标相悖；多数派（2/3）即可。"
+            },
+            {
+              "text": "JournalNode 负责存储数据块本体",
+              "correct": false,
+              "explain": "错误。数据块存在 DataNode；JN 只存 NameNode 的 EditLog。"
+            },
+            {
+              "text": "JournalNode 负责自动选主",
+              "correct": false,
+              "explain": "错误。选主与防脑裂是 ZooKeeper 的职责。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. JournalNode 的角色：Active NN 把每次元数据修改（EditLog）实时写入 JN 集群，Standby NN 从 JN 读日志回放，保持双 NN 元数据同步——**JN 是同步通道**。\n2. 多数派写入：3 个 JN 写入成功 2 个即算成功（2 > 3/2）。好处：任意 1 个 JN 宕机不影响提交，同时保证「至少一个存活 JN 存有最新日志」，Standby 总能追平。\n3. 排除：JN 不存数据块（那是 DN）、不做选主（那是 ZK）。\n4. 选 A。\n**易错点**：把 JN 当 2NN 的替代品——2NN 是单 NN 时代定期合并 fsimage 的辅助角色，不参与 HA 实时同步；HA 的同步通道是 JN。\n**延伸**：三个角色一句话——ZooKeeper 管「谁当 Active」（选主/防脑裂）、JournalNode 管「账本怎么同步」（多数派写 EditLog）、ZKFC 管「盯着 Active，挂了就切换」。",
+          "enterprise_tip": "面试高频对比：「ZK 和 JN 有什么区别」——ZK 存的是 NN 活性状态与锁（选主），JN 存的是 EditLog（同步）；一个管「谁当家」，一个管「账本怎么对」，职责完全不同。"
+        },
+        {
+          "task_id": "s04c06t07",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "多选：NameNode 故障切换过程",
+          "question": "HA 集群中 Active NameNode 突然宕机，触发自动故障切换。以下关于**故障切换过程**的描述，**正确**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "ZooKeeper 检测到 Active NN 失活，触发自动选主流程",
+              "correct": true,
+              "explain": "正确。NN 的活性状态注册在 ZooKeeper 上，失活会被感知并触发切换。"
+            },
+            {
+              "text": "Standby NN 先从 JournalNode 把 EditLog 追平（元数据同步到最新），再升级为 Active",
+              "correct": true,
+              "explain": "正确。Standby 必须追平日志、保证元数据一致，才能安全接管。"
+            },
+            {
+              "text": "ZKFailoverController（ZKFC）执行 fencing，隔离旧 Active NN，防止脑裂（双主）",
+              "correct": true,
+              "explain": "正确。fencing 确保同一时刻只有一个 NN 写元数据，防止两个 NN 同时认为自己是 Active。"
+            },
+            {
+              "text": "切换期间 HDFS 上所有已写入的数据都会丢失",
+              "correct": false,
+              "explain": "错误。元数据经 JournalNode 实时同步，Standby 追平后接管，数据完整。"
+            },
+            {
+              "text": "所有客户端必须手动重启才能继续访问集群",
+              "correct": false,
+              "explain": "错误。客户端通过 ZKFC 感知 Active 变化自动重连，切换对业务基本透明。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. **感知失活**：Active NN 与 ZK 的心跳断开，ZooKeeper 检测到失活，触发自动选主（这是 ZK 的职责）。\n2. **追平日志**：Standby NN 先把 JournalNode 里最新的 EditLog 全部回放完，保证元数据与旧 Active 一致——没追平就接管会丢元数据更新。\n3. **fencing 防脑裂**：ZKFC（ZKFailoverController）执行 fencing，把旧 Active 踢下线（如强制关闭、隔离），确保同一时刻只有一个 NN 是 Active，避免两个 NN 同时写导致元数据分裂。\n4. **切换完成**：Standby 变 Active，客户端通过 ZKFC/代理感知变化自动重连，业务秒级恢复。\n5. 排除：数据不会丢（JN 已同步）；客户端无需手动重启（自动重连）。\n6. 选前三项。\n**易错点**：把「追平日志」和「选主」混为一谈——选主是 ZK 干的事，追平是 Standby NN 自己的动作；切换顺序是先追平、后接管。\n**记忆**：失活感知（ZK）→ 追平日志（JN）→ fencing（ZKFC）→ 接管服务。",
+          "enterprise_tip": "面试题「Active NN 挂了会怎样」：按四步答——ZK 感知失活触发选主 → Standby 追平 JN 日志 → ZKFC fencing 隔离旧主防脑裂 → Standby 接管，客户端自动重连，秒级恢复。再加一句「生产要定期做故障演练验证切换」，直接加分。"
+        },
+        {
+          "task_id": "s04c06t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Active NN 宕机后 Standby 如何接管",
+          "question": "HDFS HA 中，Active NameNode 宕机后 Standby NameNode 自动接管的过程，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "ZooKeeper 检测到 Active 失活触发选主，Standby 先追平 JournalNode 上的共享 edits 日志，再升级为 Active",
+              "correct": true,
+              "explain": "正确。先追平共享 edits 保证元数据一致再接管，数据不丢。"
+            },
+            {
+              "text": "Standby 无需任何准备，直接启动即可接管",
+              "correct": false,
+              "explain": "Standby 必须先追平共享 edits，否则会丢掉 Active 宕机前的最新元数据更新。"
+            },
+            {
+              "text": "SecondaryNameNode 自动升级为 Active",
+              "correct": false,
+              "explain": "2NN 只是日志合并辅助节点；HA 的接管由 Standby + ZooKeeper 完成。"
+            },
+            {
+              "text": "需要人工重启所有 DataNode 和客户端才能恢复",
+              "correct": false,
+              "explain": "切换由 ZKFC 自动完成，客户端自动重连，业务基本无感。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 选主：Active NN 的心跳断开，ZooKeeper 检测到失活，触发自动选主（这是 ZK 的职责）。\n2. 追平：Standby NN 先把 JournalNode 上共享的 edits 日志全部回放，元数据与旧 Active 对齐——没追平就接管会丢更新。\n3. 切换：ZKFC 执行 fencing 隔离旧 Active（防脑裂），Standby 升级为 Active，客户端自动重连。\n4. 排除干扰项：必须追平才能接管；2NN 不参与 HA；无需人工重启。\n5. 选 A。\n**记忆**：失活感知（ZK）→ 追平日志（JN）→ fencing（ZKFC）→ 接管服务。",
+          "enterprise_tip": "面试题『Active NN 挂了会怎样』：按四步答——ZK 感知选主 → Standby 追平 JN 共享 edits → ZKFC fencing 防脑裂 → Standby 接管、客户端自动重连，秒级恢复；再加一句『生产定期做故障演练』加分。"
+        },
+        {
+          "task_id": "s04c06t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：NameNode 格式化",
+          "question": "关于 `hdfs namenode -format`（格式化 NameNode），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "格式化会**清空 NameNode 的元数据**（fsimage/edits），文件在 HDFS 上变得「不可见」；生产上只在首次部署或确需重建时执行",
+              "correct": true,
+              "explain": "正确。格式化清空元数据，文件从文件系统中「消失」，是重建级别的操作。"
+            },
+            {
+              "text": "格式化会同时清空 DataNode 上的数据块",
+              "correct": false,
+              "explain": "错误。数据块还留在 DN 磁盘上，但元数据没了，无法把块拼回文件——比删数据更麻烦。"
+            },
+            {
+              "text": "格式化后集群中所有文件都能自动恢复",
+              "correct": false,
+              "explain": "错误。没有元数据就无法恢复文件，除非之前备份过 fsimage/edits。"
+            },
+            {
+              "text": "每次重启集群前都必须格式化",
+              "correct": false,
+              "explain": "错误。只有首次部署需要格式化；之后重启直接 start-dfs.sh。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. namenode -format 的作用：**初始化/清空 NameNode 的元数据**（生成新的 fsimage），把文件系统「归零」。\n2. 关键认知：格式化**只动 NN 的元数据**，DataNode 上的数据块还在磁盘上——但没有元数据，无法把块拼回文件，等于「文件消失但空间被占」。\n3. 生产规则：**只有首次部署**需要格式化；重启集群直接 start-dfs.sh；格式化前必须备份 fsimage/edits。\n4. 排除干扰项：不清 DN 数据块；不能自动恢复文件；不需要每次重启都格式化。\n5. 选 A。\n**延伸**：面试题「误格式化怎么抢救」：立即停止写入、从备份恢复 fsimage、或尝试用残留块重建元数据——但成功率不高，所以「备份先行」是铁律。",
+          "enterprise_tip": "面试题「误格式化 NN 怎么办」：格式化前必须备份 fsimage/edits；格式化后块还在 DN 上，但恢复成功率不高——生产铁律是「格式化前先备份，永远别拿生产集群练手」。"
+        },
+        {
+          "task_id": "s04c06t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：Kerberos 认证",
+          "question": "企业安全集群中，Hadoop 组件之间用 **Kerberos** 做认证。关于 Kerberos，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Kerberos 通过 KDC 发放**票据（Ticket）**完成身份认证：用户先 `kinit` 获取票据，组件之间凭票据建立互信",
+              "correct": true,
+              "explain": "正确。KDC 发票据、kinit 取票据、凭票据互信，是 Kerberos 的标准机制。"
+            },
+            {
+              "text": "Kerberos 是传输加密协议，负责数据在网络上加密传输",
+              "correct": false,
+              "explain": "错误。Kerberos 管「你是谁」（认证），数据加密传输是 TLS 等协议的事。"
+            },
+            {
+              "text": "开启 Kerberos 后集群内文件都变成明文可读",
+              "correct": false,
+              "explain": "错误。恰恰相反，未认证的用户连访问都会被拒绝。"
+            },
+            {
+              "text": "Kerberos 只能用于 Windows 系统",
+              "correct": false,
+              "explain": "错误。Kerberos 是跨平台的通用认证协议，Hadoop 安全集群主要在 Linux 上使用。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Kerberos 的定位：**认证**协议——确认「你是谁」，不是加密传输（加密是 TLS/SSL 的事）。\n2. 工作机制：KDC（密钥分发中心）发**票据（Ticket/TGT）**；用户 kinit 获取票据，之后访问服务凭票据完成认证。\n3. 组件互信：Hadoop 各服务（NN/DN/RM/NM）都注册到 Kerberos，互相凭票据验证身份，未认证的访问被拒绝。\n4. 排除干扰项：不负责传输加密；开启后文件更安全而非明文；不限操作系统。\n5. 选 A。\n**延伸**：安全集群日常：登录先 kinit；票据有效期（默认 1 天）过了任务报认证失败；调度平台要管理票据刷新（renew）；Hive/Spark 接 Kerberos 是等保合规标配。",
+          "enterprise_tip": "安全集群日常：登录先 kinit，票据过期任务就报认证失败；Hive/Spark 接 Kerberos 后调度平台必须管理好票据刷新，否则凌晨任务集体认证失败。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "部署 Hadoop 集群的标准五步是什么？",
+          "a": "① 规划节点角色；② 配置 SSH 免密登录；③ 修改各配置文件（core/hdfs/yarn/mapred-site.xml）；④ 首次格式化并启动（start-dfs.sh、start-yarn.sh）；⑤ 验证（jps、Web 页面、读写测试）。"
+        },
+        {
+          "q": "HDFS HA 为什么需要 ZooKeeper 和 JournalNode？",
+          "a": "JournalNode 是双 NN 的 EditLog 同步通道（多数派写入）；ZooKeeper 负责自动选主并防止脑裂。二者分工不同，缺一不可。"
+        },
+        {
+          "q": "Active NameNode 挂了会发生什么？",
+          "a": "ZooKeeper 感知故障后让 Standby 自动升级为 Active（秒级），ZKFC 完成切换，客户端通过虚拟 IP/代理继续访问，业务基本无感。"
+        },
+        {
+          "q": "常见集群故障有哪些？",
+          "a": "磁盘满、DataNode 掉线、NameNode 元数据损坏、小文件堆积、网络抖动；排查套路：jps → 日志 → dfsadmin -report → 对症处理。"
+        },
+        {
+          "q": "什么是脑裂？怎么防止？",
+          "a": "两个 NN 同时认为自己是 Active 的极端情况，会造成元数据分裂；ZooKeeper 通过 fencing 机制（如隔离旧 Active）防止脑裂。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "HA（高可用）",
+          "desc": "通过 Active/Standby 双节点与自动切换，消除 NameNode/RM 单点故障。"
+        },
+        {
+          "term": "Active/Standby NameNode",
+          "desc": "HA 中的活跃主节点与备用主节点，元数据保持同步，故障时切换。"
+        },
+        {
+          "term": "JournalNode",
+          "desc": "双 NN 之间的 EditLog 同步通道，多数派写入保证一致性。"
+        },
+        {
+          "term": "ZooKeeper",
+          "desc": "分布式协调器，在 HA 中负责自动选主与防脑裂。"
+        },
+        {
+          "term": "ZKFailoverController（ZKFC）",
+          "desc": "监控 NN 健康、执行自动故障转移的守护进程。"
+        },
+        {
+          "term": "安全模式（SafeMode）",
+          "desc": "NN 启动时的只读状态，长期不退说明副本缺失。"
+        },
+        {
+          "term": "jps",
+          "desc": "Java 进程查看命令，用于确认各节点 NN/DN/RM/NM 进程是否启动。"
+        },
+        {
+          "term": "hdfs dfsadmin -report",
+          "desc": "查看集群整体健康、各节点存储与副本状况的运维命令。"
+        }
+      ],
+      "kps": [
+        "集群部署五步流程（规划→免密→配置→启动→验证）",
+        "部署核心命令（ssh-keygen、namenode -format、start-dfs.sh、jps）",
+        "单点故障问题与 HA 思想（Active/Standby 双 NN）",
+        "JournalNode：EditLog 同步通道与多数派写入",
+        "ZooKeeper：自动选主与防脑裂（fencing）",
+        "ZKFC 与 NameNode 故障切换过程",
+        "常见集群故障与排查（磁盘满、DN 掉线、安全模式）",
+        "排查套路（jps → 日志 → dfsadmin -report）",
+        "故障切换底层（ZK 选举 + 共享 edits 追平）",
+        "NameNode 格式化（仅首次、清空元数据）",
+        "Kerberos 认证与安全集群（kinit、票据）"
+      ]
+    },
+    {
+      "chapter_id": "s04c07",
+      "title": "4.7 HDFS 与 MapReduce 底层原理进阶",
+      "goal": "深入 HDFS 写读流程、元数据管理、机架感知与 MapReduce Shuffle 的机制级原理，能讲清底层细节与面试考点",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "上一章讲了 HDFS 写流程的『四步走』，这一节把放大镜对准每一步的**底层细节**。HDFS 写一个文件，底层经历三件事：**切块 → 管道复制 → ack 确认**。\n\n**第一步：客户端按 128MB 切块**。切块发生在**客户端**：一个 300MB 的文件先被切成 128MB + 128MB + 44MB 三个逻辑块，逐块写入。NameNode 不接收数据，只负责『记账』（记录每个块放在哪些 DataNode 上）。\n\n**第二步：管道式复制（Pipeline）**。以 3 副本为例：客户端把块数据传给第一个 DataNode（DN1），DN1 一边把数据落盘、一边把同一份数据**转发**给 DN2，DN2 再转发给 DN3——数据像流水一样沿 DN1→DN2→DN3 流动，形成一条**复制管道**。关键点：**客户端只发送一次数据**，DN1 收到的每份数据都『自己存一份 + 转发给下一个』，所以写 3 份副本的网络代价从 3× 降到了 1×。\n\n**第三步：ack 逐级确认**。每个 DataNode 写完自己的副本后向上游返回确认（acknowledgement）：DN3 写完 → ack 给 DN2；DN2 写完（且 DN3 已确认）→ ack 给 DN1；DN1 全部确认 → ack 给客户端。客户端收到整条管道的确认后，才向 NameNode 提交『该块写入完成』，NN 更新元数据。管道中任何一环失败（如 DN 宕机），管道会**重建**（剔除坏节点、改写剩余节点），保证副本数达标。\n\n一句话：**切块在客户端、复制走管道、成功靠 ack 逐级确认**。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "HDFS 写数据底层：管道式复制 + ack 逐级确认（3 副本）\n\n  客户端 ──块数据──▶ DN1 ──块数据──▶ DN2 ──块数据──▶ DN3\n    ▲                 ▲                 ▲                 ▲\n    │  ack ③         │  ack ②         │  ack ①         │ 写完\n    └─────────────────┴─────────────────┴─────────────────┘\n   DN3 写完先 ack DN2 → DN2 再 ack DN1 → DN1 最后 ack 客户端\n\n  ● 切块：300MB 文件切成 3 块（128MB + 128MB + 44MB）\n  ● 管道：数据只在节点间流转，客户端只发送一次\n  ● ack ：逐级确认，全部成功 NN 才更新元数据\n\nHDFS 读数据底层：就近读取 + 短路读\n\n  客户端 ──读请求──▶ NameNode（返回各块副本位置列表）\n  客户端 ──就近读取──▶ DN1（本机/同机架副本优先，多副本挑最近的）\n  同机客户端 ──短路读──▶ 本地磁盘（绕过网络与 DN 进程，直接读副本文件）",
+          "caption": "写：管道复制 + ack；读：就近读取 + 短路读"
+        },
+        {
+          "type": "text",
+          "content": "**读流程底层**：客户端向 NameNode 要『块的位置清单』，NN 返回每个块的全部副本所在节点。客户端对多个块**并行**发起读取（而不是串行读一个等一个），并**就近选择**副本：本机 > 同机架 > 跨机架。多副本的意义在这里显现——读的时候可以挑最近的副本，而不用死等某一个节点，读性能随副本分布自然提升。\n\n**短路读（Short-Circuit Read）**：当客户端与 DataNode 在**同一台机器**上时，数据其实就在本地磁盘，但默认流程仍要走『客户端 → 与 DN 建立 TCP 连接 → DN 从本地磁盘读 → 网络回传』这条绕路。短路读让客户端**直接打开本地磁盘上的副本文件**读取，绕过网络与 DataNode 进程，延迟更低、吞吐更高。生产上同一节点内的计算任务（如 Spark/Hive 的本地读）开启 `dfs.client.read.shortcircuit=true` 能明显提速——注意它只对『同机』场景有效。"
+        },
+        {
+          "type": "text",
+          "content": "**NameNode 的元数据如何持久化？** 依赖两个文件：\n- **fsimage**：元数据**快照**——某一时刻目录树、文件、块的『全家福』；\n- **edits**：**编辑日志**——快照之后每一次增删改操作的『流水账』。\n\n工作方式：\n1. **启动时**：NN 把 fsimage 载入内存，再回放 edits 里的操作，得到最新元数据；\n2. **运行时**：每次元数据变更先追加写 edits，同时更新内存——只写日志、不直接改 fsimage，避免频繁全量写盘；\n3. **Checkpoint（检查点）**：把『内存中的最新元数据』落盘成**新的 fsimage**，并清空 edits——这个合并动作就叫 **checkpoint**。非 HA 集群由 **SecondaryNameNode（2NN）** 定期执行：2NN 拉取 NN 的 fsimage + edits → 在 2NN 上合并成新 fsimage → 回传给 NN → NN 替换旧快照、清空 edits。注意：**2NN 不是热备**，它不提供故障接管，只负责定期合并日志，缩短 NN 重启时的回放时间。\n\n**为什么 NN 单点曾是瓶颈？** 所有元数据（目录树、每个块的位置）必须**常驻内存**才能秒级响应客户端请求；块位置信息来自 DataNode 心跳汇报，不在 fsimage 里，无法靠磁盘换内存。文件/块数量一多，NN 内存就告急——这也是『小文件是 HDFS 头号敌人』的底层原因。元数据是集群的命根子，NN 挂 = 整个文件系统不可用，所以才有 4.6 章的 HA 双 NN 方案。"
+        },
+        {
+          "type": "text",
+          "content": "**块副本放置策略：机架感知（Rack Awareness）**。数据中心里机器按机架（rack）摆放，同一机架的机器共享交换机和电源——机架故障 = 一票机器同时挂。HDFS 默认 3 副本的放置规则（写入时由 NameNode 决策）：\n\n- **第一副本**：放**客户端所在节点**（客户端不在集群内则随机选一台不忙的节点）——写数据最就近；\n- **第二副本**：放**同机架的另一个节点**——第一、二副本之间走机架内高速网络，复制快；\n- **第三副本**：放**不同机架**的节点——防止整个机架断电/交换机故障导致数据全丢。\n\n这样同时满足：坏一台机器有副本（机器级容错）、坏一个机架数据还在（机架级容错）、跨机架流量只占一份（写放大最小）。副本数超过 3 时，更多副本继续向随机机架扩展。NameNode 通过 `net.topology.script.file.name` 指定的脚本知道每台机器属于哪个机架。"
+        },
+        {
+          "type": "text",
+          "content": "**MapReduce Shuffle 全流程**（机制级细节，面试必背）。Shuffle 不是独立阶段，而是『map 输出 → reduce 输入』之间发生的所有事。\n\n**map 端（4 步）**：\n1. **环形缓冲区**：每个 map 任务有一个默认 **100MB** 的内存环形缓冲区（io.sort.mb），map 输出先进缓冲区，不直接落盘；\n2. **溢写（Spill）**：缓冲区写入量达到阈值 **80%**（io.sort.spill.percent=0.8）时，后台线程开始把数据溢写到本地磁盘——不是等满了才写，而是到 80% 就边写边腾空间，避免 map 线程阻塞；\n3. **分区 + 排序**：溢写前在缓冲区里先按 key **分区**（默认 hash(key) % reduce 数，保证相同 key 进同一个 reducer），分区内再按 key **排序**，形成多个有序的 spill 小文件；\n4. **合并（Merge）**：map 结束前把多个 spill 文件合并成一个有序大文件，期间可执行 **Combiner**（map 端局部聚合）与**压缩**（map 输出压缩）减少落盘与传输量。\n\n**reduce 端（3 步）**：\n1. **拉取（Fetch）**：reduce 启动后主动向每个 map 节点**拉取**属于自己的分区数据（map 中间结果在本地磁盘，不经过 HDFS）；\n2. **归并排序（Merge Sort）**：把从各 map 拉来的多份有序数据归并成一份全局有序的 (key, value 列表)；\n3. **分组（Group）**：相同 key 的 value 聚成一组，交给 reduce 函数处理一次。\n\n**Combiner 与压缩的作用点**：\n- **Combiner**：作用在 map 端（溢写/合并时），先做一次局部聚合（如求和），**减少 spill 落盘与网络传输的数据量**——它是 map 端的『迷你 reducer』，逻辑通常与 reducer 相同；\n- **压缩**：map 端溢写文件与 reduce 拉取的数据均可压缩（`mapreduce.map.output.compress=true` + Snappy），**用 CPU 换网络/磁盘 IO**，shuffle 数据量大时收益明显。\n\n一句话：**map 端『缓冲-溢写-分区-排序-合并』，reduce 端『拉取-归并-分组』，Combiner 与压缩都是给 Shuffle 减负**。"
+        },
+        {
+          "type": "text",
+          "content": "**小文件问题原理**：HDFS 里**每个文件、每个目录、每个块**都要在 NameNode 内存中占一条元数据记录——一个块约 **150 字节**（文件名、路径、副本位置等）。算一笔账：1000 万个 1KB 的小文件 = 1000 万条文件元数据 + 至少 1000 万个块 = 约 2000 万条记录 ≈ 3GB 内存，还没算目录与副本信息；而同样数据合并成 1000 个 100MB 的大文件，只有几千条记录。更糟的是，小文件还会让 MapReduce/Spark **为每个文件启动一个任务**，JVM 启动与调度的开销远超处理几 KB 数据的时间。所以生产铁律：**能合并就合并**（SequenceFile/ORC/HAR 归档），并控制写入端文件数。"
+        },
+        {
+          "type": "warning",
+          "content": "**易错点**：\n- ack 确认方向是从管道末端（DN3）**逐级向上**（DN3→DN2→DN1→客户端），不是客户端直接收 3 个 DN 的确认；\n- 环形缓冲区是**写到 80% 开始溢写**（边写边腾），不是等到 100% 满了才写；\n- 2NN 是『定期合并日志』的辅助节点，**不是** HA 的 Standby，不能自动接管；\n- 短路读只对『客户端与 DN 同机』有效，跨节点读取不存在短路读；\n- 溢写前**先分区、再分区内排序**，顺序别记反。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- **面试必考**：① 讲一下 HDFS 写文件的底层管道与 ack 机制？② fsimage 和 edits 是什么？checkpoint 由谁执行？③ 机架感知怎么放 3 副本？④ map 端环形缓冲区多大、溢写阈值多少？⑤ Shuffle 的 map 端和 reduce 端各做什么？⑥ 小文件为什么费 NN 内存？\n- **生产指导**：这些机制决定调参方向——调 io.sort.mb 提升 map 端吞吐、开 map 输出压缩减少 shuffle 网络、按机架规划副本、用合并工具治理小文件；\n- **常见坑**：把 2NN 当 HA 备机；以为客户端传 3 遍数据；以为小文件只浪费磁盘（其实最伤 NN 内存）。"
+        }
+      ],
+      "hands_on": "1. 用 Python 模拟 HDFS 写流程：写一个函数，输入文件名与块大小，模拟『切块 → 管道式复制到 3 个 DataNode → 逐级 ack』，打印每一步的状态。\n2. 用 Python 模拟环形缓冲区：写一个循环向 100 个单位的缓冲区写数据，写到 80 时打印『spill 溢写』日志并继续，体会 80% 溢写阈值。\n3. 用 Python 模拟机架感知：给定 3 个机架、每机架 2 台机器，按『本机 → 同机架 → 跨机架』规则为一块数据选出 3 个副本位置并打印。\n4. 画一张 Shuffle 全流程图：map 端（缓冲 100MB/80% → 分区排序 → 溢写 → 合并）与 reduce 端（拉取 → 归并 → 分组），标出 Combiner 与压缩的作用点。",
+      "tasks": [
+        {
+          "task_id": "s04c07t01",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：HDFS 写文件管道复制的完整流程",
+          "question": "把 HDFS 写一个文件时『管道式复制 + ack 确认』的底层流程按正确顺序排列。",
+          "steps": [
+            "客户端向 NameNode 发起写文件请求，NN 校验权限与空间后返回块 1 的三个副本放置位置（DN1/DN2/DN3）",
+            "客户端把 128MB 的块数据发送给第一个 DataNode（DN1）",
+            "DN1 边落盘边把数据转发给 DN2，DN2 边落盘边转发给 DN3（管道式复制）",
+            "DN3 写完自己的副本后逐级向上返回 ack：DN3→DN2→DN1→客户端",
+            "客户端收到全部 ack 后向 NameNode 提交完成，NN 更新元数据，该块对用户可见"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "HDFS 写块是『请求 → 分配位置 → 管道写 → ack 确认 → 提交元数据』：客户端先向 NN 要副本放置位置；把块数据传给 DN1；DN1 存一份并转发 DN2、DN2 存一份并转发 DN3（客户端只传一次）；写完后 ack 从 DN3 逐级返回到客户端；客户端向 NN 提交，NN 更新元数据后块才对用户可见。",
+          "analysis": "**标准解题思路**\n1. **第一步永远是请求**：客户端向 NameNode 发起写请求，NN 只记账不碰数据，返回块 1 的 3 个副本放哪（DN1/DN2/DN3）。\n2. **第二步发送数据**：客户端把 128MB 块数据传给 DN1——客户端只发送这一次。\n3. **第三步管道复制**：DN1 收到后『自己落盘 + 转发 DN2』，DN2 同样『落盘 + 转发 DN3』，形成 DN1→DN2→DN3 的复制管道；数据只在节点间流动。\n4. **第四步 ack 确认**：写完后确认从管道末端逐级返回：DN3 先 ack DN2，DN2 再 ack DN1，DN1 最后 ack 客户端——注意方向是从末端往上游，不是客户端直接收 3 个确认。\n5. **第五步提交元数据**：客户端收到全部 ack 后向 NN 提交『块写入完成』，NN 更新元数据，块才对用户可见。\n**易错点**：① ack 方向搞反（以为客户端分别收 3 个 DN 的确认）；② 以为客户端把数据传 3 遍（管道复制的精髓就是客户端只传一次）。\n**记忆**：请求 → 传 DN1 → 管道转发 → 逐级 ack → 提交 NN。",
+          "enterprise_tip": "面试追问『为什么管道复制只传一次』：客户端带宽只消耗 1 份，写 3 副本的代价从 3× 网络 IO 降到 1×；再追问『DN 挂了怎么办』答：管道重建、剔除坏节点，NN 保证副本数补齐。"
+        },
+        {
+          "task_id": "s04c07t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：环形缓冲区溢写阈值",
+          "question": "MapReduce 中，map 端环形缓冲区默认 100MB，当写入量达到缓冲区大小的百分之多少时，后台线程开始把数据溢写（spill）到本地磁盘？",
+          "options": [
+            {
+              "text": "80%",
+              "correct": true,
+              "explain": "正确。默认溢写阈值 io.sort.spill.percent=0.8，写到 80% 就开始边写边腾空间。"
+            },
+            {
+              "text": "50%",
+              "correct": false,
+              "explain": "50% 过早溢写，会产生更多 spill 小文件，增加合并开销。"
+            },
+            {
+              "text": "90%",
+              "correct": false,
+              "explain": "90% 不是默认值；默认阈值是 80%。"
+            },
+            {
+              "text": "100%",
+              "correct": false,
+              "explain": "等到 100% 满才写会阻塞 map 线程——缓冲区满了只能停下等落盘，损失性能。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 回忆 map 端缓冲：每个 map 任务有一个默认 100MB 的环形缓冲区（io.sort.mb），map 输出先进内存。\n2. 溢写阈值：写入量达到缓冲区的 80%（io.sort.spill.percent=0.8）时，后台线程开始溢写到本地磁盘。\n3. 为什么不是 100%：缓冲区满了 map 线程只能阻塞等待落盘；80% 溢写可以『边写边腾』，把腾出的空间继续给新输出，map 不阻塞。\n4. 排除干扰项：50% 过早（spill 文件多）、90% 不是默认值、100% 会阻塞。\n5. 选 80%。\n**延伸**：溢写前会先在缓冲区完成分区 + 分区内排序，spill 文件在 map 结束前合并成一个大文件。",
+          "enterprise_tip": "调参方向：内存充足时可调大 io.sort.mb（如 200MB）并相应调大 io.sort.spill.percent，减少 spill 次数，map 端吞吐更高——面试聊调优是加分项。"
+        },
+        {
+          "task_id": "s04c07t03",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：fsimage 与 edits 的合并动作",
+          "question": "HDFS 中，把 NameNode 内存中的最新元数据合并进 fsimage、生成新的元数据快照并清空 edits 日志的动作称为 ____（英文单词，非 HA 集群中由 SecondaryNameNode 定期执行）。",
+          "answer": [
+            "checkpoint",
+            "Checkpoint",
+            "CHECKPOINT",
+            "check point",
+            "Check Point"
+          ],
+          "hint": "先回忆 NameNode 元数据管理：定期把内存元数据落盘成新 fsimage 的动作叫什么？",
+          "analysis": "**标准解题思路**\n1. NameNode 元数据有两个载体：fsimage（快照）+ edits（编辑日志）。\n2. edits 会无限增长，需要定期合并：把内存最新元数据落盘成新 fsimage、清空 edits——这个动作叫 checkpoint。\n3. 非 HA 集群中由 SecondaryNameNode 定期执行（拉取 fsimage+edits → 合并 → 回传）。\n4. 填 checkpoint。\n**易错点**：把 2NN 当热备——它只做日志合并，不能故障接管；HA 的接管是 Standby NN + ZooKeeper。",
+          "enterprise_tip": "面试题『NN 重启要多久』：取决于要回放多少 edits；checkpoint 越频繁，重启回放越短——所以 2NN 的合并周期（默认 1 小时）是运维调参点。"
+        },
+        {
+          "task_id": "s04c07t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：机架感知的副本放置",
+          "question": "HDFS 默认 3 副本的机架感知（Rack Awareness）放置策略是？",
+          "options": [
+            {
+              "text": "第一副本放客户端所在节点，第二副本放同机架另一节点，第三副本放不同机架节点",
+              "correct": true,
+              "explain": "正确。本机→同机架→跨机架：兼顾写就近、机架内快速复制与机架级容错。"
+            },
+            {
+              "text": "三个副本全部放在同一个机架内",
+              "correct": false,
+              "explain": "同机架机器共享交换机与电源，机架故障会导致三副本全丢。"
+            },
+            {
+              "text": "三个副本放在同一台机器上",
+              "correct": false,
+              "explain": "一台机器故障三副本全丢，完全失去容错意义。"
+            },
+            {
+              "text": "第一副本跨机架、第二副本本机、第三副本同机架",
+              "correct": false,
+              "explain": "方向说反了：副本从本机向外扩散，第一副本在客户端所在节点。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 机架感知的动机：同机架机器共享交换机/电源，机架故障 = 一票机器同时挂，副本必须跨机架才安全。\n2. 默认 3 副本规则：第一副本在客户端所在节点（写就近）；第二副本在同机架另一节点（机架内高速复制）；第三副本跨机架（机架级容错）。\n3. 排除干扰项：三副本同机架/同机器都不满足容错；顺序说反的选项是干扰项。\n4. 选 A。\n**延伸**：副本数多于 3 时，后续副本继续向随机机架扩展，原则始终是『机器级 + 机架级容错』。",
+          "enterprise_tip": "生产机架感知配置：net.topology.script.file.name 指向返回机架映射的脚本；配错会导致副本集中，坏一个机架丢数据——面试聊『怎么排查副本集中』是高级话题。"
+        },
+        {
+          "task_id": "s04c07t05",
+          "type": "python",
+          "difficulty": 3,
+          "title": "纯 Python 模拟 Shuffle：分区 + 排序",
+          "question": "模拟 MapReduce Shuffle 的『分区 + 排序』：给定 map 阶段输出的中间结果 `pairs`（元素为 (word, count) 二元组），请：\n① 模拟**分区**：按 `len(word) % 2` 把数据分到分区 0 和分区 1（用确定性规则代替 hash 分区）；\n② 模拟**排序**：每个分区内按 word 字母序排序；\n③ 按分区号**升序**输出：每行 `分区号 word count`（例如 `0 hive 1`）。\n只允许使用 Python 标准库。",
+          "code_context": "pairs = [('hadoop', 3), ('spark', 2), ('hive', 1), ('flink', 1), ('kafka', 4), ('hbase', 2)]\n\n# ===== 在这里编写代码 =====\n# ① 分区：len(word) % 2\n# ② 分区内按 word 排序\n# ③ 按分区号升序输出 '分区号 word count'\n",
+          "expected_output": "0 hadoop 3\n0 hive 1\n1 flink 1\n1 hbase 2\n1 kafka 4\n1 spark 2",
+          "reference": "pairs = [('hadoop', 3), ('spark', 2), ('hive', 1), ('flink', 1), ('kafka', 4), ('hbase', 2)]\n\n# ① 分区：模拟 hash 分区，用确定性的 len(word) % 2\npartitions = {0: [], 1: []}\nfor word, count in pairs:\n    p = len(word) % 2\n    partitions[p].append((word, count))\n\n# ② 分区内按 word 字母序排序\nfor p in sorted(partitions):\n    for word, count in sorted(partitions[p]):\n        print(p, word, count)",
+          "hint": "分三步：① 用什么容器按分区号收集？② 分区内怎么排序？③ 输出先按分区号还是先按单词？",
+          "analysis": "**标准解题思路**\n1. **理解输入**：pairs 是 6 个 (word, count)：hadoop 3、spark 2、hive 1、flink 1、kafka 4、hbase 2。\n2. **模拟分区**：真实 MR 用 hash(key) % reduce数 决定分区；这里用确定性的 len(word) % 2：hadoop(6→0)、hive(4→0)、spark(5→1)、flink(5→1)、kafka(5→1)、hbase(5→1)。\n3. **分区内排序**：分区 0 是 [(hadoop,3),(hive,1)]，按 word 排序 → hadoop、hive；分区 1 是 [(spark,2),(flink,1),(kafka,4),(hbase,2)]，排序 → flink、hbase、kafka、spark。\n4. **输出**：先分区 0 两行，再分区 1 四行，每行『分区号 word count』。\n5. 期望输出：0 hadoop 3 / 0 hive 1 / 1 flink 1 / 1 hbase 2 / 1 kafka 4 / 1 spark 2。\n**易错点**：① 不能用内置 hash()——Python 对字符串的 hash 每次运行随机（PYTHONHASHSEED），输出不确定；② 必须按分区号升序、分区内按 word 排序，否则比对不通过；③ 输出一行三列，用 print(p, word, count)。\n**对照真实 MR**：dict 收集 = 分区，sorted = shuffle 排序；相同 key 进同一分区（这里用 len 模拟），就是『同 key 同 reducer』思想的简化版。",
+          "enterprise_tip": "面试手写 Shuffle 流程：map 端『环形缓冲区 → 80% 溢写 → 分区+排序 → 合并』、reduce 端『拉取 → 归并 → 分组』；能用代码模拟分区+排序说明真懂 shuffle 而不是背概念。"
+        },
+        {
+          "task_id": "s04c07t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：小文件为什么耗尽 NN 内存",
+          "question": "为什么 HDFS 上堆积大量小文件会耗尽 NameNode 的内存？",
+          "options": [
+            {
+              "text": "每个文件、目录和块都要在 NameNode 内存中保存一条元数据记录（约 150 字节/块），小文件数量越多元数据条目越多",
+              "correct": true,
+              "explain": "正确。元数据条目数随文件/块数线性增长，千万级小文件轻松吃掉几十 GB 内存。"
+            },
+            {
+              "text": "NameNode 会把小文件的数据本体缓存进内存",
+              "correct": false,
+              "explain": "NN 不存数据本体，数据在 DataNode 磁盘上。"
+            },
+            {
+              "text": "NameNode 会为每个小文件启动一个 JVM 进程",
+              "correct": false,
+              "explain": "JVM 是计算任务（Map/Reduce）的，与 NN 元数据无关。"
+            },
+            {
+              "text": "小文件的副本数会自动变多，副本信息占内存",
+              "correct": false,
+              "explain": "副本数默认固定 3，与小文件数量无关；瓶颈是文件/块元数据条目本身。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. HDFS 元数据模型：每个文件、每个目录、每个块都在 NameNode 内存中占一条元数据记录（一个块约 150 字节，含文件名、路径、副本位置）。\n2. 小文件 = 文件数多 = 元数据条目多：1000 万个 1KB 文件 ≈ 2000 万条记录 ≈ 3GB 内存（还没算目录与副本）。\n3. 排除干扰项：数据本体在 DataNode（NN 不缓存数据）；JVM 是计算任务的；副本数不因小文件变多。\n4. 选 A。\n**延伸**：小文件还让计算任务为每个文件启动一个 task，任务启动开销远超处理时间——双重伤害。",
+          "enterprise_tip": "面试题『怎么治理小文件』：合并存量（INSERT OVERWRITE 重写 + DISTRIBUTE BY）、控制增量（限制动态分区/reduce 数、写入端 coalesce）——底层都是减少『文件/块元数据条数』。"
+        },
+        {
+          "task_id": "s04c07t07",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：短路读的英文名称",
+          "question": "HDFS 中，当客户端与 DataNode 位于同一台机器时，客户端可以直接打开本地磁盘上的副本文件读取数据，无需走网络与 DataNode 进程——这个机制英文称为 ____ read（填两个英文单词，中间用空格或连字符均可）。",
+          "answer": [
+            "short circuit",
+            "short-circuit",
+            "shortcircuit",
+            "Short Circuit",
+            "Short-Circuit",
+            "Shortcircuit",
+            "SHORT CIRCUIT"
+          ],
+          "hint": "先回忆短路读机制：客户端与 DataNode 同机时绕开网络直读本地文件，这个术语由哪两个单词组成？",
+          "analysis": "**标准解题思路**\n1. 背景：默认读数据时，即使客户端与 DataNode 同机，也要走『TCP 连接 → DN 读本地盘 → 网络回传』的绕路。\n2. 短路读：客户端直接打开本地磁盘上的副本文件读取，绕过网络与 DN 进程——这就是 short-circuit read。\n3. 填 short circuit（或 short-circuit）。\n4. 配置：dfs.client.read.shortcircuit=true，仅对『客户端与 DN 同机』场景生效。\n**易错点**：短路读不是跨节点的优化——跨节点必须走网络，没有短路可言。",
+          "enterprise_tip": "生产上 Spark/Hive 任务若与 DN 同节点运行，开启短路读能明显降延迟升吞吐；排查『本地读还走网络』时先检查该配置是否开启。"
+        },
+        {
+          "task_id": "s04c07t08",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：ZooKeeper Leader 选举",
+          "question": "ZooKeeper 集群（如 3 台）的 **Leader 选举**机制，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "启动或 Leader 失联时，各节点投票，获得**半数以上（多数派）票**的节点当选 Leader；集群因此必须部署**奇数台**",
+              "correct": true,
+              "explain": "正确。多数派（n/2+1）投票当选，奇数台才能用最少机器保证多数派成立。"
+            },
+            {
+              "text": "Leader 在部署时由配置文件指定，永久不变",
+              "correct": false,
+              "explain": "错误。Leader 是动态选举出来的，Leader 故障后会重新选举。"
+            },
+            {
+              "text": "谁先启动谁就是 Leader",
+              "correct": false,
+              "explain": "错误。选举看多数派投票结果，与启动顺序无关。"
+            },
+            {
+              "text": "Leader 挂掉后整个 ZooKeeper 集群不可用",
+              "correct": false,
+              "explain": "错误。只要剩余节点仍满足多数派，就会重新选出 Leader 继续服务。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. ZooKeeper 是分布式协调服务，自身也要高可用 → 集群模式（3/5/7 台）。\n2. Leader 选举：集群启动或 Leader 失联（Follower 收不到心跳）时，各节点进入选举，投票选出自己认可的候选者；获得**多数派**（n/2+1）票的当选 Leader。\n3. 为什么奇数台：多数派 = 半数以上；3 台挂 1 台剩 2 台仍满足 2>1.5（可用）；2 台挂 1 台剩 1 台不满足（不可用）——奇数台用最少机器换最大容错。\n4. 排除干扰项：Leader 动态选举、与启动顺序无关、Leader 挂了会重选。\n5. 选 A。\n**延伸**：写操作只有 Leader 处理（ZAB 协议：Leader 提案 → 多数派确认 → 提交）；HDFS HA 的自动选主就是 ZooKeeper 这套机制，面试答出「ZAB + 多数派」是加分项。",
+          "enterprise_tip": "面试必问「ZooKeeper 为什么要奇数台」：多数派 = n/2+1，3 台挂 1 台可用、2 台挂 1 台就不可用——奇数台用最少机器换最大容错；HDFS HA 选主底层就是这套 ZAB 协议。"
+        },
+        {
+          "task_id": "s04c07t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：HDFS 纠删码",
+          "question": "HDFS 纠删码（Erasure Coding）相对 3 副本机制的优势是？",
+          "options": [
+            {
+              "text": "用 Reed-Solomon 编码把数据拆成「数据块 + 校验块」，如 6+3 用 9 块容量存 6 块数据，**存储成本接近减半**，同时保持容错",
+              "correct": true,
+              "explain": "正确。6+3 用 9 块容量存 6 块数据，存储利用率从 1/3 提升到 2/3。"
+            },
+            {
+              "text": "纠删码完全不需要额外存储空间",
+              "correct": false,
+              "explain": "错误。纠删码仍需要校验块（6+3 = 9 块存 6 块），只是比 3 副本省约一半。"
+            },
+            {
+              "text": "纠删码读写性能比副本更高",
+              "correct": false,
+              "explain": "错误。纠删码读/重建需要解码计算，CPU 开销大，读写性能不如副本。"
+            },
+            {
+              "text": "纠删码会把副本数自动提高到 9",
+              "correct": false,
+              "explain": "错误。纠删码与副本是两种不同的容错方案，不会叠加提高副本数。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 3 副本的成本：1 份数据存 3 份，存储利用率只有 1/3。\n2. 纠删码（EC）思路：把数据切成 N 份数据块 + M 份校验块（如 RS-6-3：6 数据 + 3 校验），任取 N 块即可还原全部数据。\n3. 成本对比：6+3 用 9 块容量存 6 块数据，存储利用率 2/3 ≈ 比 3 副本省一半空间。\n4. 代价：读/重建需要解码计算，CPU 开销大，性能不如副本——适合冷/温数据。\n5. 选 A。\n**延伸**：Hadoop 3 支持 EC 后，生产对冷数据目录（hdfs ec -setPolicy -path /cold -policy RS-6-3-1024k）降本；热数据仍用副本保读写性能；面试答「EC 用 CPU 换存储」是精髓。",
+          "enterprise_tip": "生产实践：热数据用副本（读快），冷/温数据用纠删码（如 RS-6-3）省 40%+ 存储成本；Hadoop 3 引入 EC 后，降本增效是运维面试的高频话题。"
+        },
+        {
+          "task_id": "s04c07t10",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：CAP 理论",
+          "question": "关于分布式系统的 **CAP 理论**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "CAP 指一致性（Consistency）、可用性（Availability）、分区容错性（Partition tolerance）；网络分区不可避免时，只能在 C 与 A 之间二选一，三者不可兼得",
+              "correct": true,
+              "explain": "正确。分区是常态，分区发生时必须在强一致与可用之间做取舍。"
+            },
+            {
+              "text": "CAP 三项可以同时满足",
+              "correct": false,
+              "explain": "错误。网络分区发生时只能在 C 与 A 之间二选一，三者不可兼得。"
+            },
+            {
+              "text": "CAP 中的 A 指认证（Authentication）",
+              "correct": false,
+              "explain": "错误。A 是可用性 Availability。"
+            },
+            {
+              "text": "CAP 理论只适用于传统数据库",
+              "correct": false,
+              "explain": "错误。它适用于一切分布式系统，是大数据组件选型的理论依据。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. CAP 三要素：C 一致性（Consistency，所有节点同一时刻看到同一数据）、A 可用性（Availability，任何请求都有响应）、P 分区容错性（Partition tolerance，网络分区时系统仍能工作）。\n2. 关键前提：网络分区（节点间通信中断）在分布式系统里**不可避免**——P 必须选。\n3. 分区发生时只能在 C 与 A 之间二选一：CP（牺牲可用性保证一致，如 HBase、ZooKeeper）或 AP（牺牲强一致保证可用，如 Redis 主从最终一致）。\n4. 排除干扰项：三者不可兼得；A 是可用性不是认证；适用一切分布式系统。\n5. 选 A。\n**延伸**：面试选型题：MySQL 单机不分区（CA），分布式后要按业务取舍——账务要 CP、缓存可 AP；能结合业务讲取舍比背定义强。",
+          "enterprise_tip": "面试常问「HBase 为什么选 CP、Redis 为什么偏 AP」：HBase 强一致（写 WAL + 同步），Redis 主从异步复制可能丢最近写入（最终一致）；选型本质就是 CAP 取舍，结合业务讲取舍是加分项。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "HDFS 写文件时管道式复制为什么客户端只传一次数据？",
+          "a": "客户端把块传给 DN1 后，DN1 自己存一份并转发 DN2，DN2 存一份并转发 DN3——数据像流水一样在管道中流动，客户端带宽只消耗 1 份，写 3 副本的网络代价从 3× 降到 1×。"
+        },
+        {
+          "q": "fsimage 和 edits 各是什么？checkpoint 做什么？",
+          "a": "fsimage 是元数据快照（某时刻的全家福），edits 是编辑日志（快照后的流水账）；checkpoint 把内存最新元数据合并成新 fsimage 并清空 edits，非 HA 集群由 SecondaryNameNode 定期执行。"
+        },
+        {
+          "q": "机架感知的 3 副本怎么放？",
+          "a": "第一副本放客户端所在节点；第二副本放同机架另一节点；第三副本跨机架，防止整机架故障导致数据全丢。"
+        },
+        {
+          "q": "map 端环形缓冲区多大、何时溢写？",
+          "a": "默认 100MB（io.sort.mb），写入量达 80%（io.sort.spill.percent=0.8）开始溢写，边写边腾空间，避免 map 阻塞。"
+        },
+        {
+          "q": "为什么小文件伤 NameNode？",
+          "a": "每个文件/目录/块都要占 NN 内存约 150 字节/块的元数据，千万级小文件吃掉几十 GB 内存，还会让计算任务为每个文件空转启动。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "管道式复制（Pipeline）",
+          "desc": "HDFS 写数据时数据在 DataNode 间链式流转、客户端只传一次的复制方式。"
+        },
+        {
+          "term": "ack 确认",
+          "desc": "数据节点写完副本后向上游逐级返回的写入确认。"
+        },
+        {
+          "term": "fsimage",
+          "desc": "NameNode 的元数据快照文件（某时刻的全家福）。"
+        },
+        {
+          "term": "edits",
+          "desc": "NameNode 的编辑日志文件，记录快照后的每次操作。"
+        },
+        {
+          "term": "Checkpoint",
+          "desc": "合并 fsimage 与 edits 生成新快照并清空日志的动作。"
+        },
+        {
+          "term": "机架感知（Rack Awareness）",
+          "desc": "按机架拓扑放置副本的策略：本机→同机架→跨机架。"
+        },
+        {
+          "term": "环形缓冲区",
+          "desc": "map 端 100MB 的内存缓冲，写入达 80% 开始溢写。"
+        },
+        {
+          "term": "短路读（Short-Circuit Read）",
+          "desc": "客户端与 DN 同机时直接读本地副本文件、绕过网络的机制。"
+        }
+      ],
+      "kps": [
+        "HDFS 写流程底层（128MB 切块 → 管道式复制 → ack 逐级确认）",
+        "map 端环形缓冲区与溢写机制（100MB、80% 阈值）",
+        "NameNode 元数据管理（fsimage + edits、Checkpoint、NN 单点瓶颈）",
+        "块副本放置策略（机架感知：本机/同机架/跨机架）",
+        "Shuffle 全流程（map 端分区排序合并、reduce 端拉取归并分组）与 Combiner/压缩优化",
+        "小文件问题原理（NN 内存约 150 字节/块）",
+        "HDFS 读流程底层与短路读（就近读取、并行读、short-circuit read）",
+        "ZooKeeper Leader 选举（多数派投票、奇数台）",
+        "HDFS 纠删码（Erasure Coding：RS 编码省存储）",
+        "CAP 理论（一致性/可用性/分区容错性取舍）"
+      ]
+    },
+    {
+      "chapter_id": "s04c08",
+      "title": "4.8 HBase 与 NoSQL 生态",
+      "goal": "理解 NoSQL 的动机与 HBase 的列式存储定位，掌握 RowKey/列族/Region/WAL 核心概念与写入流程，能对比 Hive/关系库并判断适用场景",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "关系型数据库（MySQL/Oracle）是数仓和业务系统的老搭档，但它有天花板：**单机存储与写入吞吐有限**，海量数据 + 高并发写入时撑不住；**水平扩展难**——加机器要做分库分表，成本高、运维复杂。\n\n而互联网业务的数据是**海量写入 + 快速增长**的：订单流水、用户行为日志、点击流……一天几亿条。这类场景需要的是：\n- **水平扩展**：加机器就能扩容，不用停机；\n- **高吞吐写入**：每秒几十万条也能扛住；\n- **灵活结构**：字段可以随时加，不要求每行结构一致。\n\n于是 **NoSQL（Not Only SQL）** 应运而生：牺牲部分关系库能力（复杂 join、事务），换来**海量存储 + 水平扩展 + 高性能读写**。HBase 就是 Hadoop 生态里最典型的 NoSQL 数据库。"
+        },
+        {
+          "type": "text",
+          "content": "HBase 是一个**基于 HDFS 的分布式列式 NoSQL 数据库**：\n- **列式存储**：数据按**列族**组织存储（同一列族的数据物理上挨在一起），不是按行；\n- **稀疏表**：允许大量列为空——空列不占存储，一亿行用户数据，每人只有 5 个字段有值也毫无压力；\n- **随机读写**：支持按主键（RowKey）的**实时随机读写**，毫秒级返回——这是 Hive（离线分析）做不到的；\n- **底层存储**：数据最终以 HFile 形式存在 HDFS 上，天然多副本、可水平扩展。\n\n一句话：**HDFS 管海量文件存储，Hive 管离线批量分析，HBase 管海量数据的实时随机读写**。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "# HBase 逻辑表结构：user_info（RowKey + 2 个列族）\n# 列族 info：姓名/年龄；列族 address：城市/邮编\n\nRowKey      列族 info                列族 address\n----------------------------------------------------------\nuser_001    name=张三  age=25        city=杭州  zip=310000\nuser_002    name=李四  age=30        (空)      (空)\nuser_003    name=王五  (空)          city=北京\n\n# 特点：\n# ① 每个单元格由 (RowKey, 列族:列名, 时间戳) 唯一确定，可存多个版本\n# ② 空列不占存储（稀疏表）\n# ③ 查询只能高效按 RowKey 或 RowKey 范围扫描\n\n# 常用命令（hbase shell）\ncreate 'user_info', 'info', 'address'   # 建表：指定列族\nput 'user_info', 'user_001', 'info:name', '张三'   # 写入\nput 'user_info', 'user_001', 'info:age', '25'\nget 'user_info', 'user_001'              # 按 RowKey 查询\nscan 'user_info', {LIMIT => 5}           # 全表扫描（慎用）",
+          "caption": "HBase 数据模型：RowKey + 列族 + 稀疏单元格"
+        },
+        {
+          "type": "text",
+          "content": "HBase 的核心概念：\n- **RowKey（行键）**：每行数据的**主键**，是查询的唯一入口——HBase 按 RowKey 字典序排序存储，查询只能按 RowKey 或 RowKey 范围高效进行；\n- **列族（Column Family）**：列的容器，建表时定义，同一列族的数据物理上存储在一起；列族内的列可以动态添加；列族数量**不宜多**（一般 1~3 个），多了影响读写性能；\n- **Region（区域）**：表按 RowKey 范围横向切分成一个个 Region，每个 Region 是数据分布与负载均衡的基本单位；数据量大时 Region 会分裂；\n- **RegionServer（分区服务器）**：真正存 Region、服务读写请求的节点；一个 RegionServer 管理多个 Region。\n\n架构一句话：**表 → 按 RowKey 切分成多个 Region → 分布在多台 RegionServer 上 → 数据落 HDFS**。"
+        },
+        {
+          "type": "text",
+          "content": "**RowKey 设计是 HBase 使用者的核心功课**，原则是让写入均匀分散、避免热点：\n- **加盐（Salting）**：在 RowKey 前拼接随机前缀或分区号（如 `0_user_001`、`1_user_002`），让数据散落到不同 Region，避免全部写进同一个 Region（热点）；\n- **反转（Reversal）**：把 RowKey 的尾部翻到前面（如手机号 13812345678 反转为 87654321831），让变化的部分成为前缀，均匀分布；\n- **避免**：用自增 ID、时间戳直接做 RowKey——单调递增会导致新数据全部写向最后一个 Region，形成热点。\n\n**WAL（Write-Ahead Log，预写日志）**：HBase 写数据的可靠性保障——**先写日志、再写内存**。数据先追加写入 WAL 落盘，再写入内存 MemStore；如果写入过程中 RegionServer 宕机，重启后可以重放 WAL 把数据恢复，不丢数据。"
+        },
+        {
+          "type": "text",
+          "content": "一条数据写入 HBase 的**完整流程**：\n1. 客户端向所在 **RegionServer** 提交写入请求；\n2. RegionServer **先追加写入 WAL（预写日志）**落盘——保证宕机可恢复；\n3. 再把数据写入**内存中的 MemStore**（按列族划分的内存缓冲区）；\n4. MemStore 达到阈值（默认 64MB）后执行 **Flush 刷写**；\n5. 刷写生成 **HFile** 文件落盘到 HDFS。\n\n记忆口诀：**WAL → MemStore → Flush → HFile**。读数据则是反向：先查 MemStore（最新数据），再查 HFile（历史数据）。"
+        },
+        {
+          "type": "text",
+          "content": "**HBase vs Hive**：Hive 是**离线批量分析**（SQL、全表扫描、分钟~小时级），HBase 是**实时随机读写**（按 RowKey 查、毫秒级）。Hive 适合报表、数仓分析；HBase 适合在线服务。\n\n**HBase vs MySQL**：MySQL 适合**关系复杂、强事务**的在线业务（订单主库、账户）；HBase 适合**海量、稀疏、高并发读写**的存储（历史流水、日志、画像）。\n\n**适用场景**：\n- **订单流水**：海量历史订单查询（按用户 ID 查某段时间的订单）；\n- **用户画像**：亿级用户、每人几十上百个标签，稀疏表 + 按用户 ID 随机读写；\n- **风控/反欺诈**：按手机号/IP 实时查历史行为，毫秒级返回；\n- **时序/监控数据**：海量指标写入与按时间范围扫描。\n\n**不适合**：复杂 join、跨行事务、需要灵活聚合分析的场景——那些交给 Hive/Spark。"
+        },
+        {
+          "type": "warning",
+          "content": "**三个高频坑**：① 把 HBase 当关系库用——HBase 没有 SQL 的 join、不支持复杂事务，复杂查询要交给上层（Phoenix 提供 SQL 层）；② RowKey 用自增 ID/时间戳——必然产生写热点，Region 倾斜；③ 列族建太多——每个列族独立 Flush/存储，列族多了写放大与内存浪费，一般 1~3 个足够。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- 面试必问：① HBase 和 Hive 的区别？② RowKey 怎么设计？③ 为什么先写 WAL？④ 一条数据写入 HBase 的流程？⑤ 列族是什么、为什么不能多？⑥ HBase 适合什么场景？\n- 生产实践：订单中心把「已完结订单」异步同步到 HBase 供客服/用户端查询，把 MySQL 从亿级查询中解放出来；画像平台用 HBase 存亿级用户标签；风控用 HBase 存手机号维度历史行为，毫秒级查询。\n- 常见坑：RowKey 设计不当导致热点；Region 分裂后负载不均衡（要配 HBase Balancer）；Scan 全表扫导致 RegionServer 压力大。"
+        }
+      ],
+      "hands_on": "1. 用 Python 模拟 HBase 写入流程：写一个函数，接收 (rowkey, 列族, 值)，依次打印「写 WAL → 写 MemStore」；再写一个循环把 MemStore 塞到阈值后打印「Flush → 生成 HFile」，体会先日志后内存的顺序。\n2. 用纸笔画一张 HBase 架构图：表 → 多个 Region → 分布在 RegionServer 上 → 数据落 HDFS，标出 WAL 与 MemStore 的位置。\n3. 设计练习：给 1 亿用户按 user_id 存画像，user_id 是递增数字，说明直接用它做 RowKey 会有什么问题，再写出加盐方案（如 user_id % 100 作为前缀）。\n4. 对比表：把「订单流水查询」「用户画像」「报表分析」「账户事务」四个场景分别填入 MySQL/Hive/HBase 的推荐列，说明理由。\n5. 思考题：为什么 HBase 先写 WAL 而不是先写 MemStore？把答案写在笔记里。",
+      "tasks": [
+        {
+          "task_id": "s04c08t01",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：HBase 与 Hive 的定位区别",
+          "question": "关于 HBase 与 Hive 的定位，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Hive 是**离线批量分析**工具（SQL 全表扫描、分钟~小时级）；HBase 是**实时随机读写**数据库（按 RowKey 毫秒级查询）",
+              "correct": true,
+              "explain": "正确。Hive 管离线分析、HBase 管实时随机读写，两者定位互补。"
+            },
+            {
+              "text": "Hive 负责实时随机读写，HBase 负责离线分析",
+              "correct": false,
+              "explain": "错误。说反了：实时读写是 HBase，离线分析是 Hive。"
+            },
+            {
+              "text": "两者完全等价，只是名字不同",
+              "correct": false,
+              "explain": "错误。Hive 是全表扫描的批处理，HBase 是按 RowKey 的随机读写，能力完全不同。"
+            },
+            {
+              "text": "Hive 支持毫秒级单条查询",
+              "correct": false,
+              "explain": "错误。Hive 是全表扫描的批处理，单条查询也要分钟级。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 先记定位：Hive = SQL on Hadoop 的**离线分析**引擎（批处理、全表扫描、分钟~小时级）；HBase = **实时随机读写**数据库（按 RowKey 毫秒级）。\n2. 能力差异：Hive 没有单条随机读写能力（查询要走全表扫描）；HBase 不能做复杂 join/聚合（要靠上层 Phoenix 或 Spark）。\n3. 场景分工：报表/数仓分析 → Hive；在线查询/实时服务 → HBase。\n4. 排除干扰项：说反的、等价的、Hive 毫秒级都是错的。\n5. 选 A。\n**延伸**：两者都基于 HDFS，但 Hive 是「表 + SQL」抽象、HBase 是「表 + 随机读写」能力，底层文件格式也不同（Hive 用 ORC/Parquet，HBase 用 HFile）。",
+          "enterprise_tip": "面试第一问「HBase 和 Hive 什么区别」：答「Hive 管离线分析、HBase 管实时读写」，再补一句「Hive 没有随机读写能力」——这是最常考的区分点。"
+        },
+        {
+          "task_id": "s04c08t02",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：HBase 的主键",
+          "question": "HBase 表中每一行数据的**主键**（唯一标识、查询入口）叫做 ____（英文单词，一个词）。",
+          "answer": [
+            "RowKey",
+            "rowkey",
+            "Row Key",
+            "row key",
+            "行键"
+          ],
+          "hint": "先回忆 HBase 行存储模型：每行数据的唯一标识叫什么？它由哪两个英文单词组合？",
+          "analysis": "**标准解题思路**\n1. HBase 是 KV 式的表：每一行用 RowKey 唯一标识，数据按 RowKey 字典序排列。\n2. 查询定位：唯一高效入口就是 RowKey（get 单条）或 RowKey 范围（scan）。\n3. 填 RowKey。\n**延伸**：RowKey 设计直接影响性能与热点——这是 HBase 面试最核心的考点；无 RowKey 的全表 scan 在生产上是大忌。",
+          "enterprise_tip": "面试手写题常考「HBase 查询只能通过什么高效定位」：RowKey 或 RowKey 范围扫描；全表 scan 会拖垮 RegionServer，生产上严格限制。"
+        },
+        {
+          "task_id": "s04c08t03",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "选一选：RowKey 设计避免热点",
+          "question": "用户表用**自增 user_id**（如 1、2、3……）直接做 RowKey，会导致什么问题？如何解决？",
+          "options": [
+            {
+              "text": "自增 RowKey 单调递增，新数据全部写向最后一个 Region，形成**写热点**；解决：**加盐**（拼随机前缀/分区号）或**反转**（把变化的部分放前面）让数据均匀分散",
+              "correct": true,
+              "explain": "正确。单调递增 = 顺序写集中在尾部 Region，加盐/反转是标准解法。"
+            },
+            {
+              "text": "自增 RowKey 没有任何问题，是最优设计",
+              "correct": false,
+              "explain": "错误。单调递增 RowKey 必然导致写热点，是经典的反面教材。"
+            },
+            {
+              "text": "自增 RowKey 会导致数据无法排序",
+              "correct": false,
+              "explain": "错误。HBase 本来就按 RowKey 字典序排序，问题出在写热点而不是排序。"
+            },
+            {
+              "text": "解决热点的方法是增加列族数量",
+              "correct": false,
+              "explain": "错误。列族多少与写热点无关，热点要靠 RowKey 散列解决。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 自增 ID 的特点：单调递增 → 新 RowKey 永远比旧的大 → 按字典序全部排在表末尾 → 所有写入都打向最后一个 Region。\n2. 后果：写热点（最后一个 Region 的 RegionServer 扛全部写入、其他空闲），集群吞吐上不去，甚至 RegionServer 压力过大。\n3. 解决：**加盐**——RowKey 前拼分区号/随机前缀（如 user_id % 100），把写入分散到 100 个 Region；**反转**——把变化的部分（如手机号尾部）翻到前面。\n4. 排除干扰项：自增不是最优设计；不是排序问题；列族与热点无关。\n5. 选 A。\n**延伸**：加盐的代价：查询时要知道前缀（用「用户 ID 哈希」类方案时，查询端也要算出同样的前缀才能定位）；面试答「均匀分散、避免单调前缀」是标准答案。",
+          "enterprise_tip": "面试必考「RowKey 设计」：加盐（随机前缀）、反转（尾部翻到前面）、散列（MD5 取前缀）；再答「热点导致单个 Region 扛全部写入、其他 Region 空闲」——答全这两层就过关。"
+        },
+        {
+          "task_id": "s04c08t04",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排序：一条数据写入 HBase 的流程",
+          "question": "把一条数据写入 HBase 的完整流程按正确顺序排列。",
+          "steps": [
+            "客户端向 RegionServer 提交写入请求",
+            "先追加写入 WAL（预写日志）落盘，保证宕机可恢复",
+            "再把数据写入内存中的 MemStore",
+            "MemStore 达到阈值后执行 Flush 刷写",
+            "刷写生成 HFile 落盘到 HDFS"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "写入顺序是「先日志、后内存、再落盘」：请求 → 写 WAL（先持久化日志）→ 写 MemStore（内存）→ 达阈值 Flush → 生成 HFile 落 HDFS。WAL 必须先于 MemStore：如果先写内存再写日志，宕机时内存里还没来得及写日志的数据就丢了。",
+          "analysis": "**标准解题思路**\n1. **请求**：客户端把写请求发给行所在 Region 的 RegionServer。\n2. **先写 WAL**：RegionServer 先把数据追加写入 WAL（预写日志，落盘 HDFS）——保证宕机后能重放恢复。\n3. **再写 MemStore**：数据写入内存中的 MemStore（按列族划分），此时客户端即返回成功（不用等落盘 HFile）。\n4. **Flush**：MemStore 达到阈值（默认 64MB）触发 Flush 刷写。\n5. **HFile**：刷写生成 HFile 文件落盘到 HDFS，数据持久化完成。\n**记忆**：WAL → MemStore → Flush → HFile；「先日志、后内存、再落盘」。\n**易错点**：把 WAL 和 MemStore 顺序搞反——先写 WAL 是崩溃恢复的前提：若先写内存，宕机时内存中未落日志的数据就丢了。\n**延伸**：为什么 HBase 写入快：随机写变顺序写（WAL 追加 + MemStore 攒批刷盘）；读时先查 MemStore（最新）再查 HFile（历史）。",
+          "enterprise_tip": "面试画图题「HBase 写入流程」：能画出 WAL→MemStore→Flush→HFile 并说清「WAL 先行的原因（崩溃恢复）」就过关；追问「HBase 为什么快」：随机写变顺序写 + 内存攒批刷盘。"
+        },
+        {
+          "task_id": "s04c08t05",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：列族（Column Family）",
+          "question": "关于 HBase 的**列族（Column Family）**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "列族是**列的容器**，建表时定义，同一列族的数据物理上存储在一起；列族内列可动态添加，但列族数量不宜多（一般 1~3 个）",
+              "correct": true,
+              "explain": "正确。列族建表时定义、数据物理聚合、列可动态添加，数量要克制。"
+            },
+            {
+              "text": "列族是在写入数据时随意创建的",
+              "correct": false,
+              "explain": "错误。列族必须在建表时（create 语句）定义，不能随写随建。"
+            },
+            {
+              "text": "列族越多越好，可以无限加",
+              "correct": false,
+              "explain": "错误。列族多了写放大、内存与 IO 开销大，一般 1~3 个。"
+            },
+            {
+              "text": "列族是 Region 的另一个叫法",
+              "correct": false,
+              "explain": "错误。列族是逻辑分组，Region 是数据按 RowKey 的物理分片，两者不同。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 列族（Column Family）定义：建表时声明的「列的容器」，是 HBase 物理存储的基本单位——同一列族的数据在物理上存在一起。\n2. 特性：列族内的**列可以动态添加**（不用改表结构）；空列不占存储（稀疏）。\n3. 数量原则：一般 1~3 个——每个列族独立 Flush/存储，多了写放大、内存与 IO 开销大。\n4. 排除干扰项：列族建表时定义、不是越多越好、不是 Region 别名。\n5. 选 A。\n**延伸**：设计建议：把「访问频率和大小相似」的列放同一列族（如 info 放基本信息、address 放地址信息）；不同列族不要频繁一起读，否则要多路 IO。",
+          "enterprise_tip": "面试题「为什么列族不能多」：每个列族独立 Flush/存储，列族多 → 同一行数据分散多份存储、写放大严重；设计时按「访问频率和大小相似」归组。"
+        },
+        {
+          "task_id": "s04c08t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "选一选：HBase 适合什么场景",
+          "question": "以下哪个场景**最适合**使用 HBase？",
+          "options": [
+            {
+              "text": "用户画像存储：亿级用户、每人几十个标签（稀疏表），按用户 ID 实时随机读写",
+              "correct": true,
+              "explain": "正确。海量 + 稀疏 + 高并发随机读写，正是 HBase 的典型场景。"
+            },
+            {
+              "text": "数仓月度报表：对万亿行数据做复杂聚合分析",
+              "correct": false,
+              "explain": "错误。复杂聚合是 Hive/Spark 的活，HBase 不支持复杂 join/聚合。"
+            },
+            {
+              "text": "账户核心交易：强事务、跨行转账",
+              "correct": false,
+              "explain": "错误。强事务/ACID 是关系库（MySQL）的强项，HBase 事务能力弱。"
+            },
+            {
+              "text": "两张表做等值 join 生成结果集",
+              "correct": false,
+              "explain": "错误。join 是 SQL 引擎的事，HBase 不适合。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. HBase 的适用特征：**海量数据 + 稀疏表 + 高并发随机读写**（按 RowKey 毫秒级）。\n2. 用户画像：亿级用户、每人几十个稀疏标签、按用户 ID 实时读写——完全命中，选它。\n3. 排除干扰项：复杂聚合分析 → Hive/Spark；强事务 → MySQL；join → SQL 引擎。\n4. 选 A。\n**延伸**：经典三案例：订单流水（海量历史查询）、用户画像（稀疏标签）、风控（按手机号/IP 实时查历史行为）；面试答选型要「先说场景特征、再对号入座」。",
+          "enterprise_tip": "面试选型题答法：先说场景特征（海量 + 稀疏 + 高并发随机读写 → HBase），再对比排除（聚合 → Hive/Spark、事务 → MySQL）；能说出「订单流水、画像、风控」三个经典案例更佳。"
+        },
+        {
+          "task_id": "s04c08t07",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：HBase 预写日志",
+          "question": "HBase 在写内存之前先写日志以保证宕机可恢复，这个机制叫预写日志，英文缩写是 ____（3 个大写字母）。",
+          "answer": [
+            "WAL",
+            "Write-Ahead Log",
+            "Write Ahead Log",
+            "预写日志"
+          ],
+          "hint": "先回忆 HBase 持久化机制：写内存前先写日志以保证恢复，这个机制英文叫什么？取首字母。",
+          "analysis": "**标准解题思路**\n1. 可靠性问题：写内存（MemStore）快但易失，宕机内存数据就没了。\n2. 解决方案：预写日志（WAL，Write-Ahead Log）——**先写日志落盘、再写内存**，宕机后重放 WAL 恢复。\n3. 缩写：WAL = Write-Ahead Log 三个单词首字母。\n4. 填 WAL。\n**延伸**：WAL 是数据库的通用设计（MySQL 的 redo log、HBase 的 WAL 同一思想）；面试追问「WAL 写哪」：HDFS 上，RegionServer 崩溃后从 WAL 恢复未刷盘的数据。",
+          "enterprise_tip": "面试追问「WAL 放哪、怎么恢复」：WAL 写在 HDFS 上，RegionServer 宕机后重启会重放 WAL 恢复 MemStore 中未刷盘的数据——这就是「先日志后内存」的价值。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "HBase 和 Hive 有什么区别？",
+          "a": "Hive 是离线批量分析工具（SQL、全表扫描、分钟~小时级），HBase 是实时随机读写数据库（按 RowKey 毫秒级查询）。Hive 适合报表分析，HBase 适合在线服务，两者都基于 HDFS。"
+        },
+        {
+          "q": "RowKey 怎么设计才能避免热点？",
+          "a": "加盐（拼随机前缀/分区号）、反转（把变化部分放前面）、散列（哈希取前缀）；避免用自增 ID 和时间戳做 RowKey，否则新数据全部写向最后一个 Region 形成写热点。"
+        },
+        {
+          "q": "HBase 写数据为什么先写 WAL？",
+          "a": "WAL 是预写日志：先落盘日志再写内存 MemStore，RegionServer 宕机后可以重放 WAL 恢复未刷盘的数据，保证不丢数据；完整顺序是 WAL → MemStore → Flush → HFile。"
+        },
+        {
+          "q": "列族是什么？为什么列族数量不宜多？",
+          "a": "列族是列的容器，建表时定义，同一列族数据物理存储在一起，列可动态添加。列族多了每个列族独立存储与 Flush，写放大和内存开销大，一般 1~3 个。"
+        },
+        {
+          "q": "HBase 适合什么场景？",
+          "a": "海量、稀疏、高并发随机读写的场景：订单流水查询、用户画像（亿级用户稀疏标签）、风控反欺诈（按手机号/IP 实时查历史）、时序数据。不适合复杂 join、强事务与灵活聚合（那是 MySQL/Hive/Spark 的活）。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "NoSQL",
+          "desc": "Not Only SQL，非关系型数据库总称，突出海量存储与水平扩展。"
+        },
+        {
+          "term": "HBase",
+          "desc": "基于 HDFS 的分布式列式 NoSQL 数据库，支持海量数据的实时随机读写。"
+        },
+        {
+          "term": "RowKey",
+          "desc": "HBase 每行数据的主键，按字典序排序，是查询的唯一高效入口。"
+        },
+        {
+          "term": "列族（Column Family）",
+          "desc": "列的容器，建表时定义，同一列族数据物理存储在一起。"
+        },
+        {
+          "term": "Region / RegionServer",
+          "desc": "表按 RowKey 切分的物理分片 / 存储并服务 Region 的节点。"
+        },
+        {
+          "term": "WAL（预写日志）",
+          "desc": "Write-Ahead Log，写内存前先落盘的日志，宕机后重放恢复数据。"
+        },
+        {
+          "term": "MemStore / HFile",
+          "desc": "内存中的写入缓冲区 / Flush 后落盘 HDFS 的存储文件。"
+        },
+        {
+          "term": "加盐（Salting）",
+          "desc": "RowKey 前拼随机前缀让数据均匀散列、避免写热点的设计手段。"
+        }
+      ],
+      "kps": [
+        "为什么需要 NoSQL（海量写入、水平扩展）与 HBase 定位（列式、稀疏、随机读写）",
+        "HBase 数据模型：RowKey / 列族 / 单元格",
+        "Region 与 RegionServer（表按 RowKey 切分、分布式存储）",
+        "RowKey 设计原则（加盐、反转、避免自增热点）",
+        "WAL 预写日志与写入流程（WAL → MemStore → Flush → HFile）",
+        "HBase 与 Hive / 关系数据库的对比（实时读写 vs 离线分析）",
+        "适用场景与生产实践（订单流水、用户画像、风控）"
+      ]
+    }
+  ]
+}

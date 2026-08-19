@@ -1,0 +1,21 @@
+{
+  "name": "大数据学习闯关平台",
+  "version": "1.0.0",
+  "description": "循序渐进的交互式大数据学习软件：Python → SQL → Linux → Hadoop → Hive → Spark → Flink → 数仓建模 → 调度工具 → DataWorks → 企业级项目实战",
+  "stages": [
+    "s01_python",
+    "s02_sql",
+    "s03_linux",
+    "s04_hadoop",
+    "s05_hive",
+    "s06_kafka",
+    "s07_spark",
+    "s08_flink",
+    "s09_dw",
+    "s10_scheduler",
+    "s11_dataworks",
+    "s12_project"
+  ],
+  "daily_minutes": 120,
+  "start_hint": "每日 2 小时：理论 40 分钟 + 交互闯关 50 分钟 + 动手实践 20 分钟 + 回顾 10 分钟"
+}

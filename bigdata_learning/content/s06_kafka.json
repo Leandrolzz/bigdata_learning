@@ -1,0 +1,2385 @@
+{
+  "stage_id": "s06_kafka",
+  "title": "阶段 6：Kafka 消息队列与数据采集",
+  "subtitle": "大数据的传输大动脉：Kafka / Flume / Sqoop / DataX",
+  "emoji": "📨",
+  "estimated_days": 12,
+  "learning_goal": "掌握 Kafka 的核心架构与使用流程（主题/分区/生产者/消费者/消费组），理解 Flume/Sqoop/DataX 等采集工具的数据传输链路，为 Spark Streaming 与 Flink 实时计算打好基础。",
+  "chapters": [
+    {
+      "chapter_id": "s06c01",
+      "title": "6.1 消息队列与 Kafka 概述",
+      "goal": "理解消息队列的作用与 Kafka 的定位",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**消息队列（MQ）**是分布式系统的「传输大动脉」：生产者把消息写入队列，消费者按自己的节奏读取，两者完全解耦。为什么需要它？三个核心价值：**解耦**（上下游互不影响）、**削峰**（双 11 流量洪峰先落队列，下游慢慢消费）、**异步**（请求立刻返回，处理稍后完成）。\n\n**Kafka** 是 Apache 顶级项目，大数据生态事实上的消息标准：日志采集、实时计算（Spark Streaming/Flink）、事件驱动架构都离不开它。它本质是一个**分布式发布-订阅消息系统**：生产者把消息发布到「主题」，消费者订阅主题拉取消息。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "一条日志从产生到进入数仓的完整链路（企业标准架构）：\n\n  埋点/日志 → Flume 采集 → Kafka 主题 →\n                            ├→ Flink/Spark Streaming 实时计算 → 大屏/实时报表\n                            └→ 落 HDFS → Hive 数仓 → 离线报表\n\nKafka 在中间起「缓冲 + 解耦 + 多下游」的作用：\n同一份数据，实时链路和离线链路可以各自消费，互不影响。",
+          "caption": "Kafka 在大数据链路中的位置"
+        },
+        {
+          "type": "tip",
+          "content": "**面试高频开场题**：Kafka 和 RabbitMQ 有什么区别？答：Kafka 吞吐量极高（百万级/秒）、天然分布式、消息可重复消费（通过 offset 控制），适合大数据日志流；RabbitMQ 功能丰富、路由灵活，适合业务系统消息。大数据场景几乎都用 Kafka。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：面试必问「你们公司的实时链路怎么搭的」，标准回答框架就是：Flume/Kafka 采集 → Kafka 缓冲 → Flink 消费计算 → 结果写 Redis/MySQL → 大屏展示。Kafka 是整个链路承上启下的核心，本章学的就是它的使用流程。"
+        },
+        {
+          "type": "warning",
+          "content": "**概念辨析**：Kafka 不是数据库，消息被消费后**不会删除**（按保留时间/大小清理），消费者通过 offset 记录自己读到哪了。这也是它能支持多个消费者组各自独立消费的原因。"
+        }
+      ],
+      "hands_on": "1. 搜索并阅读 Kafka 官方文档（kafka.apache.org）的 Quickstart 页面，了解单机启动步骤。\\n2. 用文字画出你理解的「日志 → Kafka → 实时/离线」链路图。\\n3. 思考：如果没有消息队列，双 11 大促时数据库会被打爆吗？为什么？",
+      "qa": [
+        {
+          "q": "为什么大数据架构里必须有消息队列？",
+          "a": "三个原因：解耦（生产与消费独立）、削峰（洪峰先入队列缓冲，下游按能力消费）、异步（请求快速返回）。没有 MQ，高峰期请求会直接打垮下游数据库。"
+        },
+        {
+          "q": "Kafka 是什么？",
+          "a": "Apache 开源的分布式发布-订阅消息系统，以超高吞吐（百万级消息/秒）、可持久化、可重复消费著称，是大数据日志采集与实时计算的标配消息组件。"
+        },
+        {
+          "q": "消息被消费后会删除吗？",
+          "a": "不会立即删除。Kafka 按主题保留消息（默认 7 天或按大小），消费者用 offset 记录消费位置，所以不同消费者组可以各自独立、重复消费同一份数据。"
+        },
+        {
+          "q": "Kafka 和 RabbitMQ 怎么选？",
+          "a": "大数据日志/流式计算场景选 Kafka（吞吐高、分布式、可重复消费）；业务系统内部消息（订单状态通知等）选 RabbitMQ（功能丰富、路由灵活）。"
+        },
+        {
+          "q": "Kafka / RocketMQ / Pulsar 怎么选？",
+          "a": "Kafka：日志采集与流式计算标准（吞吐高、生态成熟）；RocketMQ：业务消息（事务消息、延迟消息更丰富）；Pulsar：存算分离、多租户、跨地域复制。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "消息队列 MQ",
+          "desc": "Message Queue，生产者-消费者之间的缓冲通道，实现解耦/削峰/异步。"
+        },
+        {
+          "term": "发布-订阅",
+          "desc": "Publish-Subscribe 模型：消息按主题发布，订阅该主题的消费者都能收到。"
+        },
+        {
+          "term": "Topic（主题）",
+          "desc": "消息的分类，如 user_log、order_topic，生产者和消费者都围绕主题工作。"
+        },
+        {
+          "term": "Producer（生产者）",
+          "desc": "把消息写入 Kafka 的客户端。"
+        },
+        {
+          "term": "Consumer（消费者）",
+          "desc": "从 Kafka 拉取消息的客户端。"
+        },
+        {
+          "term": "削峰",
+          "desc": "用队列缓冲瞬时洪峰，避免下游系统被瞬时流量打垮。"
+        },
+        {
+          "term": "RocketMQ",
+          "desc": "阿里开源消息队列，事务消息与延迟消息能力强，常用于业务消息。"
+        },
+        {
+          "term": "Pulsar",
+          "desc": "Apache 消息系统，存算分离架构，多租户与跨地域复制是强项。"
+        }
+      ],
+      "tasks": [
+        {
+          "task_id": "s06c01t01",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "消息队列的核心价值",
+          "question": "以下哪一项**不是**消息队列的核心价值？",
+          "options": [
+            {
+              "text": "解耦：上下游系统互不影响",
+              "correct": false,
+              "explain": "解耦确实是 MQ 的核心价值之一，生产者不关心谁在消费。"
+            },
+            {
+              "text": "削峰：缓冲瞬时洪峰",
+              "correct": false,
+              "explain": "削峰是 MQ 最经典的价值，双 11 场景全靠它。"
+            },
+            {
+              "text": "让数据库永远不用扩容",
+              "correct": true,
+              "explain": "错误说法。MQ 只是缓冲流量，数据库的容量规划仍然要做。"
+            },
+            {
+              "text": "异步：请求快速返回",
+              "correct": false,
+              "explain": "异步处理是 MQ 的核心价值之一。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 回忆 MQ 三大价值：解耦、削峰、异步。\\n2. 逐项对照：A/B/D 都是核心价值。\\n3. C 是绝对化说法，数据库仍需按峰值规划容量，选 C。\\n**面试延伸**：能说出三大价值并各举一个例子，这道题就稳了。",
+          "enterprise_tip": "面试答「为什么用 Kafka」时，先讲这三大价值，再结合公司业务举例（如日志量洪峰），比背概念强十倍。"
+        },
+        {
+          "task_id": "s06c01t02",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排列一条日志的数据链路",
+          "question": "把「一条用户点击日志从产生到进入离线数仓」的链路按正确顺序排列。",
+          "steps": [
+            "前端埋点产生日志",
+            "Flume 采集日志",
+            "写入 Kafka 主题",
+            "离线链路消费并落 HDFS",
+            "Hive 数仓加工分析"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "数据流方向固定：产生 → 采集 → 缓冲 → 落地 → 加工。Kafka 在中间做缓冲和解耦，实时链路与离线链路可以同时从第 4 步分叉。",
+          "analysis": "**标准解题思路**\\n1. 源头：前端埋点产生点击日志。\\n2. 采集：Flume 把分散的日志汇聚起来。\\n3. 缓冲：写入 Kafka 主题（核心枢纽）。\\n4. 落地：离线消费者把数据写到 HDFS。\\n5. 加工：Hive 建表查询分析。\\n**记忆**：产生→采集→缓冲→落地→加工。"
+        },
+        {
+          "task_id": "s06c01t03",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "哪些场景适合用 Kafka",
+          "question": "以下哪些场景适合使用 Kafka？（多选）",
+          "options": [
+            {
+              "text": "每天几十亿条的用户行为日志采集",
+              "correct": true,
+              "explain": "Kafka 高吞吐，正是日志采集的典型场景。"
+            },
+            {
+              "text": "实时大屏的流式数据通道",
+              "correct": true,
+              "explain": "Flink 等实时引擎消费 Kafka 做窗口计算，是标准架构。"
+            },
+            {
+              "text": "两台服务之间的简单函数调用",
+              "correct": false,
+              "explain": "简单调用用 RPC/HTTP 即可，引入 MQ 反而增加复杂度。"
+            },
+            {
+              "text": "电商大促的订单洪峰缓冲",
+              "correct": true,
+              "explain": "削峰场景，MQ 的经典用途。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. Kafka 适合：高吞吐日志流、实时计算通道、削峰缓冲。\\n2. 不适合：简单同步调用（杀鸡用牛刀，还引入延迟和运维成本）。\\n3. 选 A、B、D。",
+          "enterprise_tip": "面试追问「什么时候不该用 Kafka」：实时性要求极低/调用关系简单/数据量很小，都不需要 MQ。能说出反面场景说明你真的理解。"
+        },
+        {
+          "task_id": "s06c01t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "用业务例子辨析三大核心价值",
+          "question": "以下哪个业务场景最能体现消息队列『解耦』的核心价值？",
+          "options": [
+            {
+              "text": "用户下单后立即返回『下单成功』，短信/邮件通知稍后异步发送",
+              "correct": false,
+              "explain": "这是『异步』的体现：请求先返回，处理稍后完成。"
+            },
+            {
+              "text": "双 11 零点流量洪峰先写入消息队列，订单处理服务按自身能力慢慢消费",
+              "correct": false,
+              "explain": "这是『削峰填谷』的体现：队列缓冲瞬时洪峰。"
+            },
+            {
+              "text": "订单服务与库存服务通过消息队列通信，库存服务升级改造期间，订单服务无需改动、消息照常投递",
+              "correct": true,
+              "explain": "正确。上下游通过队列解耦，一方变更不影响另一方，正是『解耦』。"
+            },
+            {
+              "text": "把全量历史日志写入队列，供离线分析程序批量读取",
+              "correct": false,
+              "explain": "这体现的是队列的缓冲/中转作用，不是解耦的典型场景。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 回忆 MQ 三大价值：解耦、削峰、异步。\n2. 逐项判断：A 是异步（先返回后处理）；B 是削峰（洪峰入队缓冲）；C 是解耦（上下游互不影响）——符合题意。\n3. D 是缓冲/中转，不典型。选 C。\n**面试延伸**：能就三大价值各举一个真实业务例子，比背概念更有说服力。",
+          "enterprise_tip": "面试答『为什么用 Kafka』时，把三大价值各配一个公司里的真实场景（日志洪峰、异步通知、系统解耦），立刻显得有实战经验。"
+        },
+        {
+          "task_id": "s06c01t05",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "Kafka 的核心特性",
+          "question": "以下哪些属于 Kafka 的核心特性？（多选）",
+          "options": [
+            {
+              "text": "超高吞吐：单集群可支撑每秒百万级消息",
+              "correct": true,
+              "explain": "顺序写磁盘 + 页缓存 + 零拷贝，吞吐极高，是日志采集标配。"
+            },
+            {
+              "text": "消息持久化到磁盘，按保留时间或大小清理",
+              "correct": true,
+              "explain": "消息不会消费后即删，而是按保留策略（默认约 7 天）清理。"
+            },
+            {
+              "text": "消息被消费后立即删除以释放空间",
+              "correct": false,
+              "explain": "恰恰相反，消息消费后仍保留，靠保留策略清理。"
+            },
+            {
+              "text": "消费者通过 offset 记录位置，可重复消费同一份数据",
+              "correct": true,
+              "explain": "不同消费组各自维护 offset，互不影响地重复消费。"
+            },
+            {
+              "text": "只能单机运行，不支持分布式集群",
+              "correct": false,
+              "explain": "Kafka 是天然分布式系统，由多个 Broker 组成集群。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Kafka 三大特性：高吞吐、持久化、可重复消费。\n2. A 高吞吐 ✓；B 持久化 ✓；D 可重复消费（offset）✓。\n3. C 说反了（消费后不删除）；E 说反了（支持集群）。\n4. 选 A、B、D。",
+          "enterprise_tip": "面试题『Kafka 和 RabbitMQ 怎么选』的答案骨架就是这三条特性：高吞吐、持久化、可重复消费。"
+        },
+        {
+          "task_id": "s06c01t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Kafka 的定位与选型",
+          "question": "关于 Kafka 的定位，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Kafka 是分布式发布-订阅消息系统，消息按主题分类，生产者发布、消费者订阅",
+              "correct": true,
+              "explain": "正确。发布-订阅是 Kafka 的基本模型，主题是消息分类单位。"
+            },
+            {
+              "text": "Kafka 是关系型数据库，适合用 SQL 存业务明细数据",
+              "correct": false,
+              "explain": "Kafka 是消息系统，不是数据库，不提供事务查询。"
+            },
+            {
+              "text": "Kafka 只能点对点传输，同一份消息只能被一个消费者读取",
+              "correct": false,
+              "explain": "多个消费者组可以各自独立订阅同一主题，重复消费。"
+            },
+            {
+              "text": "Kafka 消息被消费后立即从磁盘删除",
+              "correct": false,
+              "explain": "消息按保留时间/大小清理，消费后仍保留。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 定位：分布式发布-订阅消息系统，围绕主题（Topic）工作。\n2. A 正确。\n3. B 混淆消息系统与数据库；C 混淆点对点与发布-订阅；D 混淆删除时机。\n4. 选 A。\n**面试延伸**：对比 RabbitMQ——大数据日志/流式场景选 Kafka（吞吐高、可重复消费），业务系统消息选 RabbitMQ（功能丰富、路由灵活）。",
+          "enterprise_tip": "『Kafka 与 RabbitMQ 的区别』是面试高频开场题，答出『吞吐量级 + 分布式 + 可重复消费』三点即达标。"
+        },
+        {
+          "task_id": "s06c01t07",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：消息保留机制",
+          "question": "Kafka 中消息被消费后**不会立即删除**，而是按保留时间（默认约 7 天）或保留 ____（英文，指存储容量上限）自动清理。",
+          "answer": [
+            "size",
+            "Size",
+            "SIZE",
+            "大小"
+          ],
+          "hint": "先回忆消息保留的两条规则：按时间之外，还能按什么上限清理？",
+          "analysis": "**标准解题思路**\n1. 消息保留策略两个维度：保留时间（默认约 7 天）与保留大小（log.retention.bytes）。\n2. 任一维度先达到阈值即触发清理。\n3. 填 size（大小）。\n**为什么**：因为消息消费后不删除，所以必须靠保留策略控制磁盘占用，这也支撑了『可重复消费』。"
+        },
+        {
+          "task_id": "s06c01t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "削峰填谷的底层机制",
+          "question": "从**底层机制**看，消息队列的'削峰填谷'为什么能保护下游系统？",
+          "options": [
+            {
+              "text": "队列自身缓冲瞬时洪峰，下游按自己的消费速率慢慢拉取，把尖峰摊平",
+              "correct": true,
+              "explain": "正确。洪峰先堆在队列里，下游用多少拉多少，瞬时压力被时间换空间摊平。"
+            },
+            {
+              "text": "队列会自动丢弃超出下游处理能力的消息",
+              "correct": false,
+              "explain": "丢弃会造成数据丢失，削峰靠缓冲而不是丢弃。"
+            },
+            {
+              "text": "队列把消息压缩后一次性全部推给下游",
+              "correct": false,
+              "explain": "一次性全推反而会打垮下游，削峰恰恰是慢慢给。"
+            },
+            {
+              "text": "削峰靠的是给下游数据库扩容，与队列无关",
+              "correct": false,
+              "explain": "扩容是另一条路，队列削峰靠的是缓冲加消费速率控制。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 削峰的本质：把瞬时洪峰用队列缓冲，变成平稳的持续流量。\n2. 底层机制有两层：① 队列先承接全部消息（存储缓冲）；② 下游消费者按自身速率 pull 拉取（Kafka 是拉模式），消费多快完全由下游决定。\n3. A 描述的就是这两个机制。\n4. 排除 B（丢弃会丢数据）、C（全推反而打垮下游）、D（与队列无关是错误说法）。\n5. 选 A。\n**面试延伸**：拉模式（pull）是削峰能成立的底层原因——Broker 不主动推，就不会压垮下游。",
+          "enterprise_tip": "双 11 的订单写入峰值是平时的几十倍，正是'队列缓冲 + 下游按能力消费'让数据库不用按峰值扩容，这就是削峰填谷的生产意义。"
+        },
+        {
+          "task_id": "s06c01t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Kafka 与 RocketMQ / Pulsar 的对比",
+          "question": "关于 **Kafka 与 RocketMQ、Pulsar** 的对比，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Kafka 吞吐高、生态最成熟，是日志与流式计算的事实标准；RocketMQ 在事务消息、延迟消息等业务消息能力上更丰富；Pulsar 用存算分离架构，多租户与跨地域复制是强项",
+              "correct": true,
+              "explain": "正确。三者的定位差异：Kafka 日志流、RocketMQ 业务消息、Pulsar 存算分离多租户。"
+            },
+            {
+              "text": "RocketMQ 是日志采集的首选，Kafka 用于业务系统消息",
+              "correct": false,
+              "explain": "反了：日志采集与流式计算用 Kafka；业务消息（事务、延迟消息）RocketMQ 更丰富。"
+            },
+            {
+              "text": "Pulsar 不支持多租户，只能单集群单业务使用",
+              "correct": false,
+              "explain": "Pulsar 的多租户（tenant/namespace 隔离）恰恰是它的核心卖点。"
+            },
+            {
+              "text": "三者中只有 Kafka 支持分区，其他两个没有分区的概念",
+              "correct": false,
+              "explain": "三者都支持分区/分片实现并行与水平扩展，只是叫法不同。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 三者的定位差异：\n   - **Kafka**：高吞吐、生态最成熟（Flink/Spark/各类工具原生对接），是日志采集与流式计算的事实标准；\n   - **RocketMQ**（阿里开源）：事务消息、延迟消息、消息轨迹等业务消息能力更丰富，常用于订单/支付等业务消息；\n   - **Pulsar**（Apache）：**存算分离**架构（存储层用 BookKeeper），Broker 无状态易扩缩容，多租户与跨地域复制是强项。\n2. 排除：日志场景是 Kafka 的主场；Pulsar 多租户是强项；三者都有分区。\n3. 选 A。\n**延伸**：选型参考——纯大数据链路（日志+流计算）选 Kafka；业务消息（事务/延迟）可选 RocketMQ；需要多租户隔离与弹性扩缩容选 Pulsar。",
+          "enterprise_tip": "面试题『Kafka 和 RocketMQ 怎么选』：大数据日志/流式选 Kafka；业务消息（事务消息、延迟消息）选 RocketMQ；再提一句 Pulsar 存算分离多租户，显得知识面完整。"
+        }
+      ],
+      "kps": [
+        "消息队列三大核心价值：解耦、削峰、异步",
+        "三大价值的业务场景辨析（举例判断）",
+        "Kafka 的定位：分布式发布-订阅消息系统",
+        "Kafka 核心特性：高吞吐、持久化、可重复消费",
+        "Kafka 在数据链路中的枢纽作用（缓冲、解耦、多下游）",
+        "消息保留机制（按时间/大小清理，消费后不删除）",
+        "Kafka 与 RabbitMQ 的区别与选型",
+        "Kafka 与 RocketMQ / Pulsar 的对比（生态定位）"
+      ]
+    },
+    {
+      "chapter_id": "s06c02",
+      "title": "6.2 Kafka 核心架构",
+      "goal": "掌握 Broker/Topic/Partition/Offset/消费者组",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "Kafka 的核心概念：\\n- **Broker**：一台 Kafka 服务器，集群由多个 Broker 组成。\\n- **Topic（主题）**：消息分类，一个主题可以横跨所有 Broker。\\n- **Partition（分区）**：主题被拆成多个分区，**分区是并行读写的基本单位**，消息按追加顺序写入分区内。\\n- **Offset（偏移量）**：分区内消息的序号，消费者记录自己消费到哪个 offset。\\n- **副本（Replica）**：每个分区有多个副本（默认 1 个 Leader + N 个 Follower），Leader 负责读写，Follower 同步备份，保证高可用。\\n- **ConsumerGroup（消费组）**：一组消费者共同消费一个主题，**组内每个分区同一时刻只被一个消费者消费**（并行度 = 分区数）。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "Kafka 集群逻辑结构：\n\n  Producer A ─┐\n  Producer B ─┼─→ Topic: user_log（3 个分区）\n             │     ┌─────────┐ ┌─────────┐ ┌─────────┐\n             └─→  │Partition0│ │Partition1│ │Partition2│  ← 每个分区有副本\n                   └─────────┘ └─────────┘ └─────────┘\n                    ↑消费组 G1 的 3 个消费者各占一个分区\n                    ↑消费组 G2 的 2 个消费者：2 个分区被消费，1 个空闲",
+          "caption": "分区与消费组"
+        },
+        {
+          "type": "tip",
+          "content": "**分区数 = 并行度上限**：一个主题 3 个分区，一个消费组最多 3 个消费者同时消费，第 4 个消费者会空闲。要提升消费速度就加分区（但分区过多会增大元数据开销和文件句柄）。"
+        },
+        {
+          "type": "warning",
+          "content": "**分区内有序、分区间无序**：Kafka 只保证**同一分区内**消息有序。需要全局有序的场景（如订单状态流转）要用同一 key 路由到同一分区（key 相同 → 哈希到同一分区）。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：面试连环问：①Kafka 为什么快？→顺序写磁盘 + 页缓存 + 零拷贝；②分区怎么定？→ 按吞吐需求定，一般 3~12 个；③怎么保证订单消息有序？→ 订单号做 key，相同订单号进同一分区。这三个问题背熟。"
+        }
+      ],
+      "hands_on": "1. 画出 Topic → Partition → Replica → ConsumerGroup 的关系图（含一个 3 分区主题 + 两个消费组）。\\n2. 用文字回答：为什么分区内有序、分区间无序？\\n3. 思考：消费组里加消费者能无限提速吗？为什么？",
+      "qa": [
+        {
+          "q": "什么是 Partition？为什么要有分区？",
+          "a": "分区是主题的物理切分单元，消息按追加顺序写入分区。分区带来两点：并行读写（分区数=并行度上限）和负载均衡（分区分布在不同 Broker 上）。"
+        },
+        {
+          "q": "Kafka 如何保证消息不丢失？",
+          "a": "三端配合：生产者端 acks=all（等所有副本确认）+ 重试；Broker 端副本机制（Leader 挂掉 Follower 顶上）；消费者端处理完再提交 offset（手动提交）。"
+        },
+        {
+          "q": "什么是消费者组？",
+          "a": "一组消费者共同消费一个主题，组内每个分区同一时刻只被一个消费者消费；多个消费者组可以各自独立消费同一份数据（互不影响），因为各自记录 offset。"
+        },
+        {
+          "q": "同一个 key 的消息为什么有序？",
+          "a": "生产者按 key 哈希路由分区，相同 key 必然进入同一分区，而分区内消息按写入顺序追加、消费者按 offset 顺序读取，所以同 key 消息有序。"
+        },
+        {
+          "q": "再均衡是什么？有什么影响？",
+          "a": "消费者加入/退出/崩溃或分区变化时，组内分区重新分配的过程。影响：消费暂停 + 可能重复消费，所以消费端要幂等；避免频繁再均衡靠合理的心跳与处理耗时。"
+        },
+        {
+          "q": "分区扩容要注意什么？",
+          "a": "分区数只能增不能减；扩容改变 key 的取模路由，同 key 新消息可能换分区破坏顺序性；已有消息不迁移。依赖同 key 有序的业务扩容前要评估。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Broker",
+          "desc": "Kafka 集群中的一台服务器节点。"
+        },
+        {
+          "term": "Partition（分区）",
+          "desc": "主题的物理切分单元，并行读写的基本单位。"
+        },
+        {
+          "term": "Offset（偏移量）",
+          "desc": "分区内消息的序号，消费者用它记录消费位置。"
+        },
+        {
+          "term": "Replica（副本）",
+          "desc": "分区的备份，Leader 负责读写，Follower 同步数据保证高可用。"
+        },
+        {
+          "term": "ConsumerGroup（消费组）",
+          "desc": "共同消费一个主题的消费者集合，组内分区被均分消费。"
+        },
+        {
+          "term": "Leader/Follower",
+          "desc": "副本角色：Leader 对外服务读写，Follower 异步同步备份，Leader 故障时选举新的 Leader。"
+        },
+        {
+          "term": "Rebalance（再均衡）",
+          "desc": "成员或分区变化时消费组内分区的重新分配，期间暂停消费且可能重复消费。"
+        },
+        {
+          "term": "分区扩容",
+          "desc": "增加主题分区数，只能增不能减，会改变 key 路由取模结果。"
+        }
+      ],
+      "tasks": [
+        {
+          "task_id": "s06c02t01",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "分区与并行度",
+          "question": "一个主题有 3 个分区，一个消费组里加入 4 个消费者，会发生什么？",
+          "options": [
+            {
+              "text": "4 个消费者都能消费，速度提升 33%",
+              "correct": false,
+              "explain": "分区数是并行度上限，第 4 个消费者没有分区可消费，会空闲。"
+            },
+            {
+              "text": "3 个消费者各自消费一个分区，第 4 个消费者空闲",
+              "correct": true,
+              "explain": "正确。组内每个分区同一时刻只被一个消费者消费，第 4 个消费者无分区可分派，处于空闲。"
+            },
+            {
+              "text": "Kafka 自动把分区拆成 4 份",
+              "correct": false,
+              "explain": "分区是静态配置的，不会自动拆分。"
+            },
+            {
+              "text": "报错，消费组消费者数不能超过分区数",
+              "correct": false,
+              "explain": "不会报错，只是多出的消费者空闲。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 回忆：组内分区与消费者是「一个分区同一时刻只被一个消费者消费」。\\n2. 3 个分区最多被 3 个消费者消费。\\n3. 第 4 个消费者空闲。选 B。\\n**延伸**：想提速 → 先加分区再加消费者。",
+          "enterprise_tip": "面试题「消费组加消费者能无限提升消费速度吗」——不能，瓶颈是分区数。这是生产扩容的第一直觉。"
+        },
+        {
+          "task_id": "s06c02t02",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排列一条消息的生产-消费流程",
+          "question": "把「一条订单消息从生产到被消费」的完整流程按正确顺序排列。",
+          "steps": [
+            "生产者指定 key 路由到分区",
+            "消息追加写入该分区的 Leader 副本",
+            "Follower 副本同步复制",
+            "消费者提交 offset 后拉取下一条",
+            "消费者按 offset 拉取该分区消息并处理"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            4,
+            3
+          ],
+          "order_explain": "生产端：路由分区→写 Leader→副本同步；消费端：按 offset 拉取→处理→提交 offset（提交是为了记录消费位置，处理完成后再提交）。",
+          "analysis": "**标准解题思路**\\n1. 生产阶段：key 哈希路由到分区 → 写入该分区 Leader → Follower 同步（acks=all 时确认）。\\n2. 消费阶段：消费者按自己记录的 offset 拉取消息 → 业务处理 → 处理成功后再提交（更新）offset。\\n3. 顺序：0→1→2→4→3。\\n**易错点**：先处理再提交 offset，才能保证「至少一次」不丢消息。",
+          "enterprise_tip": "「先处理再提交 offset」是面试必考：先提交后处理，处理失败重启会丢消息。"
+        },
+        {
+          "task_id": "s06c02t03",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：消息在分区内的序号",
+          "question": "分区内消息的序号称为 ____（英文单词），消费者用它记录消费位置。",
+          "answer": [
+            "offset",
+            "Offset",
+            "偏移量"
+          ],
+          "hint": "先回忆消费者怎么记录「读到哪了」——这个位置的术语叫什么？",
+          "analysis": "**标准解题思路**\\n1. 分区内每条消息有唯一序号。\\n2. 这个序号叫 offset（偏移量）。\\n3. 填 offset（大小写均可）。"
+        },
+        {
+          "task_id": "s06c02t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Leader 与 Follower 的分工",
+          "question": "关于 Kafka 分区副本中 Leader 与 Follower 的分工，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Leader 负责处理读写请求，Follower 从 Leader 同步数据做备份",
+              "correct": true,
+              "explain": "正确。Leader 对外服务，Follower 异步同步，Leader 故障时选举新 Leader。"
+            },
+            {
+              "text": "Follower 负责对外读写，Leader 只做备份",
+              "correct": false,
+              "explain": "反了。对外读写的是 Leader。"
+            },
+            {
+              "text": "每个分区只有一个副本，不需要 Leader/Follower 之分",
+              "correct": false,
+              "explain": "生产环境副本因子≥2，每个分区有 Leader + 多个 Follower。"
+            },
+            {
+              "text": "Leader 宕机后，该分区的数据立即永久丢失",
+              "correct": false,
+              "explain": "Follower 持有同步副本，会选举出新的 Leader 顶上。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 副本角色：Leader 读写、Follower 备份。\n2. 高可用：Leader 故障 → Follower 选举上位，不丢数据。\n3. 选 A。\n**面试延伸**：acks=all 就是等所有副本确认，配合副本机制保证不丢消息。",
+          "enterprise_tip": "面试连环问之一『Leader 挂了怎么办』：副本同步 + ISR 选举新 Leader，配合 acks=all 做到高可用不丢消息。"
+        },
+        {
+          "task_id": "s06c02t05",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "分区与 Broker 的关系",
+          "question": "一个主题有 3 个分区，集群由 3 台 Broker 组成。下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "3 个分区必须全部放在同一台 Broker 上",
+              "correct": false,
+              "explain": "分区会尽量分散到不同 Broker，实现负载均衡。"
+            },
+            {
+              "text": "分区会尽量分布在不同的 Broker 上，实现负载均衡与高可用",
+              "correct": true,
+              "explain": "正确。分区分散 + 副本跨 Broker，单台宕机不影响整体。"
+            },
+            {
+              "text": "分区只存在于内存中，与 Broker 的磁盘无关",
+              "correct": false,
+              "explain": "分区数据持久化在 Broker 磁盘上。"
+            },
+            {
+              "text": "每台 Broker 只能存放一个分区",
+              "correct": false,
+              "explain": "一台 Broker 可承载多个主题的多个分区。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 主题横跨所有 Broker：分区按策略分散在各 Broker 上。\n2. 分散带来负载均衡；副本再跨 Broker 带来高可用。\n3. 选 B。\n**延伸**：这也是『加 Broker 能提升集群吞吐』的原因——分区更多、并行度更高。"
+        },
+        {
+          "task_id": "s06c02t06",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：offset 的存储位置",
+          "question": "Kafka 用一个内部主题保存各消费组已提交的 offset（消费位置），这个内部主题的名称是 ____（英文，下划线开头）。",
+          "answer": [
+            "__consumer_offsets",
+            "consumer_offsets",
+            "__consumer_offsets 主题"
+          ],
+          "hint": "先回忆 Kafka 内部主题：保存消费组 offset 的主题叫什么？由哪两个英文单词组成？",
+          "analysis": "**标准解题思路**\n1. 消费者处理完消息后，需要把消费位置（offset）持久化，用于断点续读。\n2. Kafka 用内部主题 __consumer_offsets 保存所有消费组的 offset。\n3. 填 __consumer_offsets。\n**为什么**：正因为 offset 存在 Kafka 里，消费者重启后才知道『上次读到哪』，配合提交时机才能做到不丢、不重。",
+          "enterprise_tip": "面试题『消费者挂了怎么恢复』：offset 持久化在 __consumer_offsets，重启后从上次提交位置继续消费。"
+        },
+        {
+          "task_id": "s06c02t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "多个消费组独立消费",
+          "question": "消费组 G1 与 G2 同时订阅同一个主题，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "G1 消费过的消息，G2 就再也读不到了",
+              "correct": false,
+              "explain": "各消费组独立维护 offset，G2 可以从头读同一份数据。"
+            },
+            {
+              "text": "G1 与 G2 各自维护自己的 offset，互不影响地独立消费同一份数据",
+              "correct": true,
+              "explain": "正确。组间隔离是 Kafka 多下游架构的基础。"
+            },
+            {
+              "text": "两个消费组不能订阅同一个主题",
+              "correct": false,
+              "explain": "多个消费组可同时订阅同一主题，正是『一份数据多下游』。"
+            },
+            {
+              "text": "G1 与 G2 会互相竞争，一条消息只能被其中一个组消费",
+              "correct": false,
+              "explain": "竞争只发生在组内；组与组之间独立消费、互不影响。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 消费组内：一个分区同一时刻只被一个消费者消费（组内竞争）。\n2. 消费组之间：各自独立，互不影响（组间隔离）。\n3. 选 B。\n**为什么**：同一份日志，实时链路（Flink 消费组）与离线链路（落 HDFS 的消费组）各读各的，互不干扰。"
+        },
+        {
+          "task_id": "s06c02t08",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "为什么分区数决定并行度上限",
+          "question": "从**底层机制**看，为什么一个消费组的并行消费能力上限等于主题的分区数？",
+          "options": [
+            {
+              "text": "组内同一分区同一时刻只能被一个消费者消费，N 个分区最多同时被 N 个消费者拉取，多出的消费者没有分区可消费只能空闲",
+              "correct": true,
+              "explain": "正确。分区是并行拉取的基本单位，消费者数超过分区数就有人空闲。"
+            },
+            {
+              "text": "一个消费者只能消费一个分区，所以并行度等于消费者数",
+              "correct": false,
+              "explain": "一个消费者可以消费多个分区（串行），并行度的决定因素是分区数。"
+            },
+            {
+              "text": "消费者数决定分区数，加消费者分区会自动增加",
+              "correct": false,
+              "explain": "分区是静态配置，不会随消费者数量自动变化。"
+            },
+            {
+              "text": "Kafka 会把分区复制多份分发给消费者，并行度没有上限",
+              "correct": false,
+              "explain": "同一分区不会同时分给组内多个消费者，并行度上限就是分区数。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 底层约束：同一分区同一时刻只能被一个消费者消费（避免同一分区被多线程重复拉取导致 offset 混乱）。\n2. 因此每个分区同一时刻只能喂一个消费者，N 个分区最多支撑 N 个消费者同时干活。\n3. 第 N+1 个消费者没有分区可分派，只能空闲等待。\n4. A 正确。\n5. 排除 B（消费者可消费多分区但并行上限是分区数）、C（分区不会自动增加）、D（不会复制分发）。\n6. 选 A。\n**面试延伸**：要提升消费速度，必须先加分区再加消费者；消费者数 = 分区数时并行度达到上限。",
+          "enterprise_tip": "生产扩容口诀：先加分区（改主题配置），再扩消费者实例，顺序反了只会多出空闲消费者。"
+        },
+        {
+          "task_id": "s06c02t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "消费者再均衡（Rebalance）",
+          "question": "关于 Kafka 消费者的**再均衡（Rebalance）**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "消费者加入/退出消费组、分区数变化等情况会触发组内分区重新分配，期间该组消费会暂停，且可能造成部分消息重复消费",
+              "correct": true,
+              "explain": "正确。再均衡要把分区重新分配，期间暂停消费；已拉取未提交的消息可能被重复消费。"
+            },
+            {
+              "text": "再均衡不影响正在消费的消费者，消费过程完全无缝",
+              "correct": false,
+              "explain": "再均衡期间组内消费者会停止消费（stop-the-world），直到分配完成。"
+            },
+            {
+              "text": "再均衡只发生在消费者崩溃时，正常退出不会触发",
+              "correct": false,
+              "explain": "消费者正常离开（close/会话超时）、新增消费者、分区变化都会触发再均衡。"
+            },
+            {
+              "text": "再均衡期间消息绝对不会重复",
+              "correct": false,
+              "explain": "再均衡可能把正在处理的分区转移给其他消费者，导致消息重复，需幂等兜底。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 再均衡是什么：Kafka 保证『组内一个分区同一时刻只被一个消费者消费』，当**成员关系或分区数量变化**（消费者加入/离开/崩溃、分区新增、订阅变更）时，协调器触发分区在组内重新分配，这个重分配过程叫 Rebalance。\n2. 触发条件：① 消费者加入或正常离开；② 消费者崩溃/会话超时被踢出；③ 主题分区数变化。\n3. 影响：① **消费暂停**（旧分配作废、新分配未建立，期间不拉消息）；② **可能重复消费**（之前拉取未提交的消息会由新接手的消费者重新消费）——所以消费端要幂等。\n4. 排除：不是无缝、正常退出也触发、不保证不重复。\n5. 选 A。\n**延伸**：新版消费者用增量协作式（cooperative）再均衡减少停顿；老版 eager 会全组停止。",
+          "enterprise_tip": "面试题『再均衡有什么影响』：消费暂停 + 可能重复消费；生产上避免频繁再均衡（session.timeout 调大、处理耗时不要太长导致心跳超时），消费端幂等兜底。"
+        },
+        {
+          "task_id": "s06c02t10",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "分区扩容的注意事项",
+          "question": "关于 Kafka 主题**分区扩容**（增加分区数），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "分区数只能增加不能减少；扩容后基于 key 的哈希取模路由发生变化，相同 key 的**新消息**可能进入不同分区，破坏原有的分区内顺序性",
+              "correct": true,
+              "explain": "正确。扩容改变取模基数，key 路由结果变化；已有消息不迁移，但新消息顺序性可能被破坏。"
+            },
+            {
+              "text": "分区数可以随时减少，减少后消息会自动合并到剩余分区",
+              "correct": false,
+              "explain": "Kafka 的分区数只能增不能减，减少会导致数据与 offset 语义无法处理。"
+            },
+            {
+              "text": "扩容后已有消息会自动重新分布到新分区",
+              "correct": false,
+              "explain": "已有消息留在原分区不动；新分区从空开始接收新消息。"
+            },
+            {
+              "text": "扩容对 key 路由没有任何影响",
+              "correct": false,
+              "explain": "key 路由是 hash(key) 对分区数取模，分区数变了取模结果就变。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 扩容背景：分区数 = 并行度上限，消费积压时先加分区再扩消费者。\n2. 硬约束：**分区数只能增加，不能减少**（减少会破坏 offset 与数据语义，Kafka 不允许）。\n3. 对 key 路由的影响：key → hash(key) % 分区数。分区数从 N 变到 M 后，取模基数变化，**相同 key 的新消息可能落到不同分区**——如果业务依赖『同 key 有序』，扩容会破坏顺序性（已有消息仍在旧分区按序，新旧之间可能乱序）。\n4. 已有消息不动：不会自动重新分布，新分区从空开始。\n5. 选 A。\n**延伸**：扩容前要评估对顺序性要求的业务影响；或者一开始就把分区数规划得偏大（分区数只增不减）。",
+          "enterprise_tip": "生产教训：订单消息用 order_id 做 key 保序，扩容后同订单新消息可能换分区导致状态机乱序——所以扩容前要评估，或初始分区数给足余量；面试题『分区扩容注意什么』答：只能增不能减 + key 路由变化破坏顺序 + 已有数据不迁移。"
+        }
+      ],
+      "kps": [
+        "Broker / Topic / Partition / Offset 核心概念",
+        "分区是并行读写的基本单位（并行度 = 分区数）",
+        "副本机制：Leader 读写、Follower 同步备份、故障切换",
+        "消费者组：组内均分消费、多组独立消费互不影响",
+        "分区在 Broker 上的分布与负载均衡",
+        "分区内有序、分区间无序与 key 路由",
+        "offset 的存储与提交（__consumer_offsets 内部主题）",
+        "消费者再均衡（Rebalance）与触发条件",
+        "分区扩容的注意事项（只能增不能减、key 路由变化）"
+      ]
+    },
+    {
+      "chapter_id": "s06c03",
+      "title": "6.3 Kafka 生产与消费实战",
+      "goal": "掌握主题管理、命令行生产消费与常用参数",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "Kafka 自带命令行工具，是运维和排查问题的基础功（生产环境常配合 API 使用）：\\n- `kafka-topics.sh`：创建/查看主题。`--partitions` 分区数、`--replication-factor` 副本数。\\n- `kafka-console-producer.sh`：命令行生产消息。\\n- `kafka-console-consumer.sh`：命令行消费消息，`--from-beginning` 从头消费，`--group` 指定消费组。\\n生产者的关键参数：`acks`（0/1/all，确认级别）、`retries`（重试次数）。消费者的关键参数：`group.id`（消费组）、`auto.offset.reset`（earliest/latest，无 offset 时从哪开始）、`enable.auto.commit`（是否自动提交 offset）。"
+        },
+        {
+          "type": "code",
+          "lang": "bash",
+          "content": "# 1. 创建主题：3 个分区，2 个副本（需要集群 ≥2 台 Broker）\nkafka-topics.sh --bootstrap-server node1:9092 \\\n  --create --topic user_log --partitions 3 --replication-factor 2\n\n# 2. 查看主题详情\nkafka-topics.sh --bootstrap-server node1:9092 --describe --topic user_log\n\n# 3. 命令行生产消息\nkafka-console-producer.sh --bootstrap-server node1:9092 --topic user_log\n> 2024-01-01 12:00:00 user_1001 click item_88\n\n# 4. 命令行消费消息（新消费组，从头消费）\nkafka-console-consumer.sh --bootstrap-server node1:9092 \\\n  --topic user_log --group g1 --from-beginning",
+          "caption": "Kafka 常用命令行（实际工作中还有 API 方式）"
+        },
+        {
+          "type": "tip",
+          "content": "**auto.offset.reset 三兄弟**：earliest=从最早开始（重算报表时用）、latest=只消费新消息（实时监控用）、none=没有 offset 直接报错（用于发现问题）。记忆：earliest 补数，latest 实时。"
+        },
+        {
+          "type": "warning",
+          "content": "**acks 的含义**：acks=0 发完就算成功（可能丢）；acks=1 Leader 写入即确认（默认）；acks=all 所有副本确认（最安全但慢）。数据重要 → acks=all。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：面试题「Kafka 消息丢失怎么排查」：①查生产者 acks 和重试配置；②查 Broker 副本数（单副本必丢）；③查消费者是不是先提交 offset 再处理。按「生产端→存储端→消费端」三段式排查，是标准答案框架。"
+        }
+      ],
+      "hands_on": "1. 阅读 Kafka Quickstart 文档，了解 kafka-topics.sh / kafka-console-producer.sh / kafka-console-consumer.sh 三个命令的完整参数。\\n2. 写一段文字：描述「创建主题 → 生产 3 条消息 → 新消费组从头消费」的完整操作流程。\\n3. 查资料回答：acks=all 和 acks=1 对性能的影响大概差多少。",
+      "qa": [
+        {
+          "q": "创建主题时 partitions 和 replication-factor 怎么设？",
+          "a": "partitions 根据吞吐需求设（并行度=分区数，一般 3~12）；replication-factor 生产环境至少 2（通常 3），保证一台 Broker 挂了不丢数据。"
+        },
+        {
+          "q": "acks 参数有哪几个取值？",
+          "a": "0：生产者不等确认，最快但可能丢；1：Leader 写入即确认（默认）；all：所有副本同步完成才确认，最安全。重要数据用 all。"
+        },
+        {
+          "q": "auto.offset.reset 有什么用？",
+          "a": "消费组没有已提交 offset 时决定从哪开始消费：earliest 从头（补数据）、latest 只消费新消息（实时）、none 报错。注意它只在「没有 offset」时生效。"
+        },
+        {
+          "q": "如何查看一个主题有几个分区和副本？",
+          "a": "用 kafka-topics.sh --describe --topic 主题名，输出里 Partitions 和 ReplicationFactor 字段会显示配置，还能看到每个分区的 Leader 和副本分布。"
+        },
+        {
+          "q": "commitSync 和 commitAsync 的区别？",
+          "a": "commitSync 同步阻塞提交、失败抛异常可重试、结果可知；commitAsync 异步提交不阻塞、失败只回调不重试。生产常用『处理成功 → commitAsync → 关闭前 commitSync 兜底』。"
+        },
+        {
+          "q": "怎么查看消费组 lag？",
+          "a": "kafka-consumer-groups.sh --bootstrap-server ... --describe --group 组名，输出每个分区的 CURRENT-OFFSET、LOG-END-OFFSET 与 LAG。"
+        },
+        {
+          "q": "大消息怎么处理？",
+          "a": "优先外置存储（对象存储/HDFS）只传引用；确需直传则 broker message.max.bytes、主题 max.message.bytes、生产者 max.request.size、消费者 fetch.max.bytes 多处联动调大。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "kafka-topics.sh",
+          "desc": "主题管理命令：创建/查看/删除主题。"
+        },
+        {
+          "term": "kafka-console-producer.sh",
+          "desc": "命令行生产者，用于测试和排查。"
+        },
+        {
+          "term": "kafka-console-consumer.sh",
+          "desc": "命令行消费者，--group 指定消费组，--from-beginning 从头消费。"
+        },
+        {
+          "term": "acks",
+          "desc": "生产者确认级别参数：0/1/all，决定消息写入的可靠性。"
+        },
+        {
+          "term": "auto.offset.reset",
+          "desc": "无 offset 时的消费起点策略：earliest/latest/none。"
+        },
+        {
+          "term": "--bootstrap-server",
+          "desc": "指定 Kafka 集群地址（如 node1:9092），新版替代旧版 zookeeper 参数。"
+        },
+        {
+          "term": "commitSync / commitAsync",
+          "desc": "手动提交 offset 的同步/异步 API，前者可靠阻塞、后者快速不保证结果。"
+        },
+        {
+          "term": "kafka-consumer-groups.sh",
+          "desc": "查看消费组列表与 lag 的命令行工具，也用于重置 offset。"
+        },
+        {
+          "term": "Schema Registry",
+          "desc": "集中管理消息 schema 的服务，配合 Avro 等序列化格式使用。"
+        },
+        {
+          "term": "message.max.bytes",
+          "desc": "broker 端单条消息大小限制参数（默认约 1MB）。"
+        }
+      ],
+      "tasks": [
+        {
+          "task_id": "s06c03t01",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排列命令行使用流程",
+          "question": "把「用命令行完成一次消息收发」的流程按正确顺序排列。",
+          "steps": [
+            "kafka-topics.sh 创建主题",
+            "kafka-console-producer.sh 生产消息",
+            "kafka-console-consumer.sh --from-beginning 消费消息",
+            "kafka-topics.sh --describe 查看主题确认分区副本"
+          ],
+          "correct_order": [
+            0,
+            3,
+            1,
+            2
+          ],
+          "order_explain": "先创建主题，再查看确认主题配置正确，然后生产消息，最后消费验证。先验证主题再写数据是运维好习惯。",
+          "analysis": "**标准解题思路**\\n1. 创建主题（kafka-topics.sh --create）。\\n2. 查看主题（--describe）确认分区/副本符合预期。\\n3. 生产消息（console-producer）。\\n4. 消费验证（console-consumer --from-beginning）。\\n**易错点**：不先看主题就写数据，可能写错主题名或分区数不符合预期。"
+        },
+        {
+          "task_id": "s06c03t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "auto.offset.reset 的选择",
+          "question": "一个实时监控大屏的消费组第一次启动，希望**只消费之后产生的新消息**，应该把 auto.offset.reset 设为？",
+          "options": [
+            {
+              "text": "earliest",
+              "correct": false,
+              "explain": "earliest 是从最早的消息开始消费，用于补数，会灌入历史数据。"
+            },
+            {
+              "text": "latest",
+              "correct": true,
+              "explain": "正确。latest 表示只消费启动之后的新消息，适合实时监控。"
+            },
+            {
+              "text": "none",
+              "correct": false,
+              "explain": "none 是无 offset 时报错，用于主动发现问题，不是正确答案。"
+            },
+            {
+              "text": "beginning",
+              "correct": false,
+              "explain": "Kafka 没有 beginning 这个取值，只有 earliest。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 场景：实时监控，只要新数据。\\n2. latest = 只消费新消息。\\n3. 选 B。\\n**记忆**：earliest 补数，latest 实时，none 报错。",
+          "enterprise_tip": "面试常问「新消费组上线，想重算历史数据怎么配」→ earliest；「只想要实时增量」→ latest。"
+        },
+        {
+          "task_id": "s06c03t03",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：创建主题时副本数",
+          "question": "生产环境中创建主题时，建议把 `replication-factor`（副本因子）设为不小于 ____（填数字），以保证一台 Broker 宕机不丢数据。",
+          "answer": [
+            "2",
+            "3"
+          ],
+          "hint": "先想：副本因子表示总共有几份？宕机 1 台后还剩几份？至少剩几份才不丢数据？",
+          "analysis": "**标准解题思路**\\n1. 副本因子=1 时，唯一副本所在 Broker 宕机 → 分区数据不可用。\\n2. 生产要求 ≥2（通常 3）。\\n3. 填 2 或 3 都算正确（题目问「不小于」）。",
+          "enterprise_tip": "回答「副本设 3」更标准：2 副本在 3 节点集群上还能容忍 1 台宕机，3 副本更稳但磁盘占用 ×3。"
+        },
+        {
+          "task_id": "s06c03t04",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：列出所有主题",
+          "question": "要查看 Kafka 集群中已存在的所有主题，使用的命令是：`kafka-topics.sh --____ --bootstrap-server node1:9092`（填英文参数名）。",
+          "answer": [
+            "list",
+            "--list",
+            "List"
+          ],
+          "hint": "回忆 kafka-topics.sh 的常用操作：创建、查看列表、删除——「查看列表」用哪个参数？",
+          "analysis": "**标准解题思路**\n1. kafka-topics.sh 管理主题：--create 创建、--list 列出、--describe 查看详情。\n2. 列出所有主题用 --list。\n3. 填 list。\n**延伸**：--describe --topic 主题名 可查看分区/副本/Leader 详情，排查问题时常用。"
+        },
+        {
+          "task_id": "s06c03t05",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "acks=all 的使用场景",
+          "question": "支付消息**绝对不允许丢失**，生产者应该把 `acks` 参数设置为？",
+          "options": [
+            {
+              "text": "acks=0：发完即算成功",
+              "correct": false,
+              "explain": "acks=0 最快但最不可靠，发送失败无从知晓。"
+            },
+            {
+              "text": "acks=1：Leader 写入即确认（默认）",
+              "correct": false,
+              "explain": "Leader 宕机且副本未同步时仍可能丢。"
+            },
+            {
+              "text": "acks=all：所有副本同步完成才确认",
+              "correct": true,
+              "explain": "正确。所有副本都写入才返回成功，最安全。"
+            },
+            {
+              "text": "acks 与可靠性无关，随便设置",
+              "correct": false,
+              "explain": "acks 直接决定生产端的可靠性级别。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. acks 三档：0（最快最不可靠）、1（默认）、all（最安全）。\n2. 关键数据（支付/订单）→ acks=all + 开启重试。\n3. 选 C。\n**代价**：acks=all 延迟更高，非关键日志可接受用 acks=1 换取吞吐。",
+          "enterprise_tip": "生产实践：核心链路 acks=all + retries，日志类数据用 acks=1；面试答『怎么防丢』先答生产端这组配置。"
+        },
+        {
+          "task_id": "s06c03t06",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排查消费不到消息的流程",
+          "question": "生产环境出现『消费者收不到消息』，把排查流程按正确顺序排列。",
+          "steps": [
+            "用 kafka-console-consumer.sh --from-beginning 直接消费该主题，确认消息确实存在（排除生产端问题）",
+            "检查消费者代码订阅的主题名与消费组（subscribe / group.id）是否配置正确",
+            "检查 auto.offset.reset（earliest / latest / none）与是否开启自动提交",
+            "检查是否『先提交 offset 再处理』，导致重启后消息被跳过",
+            "检查 --bootstrap-server 网络连通性与集群地址是否正确"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "先确认『数据在不在』，再查『消费端配置』，再查『offset 相关』，最后查『网络』——从数据流向逐层排查。",
+          "analysis": "**标准解题思路**\n1. 第一步先确认数据在：用控制台消费者从头消费，能读到说明生产端没问题。\n2. 再查消费程序本身：主题名/消费组写错是最常见的低级错误。\n3. 接着查 offset 策略：latest 只消费新消息、auto.offset.reset 影响起点。\n4. 再查提交时机：先提交后处理会导致重启后跳过未处理的消息。\n5. 最后查网络连通性。\n**面试延伸**：消息丢失排查按『生产端→存储端→消费端』三段式，本题是消费端内部的细化流程。",
+          "enterprise_tip": "真实运维口诀：先证明『数据在』（控制台消费者），再怀疑『自己』（代码/配置/offset），最后才是网络。"
+        },
+        {
+          "task_id": "s06c03t07",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "从头消费历史消息",
+          "question": "新消费组第一次启动，想用 `kafka-console-consumer.sh` 读取主题中的**全部历史消息**，应加哪个参数？",
+          "options": [
+            {
+              "text": "--from-beginning",
+              "correct": true,
+              "explain": "正确。--from-beginning 表示从主题最开始的消息读起。"
+            },
+            {
+              "text": "--earliest",
+              "correct": false,
+              "explain": "console-consumer 没有 --earliest 参数；earliest 是 API 层 auto.offset.reset 的取值。"
+            },
+            {
+              "text": "--offset 0",
+              "correct": false,
+              "explain": "新版 kafka-console-consumer.sh 没有 --offset 参数。"
+            },
+            {
+              "text": "--replication-factor 3",
+              "correct": false,
+              "explain": "这是 kafka-topics.sh 创建主题时的副本数参数。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 控制台消费者从头消费 → --from-beginning。\n2. 排除 B：earliest 是 auto.offset.reset 取值，不是命令行参数。\n3. 排除 C、D：--offset 不存在于新版命令，--replication-factor 属于创建主题。\n4. 选 A。\n**易错点**：--from-beginning 只在消费组没有已提交 offset 时生效（与 auto.offset.reset 语义一致）。"
+        },
+        {
+          "task_id": "s06c03t08",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "自动提交 offset 的隐患",
+          "question": "消费者开启 `enable.auto.commit=true`（默认每 5 秒自动提交），从底层看，这种做法在'消费中宕机'时可能造成什么问题？",
+          "options": [
+            {
+              "text": "自动提交按固定间隔提交的是已拉取到的位置而非已处理完的位置，处理中宕机后已拉取未处理完的消息会被跳过，造成漏处理（丢数据）",
+              "correct": true,
+              "explain": "正确。自动提交不关心业务是否处理完，宕机瞬间的已拉取未处理消息会被跳过。"
+            },
+            {
+              "text": "自动提交能保证至少一次语义，任何情况都不丢消息",
+              "correct": false,
+              "explain": "自动提交恰恰破坏了'处理完再提交'，处理中崩溃会跳过消息。"
+            },
+            {
+              "text": "宕机后 Kafka 会自动回滚 offset 到处理成功的位置",
+              "correct": false,
+              "explain": "offset 提交后不会自动回滚。"
+            },
+            {
+              "text": "自动提交只在处理成功后提交，与手动提交没有区别",
+              "correct": false,
+              "explain": "自动提交按时间间隔提交拉取位置，与业务处理进度无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 手动提交的正确语义：处理完业务，再提交 offset。\n2. 自动提交的底层行为：每次 poll 时检查是否到间隔（默认 5 秒），到了就提交当前已拉取到的位置，与业务是否处理完无关。\n3. 场景推演：拉取一批消息，处理到一半，自动提交触发（提交了拉取位置），进程宕机，重启后从已提交位置继续，那批没处理完的消息被跳过，丢数据。\n4. A 正确。\n5. 排除 B（自动提交会丢）、C（不自动回滚）、D（与手动提交本质不同）。\n6. 选 A。\n**面试延伸**：重要数据必须手动提交（commitSync），并把提交放在业务成功后。",
+          "enterprise_tip": "生产红线：核心链路一律 enable.auto.commit=false + 处理成功后再 commitSync；自动提交只适合日志类可容忍少量丢失的场景。"
+        },
+        {
+          "task_id": "s06c03t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "commitSync 与 commitAsync",
+          "question": "关于 Kafka 消费者**手动提交 offset** 的两种 API，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "commitSync 同步阻塞提交，失败会抛异常（可捕获重试），提交结果可知；commitAsync 异步提交不阻塞，失败只回调通知不重试，适合对提交结果不敏感的场景",
+              "correct": true,
+              "explain": "正确。同步提交可靠但阻塞；异步提交快但不保证结果，两者按场景取舍。"
+            },
+            {
+              "text": "commitAsync 提交失败会自动重试直到成功",
+              "correct": false,
+              "explain": "commitAsync 失败只触发回调，不自动重试（重试还可能造成乱序提交）。"
+            },
+            {
+              "text": "commitSync 是异步的，不会阻塞主线程",
+              "correct": false,
+              "explain": "commitSync 会阻塞等待 broker 确认，是同步调用。"
+            },
+            {
+              "text": "使用手动提交 API 时仍需把 enable.auto.commit 设为 true",
+              "correct": false,
+              "explain": "手动提交的前提恰恰是 enable.auto.commit=false，关闭自动提交。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 前提：手动提交 API 用于 enable.auto.commit=false 的场景，由业务代码控制提交时机（一般处理成功后提交）。\n2. **commitSync**：同步阻塞，提交完成或抛异常后才返回；失败可以捕获异常重试，提交结果可知——可靠但会阻塞处理线程，适合需要保证提交成功的核心链路。\n3. **commitAsync**：异步提交，调用立即返回，后台线程提交；失败只触发回调（不重试，因为重试可能把更晚的提交先提交造成乱序）——吞吐好但不保证结果，适合可容忍偶尔重复的日志类场景。\n4. 常见组合：先 commitAsync 提吞吐，关闭前再 commitSync 兜底。\n5. 排除：async 不自动重试、sync 是同步的、手动提交要关闭自动提交。\n6. 选 A。\n**延伸**：配合『处理完再提交』的顺序，commitSync 放在业务成功后，是最保险的写法。",
+          "enterprise_tip": "面试题『commitSync 和 commitAsync 区别』：sync 可靠阻塞、async 快速但可能失败；生产常用『处理成功 → commitAsync → 优雅关闭前 commitSync 兜底』的组合。"
+        },
+        {
+          "task_id": "s06c03t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "kafka-consumer-groups 查看消费进度",
+          "question": "要查看某个消费组在每个分区的消费进度（**当前 offset、log-end-offset、lag**），最合适的命令是？",
+          "options": [
+            {
+              "text": "kafka-consumer-groups.sh --bootstrap-server node1:9092 --describe --group 消费组名",
+              "correct": true,
+              "explain": "正确。--describe --group 输出每个分区的 CURRENT-OFFSET、LOG-END-OFFSET 与 LAG。"
+            },
+            {
+              "text": "kafka-topics.sh --describe --topic 主题名",
+              "correct": false,
+              "explain": "该命令查看主题的分区、副本、Leader、ISR 等元数据，不显示消费组进度。"
+            },
+            {
+              "text": "kafka-console-consumer.sh --group 消费组名",
+              "correct": false,
+              "explain": "console-consumer 是消费工具，不输出消费组 lag 统计。"
+            },
+            {
+              "text": "kafka-server-start.sh 启动参数里查看",
+              "correct": false,
+              "explain": "kafka-server-start.sh 用于启动 broker，与查看消费进度无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 消费组进度（lag）的查看工具：**kafka-consumer-groups.sh**。\n2. 用法：`kafka-consumer-groups.sh --bootstrap-server node1:9092 --describe --group 组名`，输出每个分区的 CURRENT-OFFSET（已提交消费位置）、LOG-END-OFFSET（最新消息位置）、LAG（积压量 = end - current）。\n3. 其他用法：--list 列出所有消费组；--reset-offsets 重置消费位点。\n4. 排除：kafka-topics.sh 看主题元数据、console-consumer 是消费工具、server-start 是启动命令。\n5. 选 A。\n**延伸**：lag 持续上涨说明消费跟不上，是排查积压的第一步。",
+          "enterprise_tip": "运维基本功：用 kafka-consumer-groups.sh --describe 看 lag 判断消费是否健康；接入监控后把 lag 指标接入告警，超过阈值报警，是消息链路 SLA 的标配。"
+        },
+        {
+          "task_id": "s06c03t11",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：Schema Registry 常用序列化格式",
+          "question": "使用 **Schema Registry** 管理消息 schema 时，最常用的序列化格式是 ____（英文，4 个字母，也是 Hadoop 生态经典序列化框架）。",
+          "answer": [
+            "Avro",
+            "avro",
+            "AVRO",
+            "Avro schema"
+          ],
+          "hint": "先回忆 Schema Registry 常用的序列化格式：Hadoop 生态那个经典二进制序列化框架叫什么？",
+          "analysis": "**标准解题思路**\n1. Schema Registry 的作用：集中管理消息的 **schema（数据结构定义）**，生产者注册 schema 拿到 schema id，消息里只带 id 不带完整 schema，消费者拿 id 去 Registry 取定义——传输体积小、结构可校验。\n2. 常用序列化格式：**Avro**（Confluent Schema Registry 默认支持 Avro/JSON/Protobuf 三种，Avro 最主流）、JSON、Protobuf。\n3. Avro 的特点：二进制紧凑、自带 schema 描述（写进文件头）、Hadoop 生态原生支持。\n4. 填 Avro。\n**易错点**：Avro 和 Schema Registry 不是一回事——Avro 是序列化格式，Registry 是管理 schema 的服务；两者配合使用。",
+          "enterprise_tip": "面试题『Schema Registry 解决什么问题』：schema 集中管理与版本兼容（向后兼容保证老消费者不断流）；生产中 Kafka 消息用 Avro + Schema Registry 是 Confluent 体系标准做法。"
+        },
+        {
+          "task_id": "s06c03t12",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "消息大小限制",
+          "question": "Kafka 默认单条消息大小约限制在 **1MB**（由 message.max.bytes 等参数控制）。业务要传输一条 **10MB 的大消息**，正确的做法是？",
+          "options": [
+            {
+              "text": "一般建议大对象外置存储（如对象存储/HDFS），Kafka 只传引用；确需直接传则联动调大 broker 端 message.max.bytes、主题端 max.message.bytes、生产者 max.request.size 与消费者 fetch.max.bytes 等多处参数",
+              "correct": true,
+              "explain": "正确。大消息先考虑外置，确需直传要 broker/主题/生产/消费多处联动调参。"
+            },
+            {
+              "text": "只修改生产者一个参数就行",
+              "correct": false,
+              "explain": "只改生产者会卡在 broker 或消费者端的限制上，需要多处联动。"
+            },
+            {
+              "text": "Kafka 天然支持任意大小的消息，无需任何配置",
+              "correct": false,
+              "explain": "Kafka 默认限制单条消息约 1MB，超过会被拒绝或报错。"
+            },
+            {
+              "text": "大消息只能放弃 Kafka，改用 FTP 传输",
+              "correct": false,
+              "explain": "可以调参支持大消息，只是不推荐；大对象外置 + 传引用是更优方案。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 默认限制：单条消息约 1MB（broker 端 message.max.bytes、主题端 max.message.bytes、生产者 max.request.size、消费者 fetch.max.bytes 共同作用）。\n2. 大消息的两种思路：\n   - **推荐：外置存储**——把大对象（图片/文件）存到对象存储/HDFS，Kafka 只传引用（路径/ID），消费者按引用去取；避免 broker 内存、磁盘、网络压力与消费阻塞；\n   - **直传**：确需直接传，必须**多处联动调参**（broker + 主题 + 生产者 + 消费者），任何一端不调都会失败。\n3. 排除：只改一端无效；不配置不支持；不是只能放弃 Kafka。\n4. 选 A。\n**延伸**：大消息还会放大积压风险（一条 10MB 消息处理慢、拉取慢），所以架构上普遍『大对象外置 + 消息传引用』。",
+          "enterprise_tip": "生产实践：消息体超 1MB 一律先评估——图片/文件走 OSS 传引用；确需直传时写清四端参数清单（broker/topic/producer/consumer），并压测确认不拖垮消费吞吐。"
+        }
+      ],
+      "kps": [
+        "主题管理命令 kafka-topics.sh（create / list / describe）",
+        "命令行生产者 kafka-console-producer.sh",
+        "命令行消费者 kafka-console-consumer.sh（--group / --from-beginning）",
+        "生产者可靠性参数：acks（0/1/all）与 retries",
+        "消费者参数：auto.offset.reset（earliest/latest/none）与 enable.auto.commit",
+        "消息丢失与消费异常的排查流程",
+        "主题分区与副本规划（partitions / replication-factor）",
+        "手动提交 API：commitSync 与 commitAsync 的区别",
+        "kafka-consumer-groups.sh 查看消费组与 lag",
+        "Schema Registry 与 Avro 序列化",
+        "消息大小限制（message.max.bytes / max.request.size）"
+      ]
+    },
+    {
+      "chapter_id": "s06c04",
+      "title": "6.4 数据采集与传输链路",
+      "goal": "掌握 Flume/Sqoop/DataX 的定位与使用流程",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "数据从源头进入大数据平台靠**采集工具**：\\n- **Flume**：日志采集神器，source（数据源：文件/网络）→ channel（缓冲）→ sink（目的地：HDFS/Kafka）三段式架构，适合海量日志流式采集。\\n- **Sqoop**：关系型数据库（MySQL/Oracle）↔ HDFS/Hive 的批量导入导出工具，用 MapReduce 执行。\\n- **DataX**：阿里开源的异构数据同步工具（MySQL→HDFS、HDFS→MySQL 等），插件化架构，离线批量同步。\\n企业常见链路：**Flume → Kafka → HDFS/Hive**（日志）与 **Sqoop/DataX → HDFS/Hive**（业务库表）。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "企业典型采集架构：\n\n  日志文件 ──→ Flume ──→ Kafka ──→ HDFS（离线）\n                                  └─→ Flink（实时）\n\n  MySQL 业务库 ──→ Sqoop / DataX ──→ HDFS / Hive（全量+增量）\n\n  OSS / 文件服务器 ──→ DataX ──→ HDFS\n\nFlume 三段式：Source（tail 文件/网络端口）\n              → Channel（内存/文件缓冲）\n              → Sink（写 HDFS/Kafka）",
+          "caption": "Flume / Sqoop / DataX 的典型用途"
+        },
+        {
+          "type": "tip",
+          "content": "**什么时候用哪个**：日志流 → Flume；MySQL 表批量同步 → Sqoop 或 DataX（DataX 更现代、支持更多源）；两者都能干的事优先 DataX。"
+        },
+        {
+          "type": "warning",
+          "content": "**不要用 Sqoop 同步大表全量**：Sqoop 全量同步会拉全表，数据量大了以后必须改**增量同步**（按时间字段或主键增量），这是面试高频考点。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：DataWorks 的「数据集成」模块就是 DataX 的云上形态；离线数仓的 ODS 层数据全靠这些工具「灌」进来。面试问「ODS 层数据怎么来的」，答：日志走 Flume→Kafka→HDFS，业务库走 Sqoop/DataX 全量+增量。"
+        }
+      ],
+      "hands_on": "1. 查资料了解 Flume 的 agent 配置文件（a1.sources / a1.channels / a1.sinks）长什么样，并画一个「tail 日志 → 内存 channel → HDFS」的配置草图。\\n2. 用文字描述：MySQL 订单表每天 100 万新增，怎么设计 Sqoop/DataX 的增量同步（用什么字段、怎么判断）。\\n3. 对比 Flume 与 DataX 的适用场景，各写一个例子。",
+      "qa": [
+        {
+          "q": "Flume 的三段式架构是什么？",
+          "a": "Source（数据源，如 tail 日志文件、网络端口）→ Channel（缓冲通道，内存或文件）→ Sink（目的地，如 HDFS、Kafka）。三段解耦，source 采集速度与 sink 写入速度互不影响。"
+        },
+        {
+          "q": "Sqoop 和 DataX 的区别？",
+          "a": "两者都是关系型数据库与大数据组件间的批量同步工具。Sqoop 基于 MapReduce，生态老；DataX 阿里开源、插件化、支持数据源更多（MySQL/HDFS/OSS/ES 等），目前更主流。云上对应 DataWorks 数据集成。"
+        },
+        {
+          "q": "业务库表怎么保证增量同步？",
+          "a": "常用两种：①时间戳增量：按更新时间字段（如 update_time）大于上次同步水位线拉取；②主键增量：按自增主键 > 上次最大值拉取。注意处理删除（用软删除标记或额外同步删除日志）。"
+        },
+        {
+          "q": "为什么日志采集用 Flume 而不是 Sqoop？",
+          "a": "Flume 面向流式日志（tail 文件、实时推送），Sqoop 面向关系型数据库的批量导入导出，场景不同。日志流式场景还能直接对接 Kafka。"
+        },
+        {
+          "q": "Kafka Connect 是什么？",
+          "a": "Kafka 官方分布式数据集成框架：Source Connector 把外部数据（MySQL/文件等）导入 Kafka，Sink Connector 把 Kafka 数据导出到 HDFS/ES 等；支持 standalone 与 distributed 两种模式。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Flume",
+          "desc": "Apache 日志采集工具，Source-Channel-Sink 三段式架构。"
+        },
+        {
+          "term": "Sqoop",
+          "desc": "关系型数据库与 HDFS/Hive 间的批量同步工具，基于 MapReduce。"
+        },
+        {
+          "term": "DataX",
+          "desc": "阿里开源异构数据同步工具，插件化架构，支持 MySQL/HDFS/OSS 等。"
+        },
+        {
+          "term": "增量同步",
+          "desc": "只同步新增/变化的数据，按时间戳或主键水位线实现。"
+        },
+        {
+          "term": "全量同步",
+          "desc": "整表同步，适合小表或首次初始化。"
+        },
+        {
+          "term": "水位线",
+          "desc": "记录上次同步到哪的标记值（如最大 update_time），下次从它继续。"
+        },
+        {
+          "term": "Kafka Connect",
+          "desc": "Kafka 官方分布式数据集成框架，Source/Sink Connector 对接外部系统。"
+        }
+      ],
+      "tasks": [
+        {
+          "task_id": "s06c04t01",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "采集工具选型",
+          "question": "以下场景与工具的搭配，哪些是合理的？（多选）",
+          "options": [
+            {
+              "text": "服务器日志文件 → Flume → Kafka",
+              "correct": true,
+              "explain": "Flume tail 日志推 Kafka，标准日志链路。"
+            },
+            {
+              "text": "MySQL 订单表 → Sqoop 全量+增量 → Hive",
+              "correct": true,
+              "explain": "业务库表用 Sqoop/DataX 同步进数仓，合理。"
+            },
+            {
+              "text": "每秒百万级的实时推送 → 用 Sqoop 每秒执行一次",
+              "correct": false,
+              "explain": "Sqoop 是批量工具，单次启动开销大，不适合高频实时推送。"
+            },
+            {
+              "text": "OSS 上的历史数据文件 → DataX → HDFS",
+              "correct": true,
+              "explain": "DataX 支持 OSS 等对象存储到 HDFS 的同步，合理。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 日志流 → Flume（A 对）。\\n2. 业务库批量同步 → Sqoop/DataX（B 对）。\\n3. 实时高频 → 用消息队列 + 实时引擎，不是 Sqoop（C 错）。\\n4. 对象存储 → DataX（D 对）。\\n5. 选 A、B、D。",
+          "enterprise_tip": "选型题是面试常客：答出「日志流 vs 批量表 vs 实时」三条分界线，基本满分。"
+        },
+        {
+          "task_id": "s06c04t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "增量同步的判断字段",
+          "question": "订单表每天新增约 100 万行、偶尔修改历史订单，最合适的增量同步方式是？",
+          "options": [
+            {
+              "text": "每天全量同步整张表",
+              "correct": false,
+              "explain": "100 万级增量每天全量拉几亿行，浪费资源且越来越慢。"
+            },
+            {
+              "text": "按更新时间字段增量 + 定期小范围全量对账",
+              "correct": true,
+              "explain": "正确。update_time 增量覆盖新增和修改，定期对账兜底删除/异常。"
+            },
+            {
+              "text": "只按主键最大值增量",
+              "correct": false,
+              "explain": "主键增量覆盖新增，但漏掉「历史订单被修改」的情况。"
+            },
+            {
+              "text": "不设增量，靠手工导出",
+              "correct": false,
+              "explain": "手工导出不可持续，也不符合工程规范。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 需求特点：新增 + 偶发修改历史订单。\\n2. 时间戳增量（update_time > 水位线）同时覆盖新增和修改。\\n3. 删除场景用软删除或定期对账兜底。选 B。\\n**易错点**：只看主键增量会漏修改数据，是数仓数据质量事故的常见原因。",
+          "enterprise_tip": "面试题「增量同步漏数据怎么排查」：先查同步水位线是不是被回拨，再查目标表有没有 update_time 未更新的修改。"
+        },
+        {
+          "task_id": "s06c04t03",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排列搭建日志采集链路",
+          "question": "把「从零搭建日志采集链路」的步骤按正确顺序排列。",
+          "steps": [
+            "规划 Topic 与分区数并创建",
+            "启动 Flume 采集日志写入 Kafka",
+            "启动消费者验证链路联通",
+            "配置 Flume 的 source/channel/sink"
+          ],
+          "correct_order": [
+            0,
+            3,
+            1,
+            2
+          ],
+          "order_explain": "先规划并创建 Kafka 主题（目标端就绪），再配置 Flume（source→channel→sink），启动采集，最后消费验证。先备好目标再开源头。",
+          "analysis": "**标准解题思路**\\n1. 目标端先行：创建 Kafka 主题（分区/副本规划）。\\n2. 配置 Flume agent（source 指向日志文件，sink 指向 Kafka 主题）。\\n3. 启动 Flume，开始采集。\\n4. 用消费者验证消息到达。\\n**工程原则**：先让「目的地」就绪，再开「源头」，避免数据产生却无处可去。"
+        },
+        {
+          "task_id": "s06c04t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Flume 三段式组件作用",
+          "question": "关于 Flume 的 source、channel、sink 三段式架构，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "source 负责把数据写到最终目的地，sink 负责采集数据",
+              "correct": false,
+              "explain": "职责说反了：source 采集、sink 输出。"
+            },
+            {
+              "text": "source 采集数据（如 tail 日志文件），channel 负责缓冲，sink 把数据写到目的地（如 HDFS / Kafka）",
+              "correct": true,
+              "explain": "正确。三段职责清晰，采集速度与写入速度互不影响。"
+            },
+            {
+              "text": "channel 负责采集数据，sink 负责缓冲",
+              "correct": false,
+              "explain": "channel 是缓冲通道，不是采集器。"
+            },
+            {
+              "text": "Flume 只有 source 和 sink 两段，没有缓冲机制",
+              "correct": false,
+              "explain": "channel 正是中间的缓冲段，是 Flume 的核心设计。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 三段式：source（数据源采集）→ channel（缓冲）→ sink（目的地写出）。\n2. B 完全正确。\n3. 排除 A（职责颠倒）、C（channel 是缓冲）、D（没有缓冲错误）。\n4. 选 B。\n**为什么**：channel 的缓冲让 source 的采集速度与 sink 的写入速度解耦，是 Flume 扛住日志洪峰的关键。",
+          "enterprise_tip": "面试题『Flume 怎么保证数据不丢』：channel 用 file channel（落盘缓冲），比 memory channel 更可靠。"
+        },
+        {
+          "task_id": "s06c04t05",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：Sqoop 增量模式参数",
+          "question": "Sqoop 做增量同步时，先用 `--check-column` 指定判断字段，再用 ____ 参数指定增量模式（append / lastmodified）。（填英文参数名）",
+          "answer": [
+            "--incremental",
+            "incremental",
+            "--incremental 参数"
+          ],
+          "hint": "先回忆 Sqoop 增量同步的参数：判断字段用 --check-column，那指定「增量模式」用哪个？",
+          "analysis": "**标准解题思路**\n1. Sqoop 增量同步三件套：--incremental（模式：append / lastmodified）、--check-column（判断字段）、--last-value（上次水位线）。\n2. 题目问模式参数 → --incremental。\n3. 填 --incremental。\n**更通用的思路**（DataX / 自研同样适用）：按时间字段（如 update_time）与上次同步的水位线对比，只拉取新增/变化的数据——这是面试高频考点。"
+        },
+        {
+          "task_id": "s06c04t06",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "DataX 支持的同步场景",
+          "question": "以下哪些是 DataX 能支持的典型同步场景？（多选）",
+          "options": [
+            {
+              "text": "MySQL 业务表全量/增量同步到 HDFS",
+              "correct": true,
+              "explain": "关系库→HDFS 是 DataX 最常见的用法。"
+            },
+            {
+              "text": "MySQL 与 Hive 表之间的批量同步",
+              "correct": true,
+              "explain": "插件化架构支持 Hive reader/writer。"
+            },
+            {
+              "text": "OSS 对象存储文件同步到 HDFS",
+              "correct": true,
+              "explain": "DataX 支持 OSS 等对象存储，方便云上数据入湖。"
+            },
+            {
+              "text": "实时逐条推送每秒百万级消息",
+              "correct": false,
+              "explain": "DataX 是离线批量工具，实时推送应走 Kafka + 实时引擎。"
+            },
+            {
+              "text": "替代 Kafka 做消息队列",
+              "correct": false,
+              "explain": "DataX 是同步工具，不是消息队列。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. DataX：阿里开源插件化异构同步工具，离线批量。\n2. A（MySQL→HDFS）、B（MySQL→Hive）、C（OSS→HDFS）都是典型场景。\n3. D 实时推送与 E 替代 MQ 都超出了它的定位。\n4. 选 A、B、C。",
+          "enterprise_tip": "DataWorks 的『数据集成』就是 DataX 的云上形态；面试答『ODS 层数据怎么来的』时点一下 DataX 即可。"
+        },
+        {
+          "task_id": "s06c04t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Sqoop 的定位",
+          "question": "关于 Sqoop 工具，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Sqoop 用于关系型数据库与 HDFS/Hive 之间的批量数据同步，任务基于 MapReduce 执行",
+              "correct": true,
+              "explain": "正确。Sqoop 是批量导入导出工具，底层走 MapReduce。"
+            },
+            {
+              "text": "Sqoop 是实时流式同步工具，消息逐条推送",
+              "correct": false,
+              "explain": "Sqoop 是离线批量工具，每次启动开销大，不适合实时。"
+            },
+            {
+              "text": "Sqoop 只能导出数据，不能导入数据",
+              "correct": false,
+              "explain": "导入（RDBMS→HDFS）与导出（HDFS→RDBMS）都支持。"
+            },
+            {
+              "text": "Sqoop 不需要 Hadoop 集群，单机即可运行",
+              "correct": false,
+              "explain": "基于 MapReduce 执行，必须有 Hadoop 集群。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Sqoop 定位：关系库 ↔ HDFS/Hive 的批量同步，基于 MapReduce。\n2. 双向：既支持导入也支持导出。\n3. 选 A。\n**延伸**：Sqoop 较老，新项目更倾向 DataX（插件化、源更多、更现代），但面试仍会问 Sqoop 的增量同步。"
+        },
+        {
+          "task_id": "s06c04t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Flume channel 内存与文件的原理差异",
+          "question": "Flume 的 channel 既可以用 memory channel 也可以用 file channel 做缓冲，从**底层原理**看，两者的核心差异是？",
+          "options": [
+            {
+              "text": "memory channel 事件存在进程内存中，读写快但 agent 崩溃会丢；file channel 事件先写本地磁盘（WAL 日志），agent 重启可恢复，用性能换可靠性",
+              "correct": true,
+              "explain": "正确。内存缓冲快而不稳，文件缓冲稳而慢，是经典的性能与可靠性取舍。"
+            },
+            {
+              "text": "file channel 比 memory channel 快，因为磁盘顺序写",
+              "correct": false,
+              "explain": "内存读写始终比磁盘快，file channel 的优势是可靠性不是速度。"
+            },
+            {
+              "text": "两者都把数据直接写到 HDFS，区别只是路径不同",
+              "correct": false,
+              "explain": "channel 是 agent 本地的中间缓冲，HDFS 是 sink 的目的地。"
+            },
+            {
+              "text": "memory channel 会把数据持久化到数据库",
+              "correct": false,
+              "explain": "memory channel 数据只存在于进程内存，不持久化。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. memory channel：事件在 JVM 堆内缓冲，读写极快，但 agent 进程崩溃或重启，缓冲数据全部丢失。\n2. file channel：事件先写入本地磁盘（WAL 预写日志），崩溃后 agent 重启可以从磁盘恢复继续投递，可靠性高，代价是磁盘 IO 更慢。\n3. A 描述准确。\n4. 排除 B（内存快于磁盘）、C（channel 不是 HDFS）、D（不落数据库）。\n5. 选 A。\n**面试延伸**：'Flume 怎么保证不丢数据'的标准答案就是 file channel，把缓冲从内存换到磁盘。",
+          "enterprise_tip": "生产取舍：核心日志链路用 file channel 防丢；对丢失不敏感的监控日志可用 memory channel 换吞吐。"
+        },
+        {
+          "task_id": "s06c04t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Kafka Connect 的定位",
+          "question": "关于 **Kafka Connect**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "是 Kafka 官方的分布式数据集成框架：Source Connector 把外部数据（MySQL/文件等）导入 Kafka，Sink Connector 把 Kafka 数据导出到目标系统（HDFS/ES 等）",
+              "correct": true,
+              "explain": "正确。Kafka Connect 是 Kafka 生态里与 Flume/DataX 定位类似的数据接入/导出框架。"
+            },
+            {
+              "text": "是 Kafka 的监控告警工具",
+              "correct": false,
+              "explain": "Kafka 监控靠 JMX 指标采集；Kafka Connect 是数据集成框架。"
+            },
+            {
+              "text": "只能以单进程方式运行，不支持分布式",
+              "correct": false,
+              "explain": "Kafka Connect 支持 standalone（单机）与 distributed（分布式集群）两种模式。"
+            },
+            {
+              "text": "用于替代 Kafka 的存储功能",
+              "correct": false,
+              "explain": "Kafka Connect 不替代存储，它是 Kafka 与外部系统之间的搬运工。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Kafka Connect 的定位：Kafka 官方提供的**分布式数据集成框架**，与 Flume/DataX 同属『数据搬运』工具，但原生面向 Kafka。\n2. 两种组件：\n   - **Source Connector**：把外部数据（MySQL binlog、文件、JDBC、对象存储等）拉进 Kafka 主题；\n   - **Sink Connector**：把 Kafka 主题的数据写到外部系统（HDFS、Elasticsearch、HBase、S3 等）。\n3. 运行模式：standalone（单机，适合测试）与 distributed（分布式集群，支持扩展与故障转移）。\n4. 排除：不是监控工具、支持分布式、不替代存储。\n5. 选 A。\n**延伸**：与 Flume 对比——Flume 偏日志采集（source→channel→sink 自研管线），Kafka Connect 是 Kafka 原生的集成框架，生态连接器丰富，新项目更常用。",
+          "enterprise_tip": "面试题『Kafka Connect 和 Flume 区别』：Connect 是 Kafka 官方集成框架（连接器生态丰富、分布式、配置驱动）；Flume 是独立日志采集工具。做 CDC（MySQL 变更入 Kafka）时 Debezium 就是基于 Connect 框架的。"
+        }
+      ],
+      "kps": [
+        "Flume 三段式架构：source / channel / sink 的作用",
+        "Sqoop 的定位与执行原理（关系库 ↔ HDFS/Hive，基于 MapReduce）",
+        "DataX 的定位与特性（阿里开源、插件化、异构同步）",
+        "企业采集链路（日志：Flume→Kafka→HDFS；业务库：Sqoop/DataX→HDFS/Hive）",
+        "全量同步与增量同步的取舍",
+        "增量同步的实现思路（时间字段 / 主键水位线）",
+        "采集工具选型原则（日志流 vs 批量表 vs 实时）",
+        "Kafka Connect（分布式数据集成框架，source/sink connector）"
+      ]
+    },
+    {
+      "chapter_id": "s06c05",
+      "title": "6.5 Kafka 可靠性、顺序性与面试实战",
+      "goal": "掌握消息不丢失、有序消费、积压排查与高频面试题",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**消息不丢失（三段式答案）**：①生产者：acks=all + retries 重试；②Broker：副本因子 ≥2，Leader 故障自动切换；③消费者：**先处理业务、后提交 offset**（手动提交），处理失败不提交，重启后从旧 offset 重读。\\n**顺序性**：分区内有序。要全局有序 → 业务 key 相同进同一分区；要「每个订单内有序」→ 订单号做 key。\\n**消息积压排查**：先看消费组 lag（积压量），再查：消费者是否挂掉/扩容不够（分区数=并行度上限）、下游是否变慢、是否有大消息阻塞。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "面试经典五连问（背熟）：\n\nQ1: Kafka 会不会丢消息？\n→ 会，但可以通过配置规避：生产者 acks=all+重试，\n   副本≥2，消费者处理完再提交 offset。\n\nQ2: 消息重复怎么办？\n→ Kafka 是「至少一次」语义，重复靠消费端幂等：\n   唯一键去重（Redis SETNX / 数据库唯一索引）。\n\nQ3: 怎么保证有序？\n→ 同 key 进同分区，分区内天然有序。\n\nQ4: 消费积压怎么处理？\n→ 先扩容消费者（上限=分区数），不够就加分区；\n   同时排查下游瓶颈。\n\nQ5: Kafka 为什么快？\n→ 顺序写磁盘 + 页缓存 + 零拷贝（sendfile）。",
+          "caption": "Kafka 面试必背五连问"
+        },
+        {
+          "type": "warning",
+          "content": "**重复是常态，幂等是答案**：分布式系统「至少一次」意味着消息可能重复，业务侧必须幂等（同一消息处理两次结果一致）。这是所有消息系统的通用面试题。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：Kafka 是面试重灾区，本章的 qa 和 code 块已经把最常考的框架给你了。记住答题结构：**丢消息 = 三段式（生产/存储/消费）；重复 = 幂等；积压 = 分区并行度 + 下游排查**。能按结构答，面试官会觉得你「有生产经验」。"
+        }
+      ],
+      "hands_on": "1. 用文字写出「处理完再提交 offset」与「先提交再处理」的区别，以及各会导致什么问题。\\n2. 设计一个幂等方案：订单支付回调消息可能重复投递，如何保证只入账一次？\\n3. 模拟排查：消费组 lag 从 1 万涨到 100 万，列出你的排查步骤（至少 4 步）。",
+      "qa": [
+        {
+          "q": "Kafka 如何保证消息不丢失？",
+          "a": "三段式：生产者 acks=all + 重试；Broker 副本因子≥2，Leader 挂了 Follower 顶上；消费者处理成功后再手动提交 offset。任何一段配置不当都可能丢消息。"
+        },
+        {
+          "q": "消息重复消费怎么办？",
+          "a": "Kafka 是至少一次语义，重复不可避免，靠消费端幂等：用业务唯一键（如订单号）去重，Redis SETNX 或数据库唯一索引，保证同一消息处理多次结果一致。"
+        },
+        {
+          "q": "怎么保证消息有序？",
+          "a": "Kafka 只保证分区内有序：生产者用业务 key 路由，相同 key 进同一分区；消费者单线程消费一个分区。全局有序只能单分区（牺牲并行度），一般只需要「同业务有序」。"
+        },
+        {
+          "q": "消费积压怎么排查和处理？",
+          "a": "①看 lag 确认积压量；②查消费者是否挂掉或处理变慢；③扩容消费者（上限=分区数）；④不够就加分区再扩消费者；⑤同时排查下游（数据库连接、外部 API）瓶颈。"
+        },
+        {
+          "q": "Kafka 为什么快？",
+          "a": "三个原因：顺序写磁盘（磁盘顺序写接近内存速度）、页缓存（读走操作系统缓存）、零拷贝（sendfile 直接从磁盘到网卡，省去用户态拷贝）。"
+        },
+        {
+          "q": "死信队列是什么？怎么实现？",
+          "a": "消费失败重试多次仍失败的消息投递到专门主题（DLQ），不阻塞主链路，便于排查与重放。Kafka 无内置 DLQ，需业务侧实现『重试 → 失败转投死信主题』。"
+        },
+        {
+          "q": "consumer.seek 有什么用？",
+          "a": "手动把消费位置重置到指定 offset，用于重新消费历史数据或跳过坏消息；要在分区分配（poll 一次）后调用。"
+        },
+        {
+          "q": "isolation.level 的两个取值？",
+          "a": "read_uncommitted（默认）可读未提交事务消息；read_committed 只读已提交事务消息，配合事务型生产者保证一致性。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "至少一次（at-least-once）",
+          "desc": "消息不会丢但可能重复投递，Kafka 的默认语义。"
+        },
+        {
+          "term": "幂等",
+          "desc": "同一操作执行多次结果一致，是处理重复消息的标准手段。"
+        },
+        {
+          "term": "Lag（积压）",
+          "desc": "消费组落后于生产者的消息条数，Lag 持续上涨说明消费跟不上。"
+        },
+        {
+          "term": "零拷贝",
+          "desc": "sendfile 系统调用，数据从磁盘直接到网卡，绕过用户态，是 Kafka 快的原因之一。"
+        },
+        {
+          "term": "手动提交 offset",
+          "desc": "消费者处理完业务后再提交消费位置，防止处理失败丢消息。"
+        },
+        {
+          "term": "水位/offset 提交",
+          "desc": "把消费位置写回 Kafka，记录「读到哪了」，支持断点续读。"
+        },
+        {
+          "term": "死信队列（DLQ）",
+          "desc": "接收多次重试仍失败的消息的专门主题，隔离毒消息便于重放。"
+        },
+        {
+          "term": "consumer.seek",
+          "desc": "手动把消费位置定位到指定 offset 的 API。"
+        },
+        {
+          "term": "isolation.level",
+          "desc": "消费者读取事务消息的隔离级别：read_uncommitted / read_committed。"
+        }
+      ],
+      "tasks": [
+        {
+          "task_id": "s06c05t01",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "保证消息不丢失的配置",
+          "question": "以下哪些措施能降低 Kafka 消息丢失的风险？（多选）",
+          "options": [
+            {
+              "text": "生产者设置 acks=all 并开启重试",
+              "correct": true,
+              "explain": "等所有副本确认并重试，能避免发送失败丢消息。"
+            },
+            {
+              "text": "主题副本因子设为 1（节省磁盘）",
+              "correct": false,
+              "explain": "单副本时 Broker 宕机分区直接不可用，是高危配置。"
+            },
+            {
+              "text": "消费者处理完业务后再手动提交 offset",
+              "correct": true,
+              "explain": "先提交后处理，处理失败重启会丢消息；反过来才安全。"
+            },
+            {
+              "text": "消费端对重复消息做幂等处理",
+              "correct": true,
+              "explain": "不能防丢，但配合至少一次语义避免重复造成数据错误。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 生产端：acks=all + retries（A 对）。\\n2. 存储端：副本 ≥2（B 错）。\\n3. 消费端：处理完再提交（C 对）、幂等（D 对）。\\n4. 选 A、C、D。\\n**口诀**：生产确认、存储副本、消费后提交。",
+          "enterprise_tip": "这就是「消息不丢失」三段式答案的变形考法，把三段都记住任何问法都能答。"
+        },
+        {
+          "task_id": "s06c05t02",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "重复消息的幂等处理",
+          "question": "支付回调消息可能重复投递，最合适的幂等方案是？",
+          "options": [
+            {
+              "text": "不做处理，反正很少重复",
+              "correct": false,
+              "explain": "分布式系统重复是常态，不处理会导致重复入账，财务事故。"
+            },
+            {
+              "text": "用订单号作为唯一键，处理前先检查是否已处理（如数据库唯一索引）",
+              "correct": true,
+              "explain": "正确。唯一键约束天然幂等，重复消息插入会失败或被忽略。"
+            },
+            {
+              "text": "消费者收到消息后先睡 5 秒再处理",
+              "correct": false,
+              "explain": "延迟处理不解决重复问题。"
+            },
+            {
+              "text": "把消息队列换成 RabbitMQ 就能避免重复",
+              "correct": false,
+              "explain": "任何 MQ 都是至少一次语义，换组件不解决重复。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 认识：至少一次语义 → 可能重复。\\n2. 方案：业务唯一键（订单号）做幂等，数据库唯一索引或 Redis SETNX。\\n3. 选 B。\\n**延伸**：幂等要在「写入生效的地方」做，只靠消费端内存标记在重启后会失效。",
+          "enterprise_tip": "「重复消息怎么处理」几乎必考。答案核心：唯一键 + 存储层约束，而不是消费端临时判断。"
+        },
+        {
+          "task_id": "s06c05t03",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：积压量指标",
+          "question": "衡量消费者落后于生产者多少消息的指标叫 ____（英文，3 个字母）。",
+          "answer": [
+            "lag",
+            "Lag",
+            "LAG"
+          ],
+          "hint": "先回忆消费者积压的概念：落后生产者多少消息，这个指标叫什么？",
+          "analysis": "**标准解题思路**\\n1. 消费者消费速度跟不上生产速度 → 消息积压。\\n2. 积压量指标叫 lag。\\n3. 填 lag。\\n**延伸**：lag 持续上涨 = 消费能力不足，需要扩容（上限=分区数）。"
+        },
+        {
+          "task_id": "s06c05t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "先提交 offset 再处理的后果",
+          "question": "消费者『先提交 offset、再处理业务』，如果业务处理失败，会导致什么后果？",
+          "options": [
+            {
+              "text": "没有任何影响，Kafka 会记住处理失败的消息",
+              "correct": false,
+              "explain": "offset 已提交，Kafka 认为这条消息已消费完。"
+            },
+            {
+              "text": "重启后这条消息会被跳过，造成消息丢失（漏处理）",
+              "correct": true,
+              "explain": "正确。offset 已提交，处理失败的记录不会重读，数据就丢了。"
+            },
+            {
+              "text": "消息会自动重试，直到处理成功",
+              "correct": false,
+              "explain": "Kafka 没有自动重试机制，是否重试取决于提交时机与代码。"
+            },
+            {
+              "text": "Kafka 会把 offset 自动回滚到上一条",
+              "correct": false,
+              "explain": "offset 提交后不会自动回滚。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 正确顺序：先处理业务、成功后提交 offset。\n2. 先提交后处理：offset 已经前移，进程重启后从新位置继续，失败的消息永远读不到 → 丢消息。\n3. 选 B。\n**对比**：先处理后提交，处理成功但提交前崩溃 → 重启后重复消费，靠幂等兜底（至少一次语义）。",
+          "enterprise_tip": "这是『消息不丢失』消费端的核心考点：把 commitSync() 放在业务成功之后，而不是之前。"
+        },
+        {
+          "task_id": "s06c05t05",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "消息积压的处置手段",
+          "question": "消费组 lag 持续上涨、消息大量积压，以下处置手段哪些**合理**？（多选）",
+          "options": [
+            {
+              "text": "扩容消费者实例（数量不超过分区数）",
+              "correct": true,
+              "explain": "并行度上限=分区数，先扩消费者提速。"
+            },
+            {
+              "text": "给主题增加分区，再扩容消费者",
+              "correct": true,
+              "explain": "分区不够时先加分区，再扩消费者，突破并行度瓶颈。"
+            },
+            {
+              "text": "排查下游处理逻辑是否变慢（数据库连接、外部 API 等）",
+              "correct": true,
+              "explain": "下游变慢会让消费者阻塞在等待上，必须同步排查。"
+            },
+            {
+              "text": "直接删除积压的消息，反正是旧数据",
+              "correct": false,
+              "explain": "删除数据会造成业务损失，绝不能作为处置手段。"
+            },
+            {
+              "text": "重启 Kafka 集群，让积压自动消失",
+              "correct": false,
+              "explain": "重启不能消灭积压，还会影响其他业务。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 积压的本质：消费速度 < 生产速度。\n2. 提速三招：扩消费者（A，上限=分区数）→ 加分区再扩容（B）→ 排查下游瓶颈（C）。\n3. 排除 D（删数据）、E（重启无效）。\n4. 选 A、B、C。",
+          "enterprise_tip": "面试答『积压怎么处理』按顺序说：扩消费者 → 加分区 → 查下游；同时报备业务方评估数据时效性影响。"
+        },
+        {
+          "task_id": "s06c05t06",
+          "type": "python",
+          "difficulty": 3,
+          "title": "模拟『处理成功才提交』的消费者",
+          "question": "用**纯 Python** 模拟 Kafka 消费者的『处理成功才提交 offset』语义：消息依次为 `['订单:1001', '订单:1002', '坏消息', '订单:1003']`，其中 `坏消息` 代表处理失败。要求：逐条消费，处理成功的消息才推进 offset（提交消费位置），遇到 `坏消息` 时打印失败信息并停止（offset 停留在原地，重启后可从失败处重读）。最后打印已提交的 offset 和成功处理的消息列表。",
+          "code_context": "messages = ['订单:1001', '订单:1002', '坏消息', '订单:1003']\noffset = 0  # 已提交的消费位置\nprocessed = []\n\n# ===== 在这里编写代码 =====\n# 模拟消费者循环：处理成功才推进 offset，遇到 '坏消息' 打印失败信息并停止\n",
+          "expected_output": "处理失败，不提交 offset: 坏消息\n已提交 offset = 2\n成功处理: 订单:1001, 订单:1002",
+          "reference": "messages = ['订单:1001', '订单:1002', '坏消息', '订单:1003']\noffset = 0  # 已提交的消费位置\nprocessed = []\n\nwhile offset < len(messages):\n    msg = messages[offset]\n    if msg == '坏消息':  # 模拟处理失败\n        print('处理失败，不提交 offset: %s' % msg)\n        break\n    processed.append(msg)  # 业务处理成功\n    offset += 1  # 处理成功才提交 offset\n\nprint('已提交 offset = %d' % offset)\nprint('成功处理: %s' % ', '.join(processed))",
+          "hint": "先想：offset 代表什么？处理成功才「提交」，失败时该不该推进？循环怎么控制结束？",
+          "analysis": "**标准解题思路**\n1. 用 offset 当下标，while 循环逐条取消息。\n2. 判断是否处理失败（坏消息）：失败则打印提示并 break，offset 保持不动。\n3. 处理成功的消息加入 processed 列表，并把 offset + 1（模拟提交）。\n4. 循环结束后打印 offset 与成功列表。\n**逐轮演算**：订单:1001 成功 → offset=1；订单:1002 成功 → offset=2；坏消息失败 → 停止。最终 offset=2，成功处理 2 条。\n**为什么**：这正是 Kafka 消费者『处理成功才提交 offset』的语义——offset 只记录已成功处理的位置，失败的消息重启后会从 offset=2 重新读到，保证不丢消息。",
+          "enterprise_tip": "真实代码里对应『手动提交 offset』：commitSync() 放在业务处理成功之后；配合幂等，即可在『至少一次』语义下做到不丢不重。"
+        },
+        {
+          "task_id": "s06c05t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "保证同订单消息有序",
+          "question": "要保证『同一个订单的所有消息按顺序被消费』，最合适的做法是？",
+          "options": [
+            {
+              "text": "把所有消息随机发到主题的各个分区，靠运气",
+              "correct": false,
+              "explain": "随机分发会跨分区，Kafka 不保证分区间顺序。"
+            },
+            {
+              "text": "用订单号作为 key 发送，相同订单号哈希到同一分区，分区内按序消费",
+              "correct": true,
+              "explain": "正确。相同 key 必然进同一分区，分区内天然有序。"
+            },
+            {
+              "text": "给每条消息加时间戳，消费端按时间戳排序",
+              "correct": false,
+              "explain": "跨分区的消息即使有时间戳也无法保证完整顺序，还会增加复杂度。"
+            },
+            {
+              "text": "Kafka 天然保证所有消息全局有序，无需任何处理",
+              "correct": false,
+              "explain": "Kafka 只保证分区内有序，全局有序需要牺牲并行度（单分区）。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Kafka 的有序性边界：分区内有序、分区间无序。\n2. 需要『同业务有序』→ 业务 key（订单号）做 key，哈希到同一分区。\n3. 选 B。\n**面试延伸**：全局有序只能单分区（吞吐受限），绝大多数场景只需要『每个订单/每个用户内有序』，用 key 路由即可。",
+          "enterprise_tip": "生产实践：订单状态流转消息一律用 order_id 做 key，配合单线程消费一个分区，保证状态机不乱。"
+        },
+        {
+          "task_id": "s06c05t08",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "幂等生产者的底层原理",
+          "question": "Kafka 幂等生产者（`enable.idempotence=true`）在**底层**是怎么做到不重复写入的？",
+          "options": [
+            {
+              "text": "每个生产者实例有唯一 PID，每条消息带递增序列号，Broker 按 (PID, 分区, 序列号) 去重，重复的消息直接丢弃",
+              "correct": true,
+              "explain": "正确。PID + 序列号让 Broker 能识别并丢弃同一消息的重复发送。"
+            },
+            {
+              "text": "生产者把消息先存到本地数据库，靠数据库去重",
+              "correct": false,
+              "explain": "幂等去重发生在 Kafka Broker 端，不依赖生产者的本地存储。"
+            },
+            {
+              "text": "幂等靠消费者端做，与生产者无关",
+              "correct": false,
+              "explain": "消费者端幂等是另一层防线；生产者幂等解决的是重复发送问题。"
+            },
+            {
+              "text": "生产者给每条消息生成全局唯一 UUID，Broker 全局查重",
+              "correct": false,
+              "explain": "Kafka 用的是 (PID, 分区, 序列号)，不是全局 UUID 查重。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 问题来源：网络重试会导致同一消息被发送多次，Broker 重复落盘。\n2. 幂等方案：生产者初始化时分配唯一 PID（Producer ID）；该 PID 对每个分区维护递增的序列号，消息上携带序列号。\n3. Broker 端按 (PID, 分区, 序列号) 判断：序列号比已记录的大 1 就是新消息，否则是重复消息，直接丢弃。\n4. A 正确。\n5. 排除 B（不依赖本地数据库）、C（生产者侧解决发送重复）、D（不是全局 UUID）。\n6. 选 A。\n**面试延伸**：幂等只保证单个生产者会话内不重复，配合 acks=all 才是完整的不丢不重方案。",
+          "enterprise_tip": "生产实践：生产端开 enable.idempotence=true + acks=all + retries>0，是不丢不重的标准三件套，成本只是少量性能开销。"
+        },
+        {
+          "task_id": "s06c05t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "死信队列（DLQ）",
+          "question": "关于**死信队列（Dead Letter Queue，DLQ）**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "消费失败且重试多次仍失败的消息被投递到专门的主题（死信队列），不阻塞主消费链路，便于后续人工排查或定时重放",
+              "correct": true,
+              "explain": "正确。DLQ 把『毒消息』隔离出去，主链路继续跑，坏消息可复盘重放。"
+            },
+            {
+              "text": "死信队列用于存放所有正常处理的消息",
+              "correct": false,
+              "explain": "正常消息在主线处理；死信队列只收多次重试仍失败的异常消息。"
+            },
+            {
+              "text": "进入死信队列的消息永远不可能再被处理",
+              "correct": false,
+              "explain": "死信消息可以人工修复后重新投递（重放）到原主题再消费。"
+            },
+            {
+              "text": "死信队列是 Kafka 内置功能，开启一个开关即可，无需业务实现",
+              "correct": false,
+              "explain": "Kafka 没有内置 DLQ，需要业务侧在消费失败重试后用生产者把消息写到专门的死信主题。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 问题背景：消费端遇到**毒消息**（格式错误、业务校验不过、依赖系统不可用且重试仍失败）时，如果一直重试会阻塞整个分区消费，拖垮链路。\n2. DLQ 方案：① 消费失败先重试 N 次（指数退避）；② 仍失败则用生产者把消息（带上原始内容与失败原因）写入**专门的死信主题**；③ 主消费继续，死信消息由人工/定时任务排查修复后重放。\n3. 关键点：**Kafka 没有内置 DLQ**，需要业务侧实现『重试 → 失败转投死信主题』的逻辑（如 Spring Kafka 的 DefaultErrorHandler 支持）。\n4. 排除：不放正常消息、可重放、不是内置功能。\n5. 选 A。\n**延伸**：死信主题也按业务划分（如 order-dlq），配合告警，是消息链路的兜底保险。",
+          "enterprise_tip": "面试题『消费失败的消息怎么处理』：重试 N 次 → 转投死信队列 → 告警 + 人工/定时重放；能画出『主主题 + 死信主题』的链路图是加分项。"
+        },
+        {
+          "task_id": "s06c05t10",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "seek 重置消费位点",
+          "question": "消费者调用 `consumer.seek(topicPartition, offset)` 的作用是？",
+          "options": [
+            {
+              "text": "手动把消费位置重置到指定 offset，可用于重新消费历史数据（补数/重算）或跳过损坏的消息",
+              "correct": true,
+              "explain": "正确。seek 直接指定下次拉取的起始位置，是位点控制的底层 API。"
+            },
+            {
+              "text": "提交当前消费位置",
+              "correct": false,
+              "explain": "提交位置是 commitSync/commitAsync 的职责，seek 是『定位』不是『提交』。"
+            },
+            {
+              "text": "暂停该分区的消费",
+              "correct": false,
+              "explain": "暂停消费用 pause()，seek 是移动消费位点。"
+            },
+            {
+              "text": "删除主题中的消息",
+              "correct": false,
+              "explain": "seek 不删除数据，只是把消费者指针挪到别的位置。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. seek 的语义：手动把某个分区（TopicPartition）的消费位置**定位到指定 offset**，下次 poll 从那里开始。\n2. 典型用途：① **补数/重算**——把消费位置拨回历史 offset 重新消费；② **跳过坏消息**——定位到坏消息之后继续；③ 配合 seekToBeginning / seekToEnd 重置到最早/最新。\n3. 注意点：seek 要在消费者**分配分区之后**（poll 一次之后）调用才生效；位置重置后**未提交的旧位置会被覆盖**，可能造成重复或跳过。\n4. 排除：不是提交、不是暂停、不删数据。\n5. 选 A。\n**延伸**：命令行重置用 kafka-consumer-groups.sh --reset-offsets --to-offset N；API 层就是 consumer.seek。",
+          "enterprise_tip": "生产场景：报表逻辑改版要重算历史数据时，把消费组位点 seek 回 7 天前重放；注意重置前评估下游幂等与数据量，避免把下游打垮。"
+        },
+        {
+          "task_id": "s06c05t11",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "isolation.level 参数",
+          "question": "关于消费者参数 **isolation.level**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "read_uncommitted 可读到未提交事务的消息（默认值）；read_committed 只读已提交事务的消息，配合事务型生产者实现『读已提交』的精确语义",
+              "correct": true,
+              "explain": "正确。read_committed 过滤掉未提交事务的消息，保证只消费完整写入的数据。"
+            },
+            {
+              "text": "read_committed 是默认值",
+              "correct": false,
+              "explain": "默认值是 read_uncommitted；需要读已提交语义时显式配置 read_committed。"
+            },
+            {
+              "text": "该参数控制生产者的重试次数",
+              "correct": false,
+              "explain": "isolation.level 是消费者参数，控制能读到什么事务状态的消息，与重试无关。"
+            },
+            {
+              "text": "该参数与 Kafka 事务没有任何关系",
+              "correct": false,
+              "explain": "isolation.level 正是为事务型消息设计的：read_committed 只读已提交事务的消息。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 背景：Kafka 事务型生产者把多条消息放进**同一个事务**（要么全成功要么全失败）。\n2. isolation.level 两个取值（消费者端）：\n   - **read_uncommitted**（默认）：读到所有消息，包括**未提交事务**写入的消息——可能读到『事务未完成』的半成品；\n   - **read_committed**：只读**已提交事务**的消息，未提交/已中止事务的消息被过滤，保证消费到的是完整一致的数据。\n3. 配合：事务型生产者（transactional.id + initTransactions/beginTransaction/commitTransaction）+ 消费者 read_committed，实现端到端『读已提交』。\n4. 排除：默认是 read_uncommitted；不是生产者重试参数；与事务强相关。\n5. 选 A。\n**延伸**：只有开启事务型生产者的主题，两个取值才有明显差异；普通消息下两者行为基本一致。",
+          "enterprise_tip": "面试题『怎么做到不读到半成品数据』：事务型生产者 + 消费者 isolation.level=read_committed；双写 MySQL+Kafka 等场景用事务保证一致性时必配。"
+        }
+      ],
+      "kps": [
+        "消息不丢失三段式（生产端 acks=all+重试 / 存储端副本≥2 / 消费端处理完再提交）",
+        "正确提交时机：先处理业务、后提交 offset",
+        "重复消费与幂等（至少一次语义、唯一键去重）",
+        "消息顺序性保证（分区内有序、业务 key 路由）",
+        "消息积压：lag 指标、排查与处置",
+        "「处理成功才提交」的消费者编程实现",
+        "死信队列（DLQ）：消费失败消息的兜底处理",
+        "seek 重置消费位点（重新消费 / 跳过坏消息）",
+        "isolation.level（read_uncommitted / read_committed）"
+      ]
+    },
+    {
+      "chapter_id": "s06c06",
+      "title": "6.6 Kafka 高性能与高可用原理",
+      "goal": "讲透 Kafka 顺序写、页缓存、零拷贝、ISR 等底层机制，能回答面试必考原理题",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**为什么 Kafka 吞吐能到百万级？第一板斧：顺序写磁盘。**\n\n普通消息系统把每条消息当作独立记录随机插入，磁盘的寻道和旋转延迟（毫秒级）让随机写吞吐只有几 MB/s。Kafka 则把消息**追加**到分区日志文件的末尾（append-only），写完后不修改、不删除单条，过期清理直接整段删除日志段。\n\n- 顺序写时磁头几乎不用寻道，机械盘顺序写可达 100~200MB/s，接近内存速度，SSD 上优势依然明显；\n- 生产者还支持**批量发送**（batch）：把多条消息攒成一批一次发出，把多次小 IO 合并成一次大 IO，进一步降低磁盘与网络开销。\n\n**第二板斧：页缓存（Page Cache）。**\n\nKafka 的读写都发生在操作系统层面：\n- **写**：消息先进入 Page Cache（操作系统页缓存），由操作系统**异步刷盘**到物理磁盘，应用不阻塞等磁盘；\n- **读**：消费者读取时先查 Page Cache，刚写入的消息几乎必然命中，直接返回内存数据，完全不碰磁盘；\n- 读写**共享同一份缓存**：生产者刚写的数据，消费者马上就能在内存里读到，这正是 Kafka 吞吐的另一个秘密。\n\n注意：Page Cache 是操作系统管理的内存，不属于 Kafka 的 JVM 堆，所以 Kafka 机器要给系统留足内存。"
+        },
+        {
+          "type": "text",
+          "content": "**第三板斧：零拷贝（sendfile）。**\n\n传统'从磁盘读文件再发给客户端'的路径：磁盘 → 内核读缓冲 → **用户态应用缓冲** → 内核 Socket 缓冲 → 网卡。数据在内存里被复制多次，还要反复切换用户态/内核态，IO 吞吐被应用层拷贝卡死。\n\nKafka 消费消息时使用 **sendfile** 系统调用：数据从磁盘（Page Cache）**直接进入网卡**，完全绕过用户态，省掉了 2 次拷贝和 2 次上下文切换。消费者有多快，取决于网络带宽，而不是应用层拷贝。\n\n**批量与压缩（第四板斧）**：生产者端把多条消息攒成一批发送，Broker 端批量落盘；同时支持 **LZ4 / ZSTD / GZIP / Snappy** 压缩，压缩发生在发送前，Broker 与消费者拿到的是压缩后的字节，只在消费端解压。压缩让网络传输量和磁盘占用大幅下降。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "一条消息从生产到落盘的底层流程：\n\n  生产者：消息进入本地发送缓冲（RecordAccumulator），攒批\n    → Sender 线程按批次发送到 Leader 所在 Broker\n  Broker：Leader 把消息【追加】写入分区日志文件末尾（先进 Page Cache，顺序写）\n    → Follower 副本从 Leader 拉取消息同步，ISR 保持同步\n    → acks=all 时，ISR 全部写入后才向生产者返回确认\n    → 操作系统异步把 Page Cache 数据刷到物理磁盘（fsync）\n\n  消费者：pull 拉取（命中 Page Cache）→ 处理 → 提交 offset 到 __consumer_offsets",
+          "caption": "消息从生产到落盘、再到被消费的完整底层链路"
+        },
+        {
+          "type": "text",
+          "content": "**高可用原理：ISR 机制与 acks。**\n\n每个分区有 1 个 Leader 和多个 Follower 副本：Leader 负责全部读写，Follower 从 Leader 拉取数据保持同步。\n\n- **ISR（In-Sync Replicas，同步中的副本）**：与 Leader 保持同步的副本集合。Follower 如果长时间追不上（宕机、网络分区、同步延迟超过 `replica.lag.time.max.ms`），会被**踢出 ISR**；恢复同步后再加回来；\n- `acks=all`：Leader 要等 **ISR 中所有副本**都写入该消息后才向生产者返回确认，只要 ISR 里的副本都活着，消息就不会丢；\n- `min.insync.replicas`：ISR 的最小副本数，例如设为 2。当 ISR 只剩 1 个副本时，Broker 直接**拒绝写入**（宁可失败也不写丢），避免'看起来成功了，实际只有一份数据'；\n- **故障切换**：Leader 宕机后，从 ISR 中选举新的 Leader，ISR 里的副本数据最完整，能保证不丢消息。"
+        },
+        {
+          "type": "text",
+          "content": "**消费的底层：pull 拉取 + offset 提交。**\n\n- Kafka 消费者是 **pull（拉取）模式**：消费者主动向 Broker 拉消息，拉多少、多快由自己控制。如果用 **push（推送）**，Broker 无法知道每个消费者的处理能力，慢消费者会被快速推送压垮，也无法做流控。pull 模式下消费者按自己的节奏消费，天然支持'削峰填谷'；\n- pull 的代价：主题没有新消息时消费者会空轮询，所以客户端用长轮询（`fetch.max.wait.ms`）挂起等待，有新消息立即返回；\n- **offset 提交**：消费者处理完消息后，把消费位置提交到内部主题 `__consumer_offsets`。提交时机决定'丢不丢、重不重'：先处理再提交 → 至少一次（可能重复，靠幂等）；先提交再处理 → 处理失败会丢消息。"
+        },
+        {
+          "type": "text",
+          "content": "**消息查找：日志分段 + 稀疏索引。**\n\n一个分区的日志不是一个大文件，而是按大小/时间切成多个 **segment（日志分段）**，文件名就是段内第一条消息的 offset，如 `00000000000000000000.log`、`000000000001073741824.log`。\n\n每个 segment 配一个 `.index` 索引文件，但它是**稀疏索引**：不是每条消息都建索引，而是**每隔一段距离（如每 4KB 字节）记一条 (offset, 物理位置)**，用少量空间换查找速度。\n\n按 offset 查消息的流程：\n1. 在 segment 列表里**二分定位**到目标 offset 所在的段；\n2. 在该段的稀疏索引里**二分**找到最接近的 (offset, 位置)；\n3. 从那个位置开始**顺序扫描**到目标消息。\n\n好处：查找成本低，且过期数据直接删除整个 segment 文件，不需要逐条删除（避免随机 IO）。"
+        },
+        {
+          "type": "warning",
+          "content": "**易错点**：① Page Cache 是操作系统缓存，不是 Kafka 进程的 JVM 堆内存，调优时不能只盯 `-Xmx`；② acks=all 不等于立刻刷盘，消息先进 Page Cache，Kafka 的持久化靠'副本同步 + 日志段文件'而不是每次 fsync；③ 稀疏索引查找靠'二分 + 顺序扫描'，不是每条消息 O(1) 定位。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：'Kafka 为什么快'是面试必考题，标准答案四板斧：**顺序写磁盘 → 页缓存 → 零拷贝（sendfile）→ 批量与压缩**；'Kafka 为什么不丢消息'答：**ISR + acks=all + min.insync.replicas + 消费者处理完再提交**。能把'消息从生产到落盘的链路'和'消费者为什么快'两条底层链路讲清楚，面试官会认为你真的理解 Kafka 而不是背概念。实际运维中：观察 Page Cache 命中率、ISR 状态、磁盘顺序写速率，是定位性能问题的主要手段。"
+        }
+      ],
+      "hands_on": "1. 用文字画出'消息从生产到落盘'的完整链路，标注顺序写、Page Cache、ISR 同步发生的位置。\n2. 查资料回答：sendfile 相比传统 read+write 的拷贝方式，省掉了哪几次拷贝和上下文切换？\n3. 思考：一个 3 副本主题，min.insync.replicas=2，如果一台 Broker 宕机，写入还能成功吗？为什么？",
+      "qa": [
+        {
+          "q": "Kafka 为什么快？",
+          "a": "四板斧：① 顺序写磁盘，追加写避免随机寻道，吞吐接近内存；② 页缓存，读写共享操作系统缓存，刚写入的消息读时命中内存；③ 零拷贝 sendfile，数据从磁盘直接到网卡，省去用户态拷贝；④ 批量发送与 LZ4/ZSTD 压缩，把多次小 IO 合并成一次大 IO。"
+        },
+        {
+          "q": "什么是 ISR？有什么用？",
+          "a": "ISR 是与 Leader 保持同步的副本集合。Follower 长期落后会被踢出 ISR。acks=all 表示等 ISR 全部写入才确认；Leader 故障时从 ISR 中选举新 Leader，保证不丢消息。"
+        },
+        {
+          "q": "acks=all 和 min.insync.replicas 是什么关系？",
+          "a": "acks=all 让 Leader 等 ISR 中所有副本写入后才确认；min.insync.replicas 设置 ISR 的最小副本数（如 2），ISR 不足时拒绝写入，宁可失败也不写丢。两者配合做到高可用 + 不丢消息。"
+        },
+        {
+          "q": "为什么消费者用 pull 而不是 push？",
+          "a": "pull 让消费者自己控制拉取节奏，慢消费者不会被压垮，也方便做流控；push 模式下 Broker 无法感知消费者的处理能力，会把慢消费者压垮。"
+        },
+        {
+          "q": "Kafka 怎么按 offset 快速找到消息？",
+          "a": "日志按 segment 分段，索引是稀疏索引（每隔一段距离记一条 offset 与物理位置）。查找时：二分定位 segment，再二分查稀疏索引，最后顺序扫描到目标消息。"
+        },
+        {
+          "q": "Kafka 压缩类型怎么选？",
+          "a": "看『压缩比 vs CPU 开销』：LZ4 速度最快 CPU 低（吞吐优先）、ZSTD 综合均衡（推荐）、GZIP 压缩比最高但费 CPU（带宽/存储受限）。压缩发生在生产者端，消费者自动解压。"
+        },
+        {
+          "q": "Kafka 怎么监控？",
+          "a": "broker 通过 JMX 暴露指标（BytesInPerSec、UnderReplicatedPartitions 等），用 Prometheus + JMX Exporter / Ganglia 采集，接入告警与看板。"
+        },
+        {
+          "q": "Kafka Streams 和 Flink 的区别？",
+          "a": "Kafka Streams 是 Kafka 官方 Java 流处理库，无需独立集群、内嵌应用、以 Kafka 为存储，轻量；Flink 是独立流计算引擎，功能强、生态大，适合重场景。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "顺序写",
+          "desc": "消息追加写入日志文件末尾，避免随机寻道，是 Kafka 高吞吐的第一板斧。"
+        },
+        {
+          "term": "Page Cache",
+          "desc": "操作系统页缓存，Kafka 读写都先经过它，由 OS 异步刷盘。"
+        },
+        {
+          "term": "sendfile",
+          "desc": "零拷贝系统调用，数据从磁盘直接到网卡，绕过用户态。"
+        },
+        {
+          "term": "批量发送",
+          "desc": "生产者把多条消息攒成一批再发送，减少 IO 次数。"
+        },
+        {
+          "term": "ISR",
+          "desc": "In-Sync Replicas，与 Leader 保持同步的副本集合。"
+        },
+        {
+          "term": "min.insync.replicas",
+          "desc": "ISR 最小副本数，ISR 不足时拒绝写入。"
+        },
+        {
+          "term": "segment",
+          "desc": "分区日志的物理分段文件，过期数据直接整段删除。"
+        },
+        {
+          "term": "稀疏索引",
+          "desc": "每隔一段距离记录一条 (offset, 物理位置) 的索引，配合顺序扫描定位消息。"
+        },
+        {
+          "term": "LZ4 / ZSTD / GZIP",
+          "desc": "Kafka 常用压缩算法：LZ4 快、ZSTD 均衡、GZIP 省空间费 CPU。"
+        },
+        {
+          "term": "JMX",
+          "desc": "Java 管理扩展，Kafka 通过它暴露运行指标供监控系统采集。"
+        },
+        {
+          "term": "Kafka Streams",
+          "desc": "Kafka 官方 Java 流处理库，无需独立集群，内嵌应用做流处理。"
+        }
+      ],
+      "kps": [
+        "顺序写磁盘：追加写与随机写的性能差异",
+        "页缓存 Page Cache：读写共享操作系统缓存",
+        "零拷贝 sendfile：从磁盘直接到网卡",
+        "批量发送与压缩（LZ4/ZSTD）",
+        "ISR 机制：副本同步、acks=all、min.insync.replicas",
+        "消费者 pull 拉取模式与 offset 提交",
+        "日志分段 segment 与稀疏索引查找",
+        "压缩类型选择（LZ4/ZSTD/GZIP 的权衡）",
+        "JMX 监控 Kafka 指标",
+        "Kafka Streams 流处理库简介"
+      ],
+      "tasks": [
+        {
+          "task_id": "s06c06t01",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "为什么顺序写快",
+          "question": "同样是写磁盘，为什么 Kafka 采用**追加写（顺序写）**就能支撑百万级吞吐？",
+          "options": [
+            {
+              "text": "顺序写时磁盘磁头几乎不需要寻道和旋转等待，连续写入速度接近内存",
+              "correct": true,
+              "explain": "正确。顺序写把随机寻道变成连续写入，机械盘顺序写可达 100~200MB/s，是 Kafka 高吞吐的第一板斧。"
+            },
+            {
+              "text": "顺序写的数据不经过操作系统，直接写入物理磁盘",
+              "correct": false,
+              "explain": "数据仍先进 Page Cache，由操作系统异步刷盘，顺序写与是否经过缓存无关。"
+            },
+            {
+              "text": "顺序写不需要复制数据，所以比随机写快",
+              "correct": false,
+              "explain": "顺序写快在减少寻道，与数据拷贝无关。"
+            },
+            {
+              "text": "Kafka 把消息存在内存里，从不真正写磁盘",
+              "correct": false,
+              "explain": "消息最终要持久化到磁盘，顺序写只是让写盘很快。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 回忆机械磁盘的物理特性：随机写要寻道 + 旋转等待（毫秒级），顺序写磁头几乎不动。\n2. 顺序写把'每次写都要找位置'变成'沿着文件末尾连续写'，吞吐从几 MB/s 提升到 100~200MB/s。\n3. A 描述的就是这个原理。\n4. 排除 B（数据仍走 Page Cache）、C（与拷贝无关）、D（消息要落盘）。\n5. 选 A。\n**面试延伸**：答'Kafka 为什么快'的第一板斧就是顺序写磁盘，再补页缓存与零拷贝。",
+          "enterprise_tip": "运维视角：用 iostat 观察磁盘写吞吐与 await，Kafka 顺序写场景下磁盘利用率应很高而延迟很低；若 await 飙高，往往是有其他组件在做随机写。"
+        },
+        {
+          "task_id": "s06c06t02",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "零拷贝省掉了什么",
+          "question": "Kafka 消费消息用**零拷贝（sendfile）**，相比传统的'磁盘 → 用户态缓冲 → Socket'方式，主要省掉了什么？",
+          "options": [
+            {
+              "text": "数据在用户态与内核态之间的拷贝及上下文切换",
+              "correct": true,
+              "explain": "正确。sendfile 让数据从页缓存直接到网卡，省掉用户态拷贝和上下文切换。"
+            },
+            {
+              "text": "磁盘上的数据读取，完全不需要磁盘 IO",
+              "correct": false,
+              "explain": "零拷贝省的是用户态拷贝，磁盘读取仍要发生（数据在页缓存中）。"
+            },
+            {
+              "text": "网络传输，消息不需要经过网卡",
+              "correct": false,
+              "explain": "数据最终仍要经网卡发送，零拷贝只是省掉中间的拷贝环节。"
+            },
+            {
+              "text": "序列化与反序列化的开销",
+              "correct": false,
+              "explain": "序列化是另一个环节，零拷贝解决的是 IO 拷贝路径。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 传统路径：磁盘 → 内核读缓冲 → 用户态应用缓冲 → 内核 Socket 缓冲 → 网卡，涉及多次拷贝和上下文切换。\n2. sendfile：数据从页缓存直接进网卡，绕过用户态，省掉用户态拷贝与上下文切换。\n3. A 描述准确。\n4. 排除 B（磁盘读取仍需要）、C（网卡仍要传输）、D（序列化是另一件事）。\n5. 选 A。\n**为什么**：用户态拷贝是消费链路的隐形瓶颈，零拷贝让消费吞吐不再受应用层限制。",
+          "enterprise_tip": "面试追问'零拷贝怎么实现的'：sendfile 由内核完成页缓存到网卡的传输，应用只提供文件描述符与长度，无需把数据搬进自己的内存。"
+        },
+        {
+          "task_id": "s06c06t03",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：页缓存的英文",
+          "question": "Kafka 读写都借助操作系统缓存：写入的消息先进 ____（英文术语，两个单词），再由操作系统异步刷盘。",
+          "answer": [
+            "Page Cache",
+            "page cache",
+            "PAGE CACHE",
+            "PageCache",
+            "pagecache",
+            "页缓存"
+          ],
+          "hint": "先回忆 Kafka 高性能原因之一：读写借助操作系统的哪个缓存机制？英文是几个单词？",
+          "analysis": "**标准解题思路**\n1. Kafka 写消息先进操作系统缓存，由 OS 异步刷盘。\n2. 这个缓存就是 Page Cache（页缓存）。\n3. 填 Page Cache（比对忽略大小写与首尾空白，PageCache 也算对）。\n**为什么**：页缓存让'写'不阻塞等磁盘、'读'优先命中内存，读写共享同一份缓存。"
+        },
+        {
+          "task_id": "s06c06t04",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "ISR 是什么",
+          "question": "关于 Kafka 的 ISR（In-Sync Replicas），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "ISR 是与 Leader 保持同步的副本集合，Leader 故障时从 ISR 中选举新 Leader",
+              "correct": true,
+              "explain": "正确。ISR 里的副本数据最完整，选它当新 Leader 才能不丢消息。"
+            },
+            {
+              "text": "ISR 是集群中所有 Broker 的集合，与副本同步无关",
+              "correct": false,
+              "explain": "ISR 是按分区维护的副本集合，只包含同步跟得上的副本。"
+            },
+            {
+              "text": "ISR 是消费者组的同步状态，用于记录消费位置",
+              "correct": false,
+              "explain": "消费位置由 offset 记录，与 ISR 无关。"
+            },
+            {
+              "text": "ISR 是生产者端的消息发送队列",
+              "correct": false,
+              "explain": "生产者端是发送缓冲，ISR 是 Broker 侧的副本概念。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. ISR = In-Sync Replicas，与 Leader 保持同步的副本集合。\n2. 作用一：acks=all 时 Leader 等 ISR 全部写入才确认；作用二：Leader 故障时从 ISR 选新 Leader。\n3. A 正确。\n4. 排除 B（与同步相关）、C（消费位置是 offset）、D（生产者端没有 ISR）。\n5. 选 A。\n**面试延伸**：Follower 同步落后超过 replica.lag.time.max.ms 会被踢出 ISR，配合 min.insync.replicas 拒绝写入，保证高可用。",
+          "enterprise_tip": "生产排查：kafka-topics.sh --describe 输出的 Isr 列若长期小于副本数，说明有副本同步异常，需要检查网络与磁盘。"
+        },
+        {
+          "task_id": "s06c06t05",
+          "type": "order",
+          "difficulty": 3,
+          "title": "消息从生产到落盘的底层流程",
+          "question": "把'一条消息从生产到落盘的底层流程'按正确顺序排列。",
+          "steps": [
+            "生产者把消息放进本地发送缓冲，攒成一批",
+            "Sender 线程把一批消息发送到 Leader 所在 Broker",
+            "Leader 把消息追加写入分区日志文件末尾（先进 Page Cache，顺序写）",
+            "Follower 副本从 Leader 拉取消息完成同步（ISR 保持同步）",
+            "操作系统异步把 Page Cache 中的数据刷到物理磁盘"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "生产端：攒批 → 发送 → Leader 顺序写（页缓存）；存储端：副本同步（ISR）→ OS 异步刷盘。注意 acks=all 在副本同步完成后返回确认，而物理刷盘由操作系统稍后异步完成。",
+          "analysis": "**标准解题思路**\n1. 生产者先攒批：消息进 RecordAccumulator，凑够一批或到时间再发。\n2. Sender 线程把批次发到 Leader 所在 Broker。\n3. Leader 把消息追加写入日志文件末尾——顺序写，先进 Page Cache。\n4. Follower 从 Leader 拉取同步，ISR 保持同步，acks=all 时向生产者返回确认。\n5. 操作系统异步把页缓存刷到物理磁盘（fsync），落盘完成。\n**易错点**：ack 确认在副本同步之后、物理刷盘之前——Kafka 的持久化靠副本，不靠每次立即刷盘。"
+        },
+        {
+          "task_id": "s06c06t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "pull 模式与 push 模式",
+          "question": "为什么 Kafka 采用消费者主动 **pull（拉取）** 而不是 Broker **push（推送）** 模式？",
+          "options": [
+            {
+              "text": "pull 让消费者自己控制拉取节奏，慢消费者不会被压垮，也方便做流控",
+              "correct": true,
+              "explain": "正确。消费者按自身能力拉取，天然支持削峰填谷。"
+            },
+            {
+              "text": "push 模式消息一定会丢失，pull 模式一定不会丢",
+              "correct": false,
+              "explain": "丢不丢由 acks、副本、offset 提交决定，与拉/推模式无关。"
+            },
+            {
+              "text": "push 模式技术上无法实现",
+              "correct": false,
+              "explain": "push 可以实现（如部分系统推送），只是难以处理消费能力差异。"
+            },
+            {
+              "text": "pull 模式下消费者不需要记录 offset",
+              "correct": false,
+              "explain": "pull 模式同样要提交 offset 记录消费位置。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. push 的问题：Broker 不知道每个消费者的处理能力，推快了慢消费者被压垮，推慢了浪费。\n2. pull 的好处：消费者自己决定拉多少、多快，慢消费者可以慢慢拉。\n3. A 正确。\n4. 排除 B（可靠性由其他机制保证）、C（push 可实现）、D（pull 也要 offset）。\n5. 选 A。\n**面试延伸**：pull 的代价是空轮询，Kafka 用长轮询（fetch.max.wait.ms）挂起等待新消息。",
+          "enterprise_tip": "实时链路中消费者处理变慢时，pull 模式会自动减速——消息在 Kafka 里积压而不丢失，这正是 MQ 削峰能力的底层来源。"
+        },
+        {
+          "task_id": "s06c06t07",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：segment 索引类型",
+          "question": "Kafka 每个日志分段（segment）配一个索引文件，它不是为每条消息都建索引，而是每隔一段距离记录一条 (offset, 物理位置)，这种索引叫 ____ 索引（填两个汉字，或英文 sparse index）。",
+          "answer": [
+            "稀疏索引",
+            "sparse index",
+            "Sparse Index",
+            "SPARSE INDEX",
+            "sparseindex",
+            "稀疏"
+          ],
+          "hint": "先想：索引不是每条都记，而是隔一段记一条——这种「条目少、省空间」的索引叫什么？",
+          "analysis": "**标准解题思路**\n1. 若每条消息都建索引，索引文件比数据还大，浪费空间。\n2. Kafka 每隔一段距离（如每 4KB）记一条索引，这就是稀疏索引。\n3. 查找流程：二分定位 segment，再二分查稀疏索引找到最近位置，最后顺序扫描到目标。\n4. 填 稀疏索引（sparse index 也算对）。\n**为什么**：稀疏索引用少量空间换查找速度，配合顺序扫描，既省空间又快。"
+        },
+        {
+          "task_id": "s06c06t08",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "压缩类型的选择",
+          "question": "生产环境为 Kafka 消息选择压缩类型（LZ4 / ZSTD / GZIP），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "追求低 CPU 开销与高吞吐选 LZ4（速度极快、压缩比一般）；追求更高压缩比且 CPU 有余量选 ZSTD；GZIP 压缩比高但 CPU 开销大，适合带宽/存储受限的冷链路",
+              "correct": true,
+              "explain": "正确。压缩选型本质是『压缩比 vs CPU 开销』的权衡：LZ4 快、ZSTD 均衡、GZIP 省空间费 CPU。"
+            },
+            {
+              "text": "ZSTD 一定比 LZ4 快",
+              "correct": false,
+              "explain": "ZSTD 压缩比高于 LZ4，但压缩/解压速度不如 LZ4，各有取舍。"
+            },
+            {
+              "text": "压缩只发生在消费者端，生产者发送的都是明文",
+              "correct": false,
+              "explain": "压缩发生在生产者端（compression.type），消息以压缩字节传输，消费者端解压。"
+            },
+            {
+              "text": "开启压缩后消费者无法读取消息",
+              "correct": false,
+              "explain": "消费者会自动按消息头识别压缩算法解压，压缩对业务透明。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 压缩发生位置：生产者端 compression.type 配置，消息压缩后传输与落盘，**消费者端解压**（按消息头识别算法，对业务透明）。\n2. 三种常用算法的取舍（核心是『压缩比 vs CPU 开销』）：\n   - **LZ4**：压缩/解压**速度极快**、CPU 开销低，压缩比一般——追求吞吐与低延迟首选；\n   - **ZSTD**：压缩比高且速度也不错，**综合均衡**，是目前推荐的主流选择；\n   - **GZIP**：压缩比最高（最省空间/带宽）但 CPU 开销大、速度慢——带宽/存储受限且 CPU 有余量的冷链路用。\n3. 收益：网络传输量、磁盘占用大幅下降；代价是生产/消费端的 CPU 开销。\n4. 排除：ZSTD 不必然快于 LZ4、压缩在生产者端、消费者自动解压。\n5. 选 A。\n**延伸**：压缩对批次（batch）效果更好——批量越大压缩率越高，所以压缩常与批量发送搭配。",
+          "enterprise_tip": "生产默认建议：日志链路用 LZ4（快）或 ZSTD（均衡）；带宽紧张/长期归档主题用 GZIP；压测时对比『吞吐 + CPU 占用 + 压缩率』三个指标再定稿，别只看压缩率。"
+        },
+        {
+          "task_id": "s06c06t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "JMX 监控 Kafka",
+          "question": "关于 Kafka 的 **JMX 监控**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Kafka broker 通过 JMX 暴露运行指标（如 BytesInPerSec、BytesOutPerSec、UnderReplicatedPartitions 等），监控系统采集后用于告警与容量规划",
+              "correct": true,
+              "explain": "正确。JMX 是 Kafka 指标的标准出口，配合采集器做监控与告警。"
+            },
+            {
+              "text": "JMX 只能监控生产者，不能监控 broker",
+              "correct": false,
+              "explain": "JMX 主要监控 broker（吞吐、副本、分区指标），也监控客户端进程。"
+            },
+            {
+              "text": "开启 JMX 会显著降低 Kafka 的吞吐",
+              "correct": false,
+              "explain": "JMX 指标采集开销极小，不会显著影响性能。"
+            },
+            {
+              "text": "Kafka 自带完善的告警系统，无需额外监控",
+              "correct": false,
+              "explain": "Kafka 只暴露指标（JMX），告警需要对接 Prometheus/Ganglia 等监控系统。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. JMX 的作用：Kafka broker 内置了大量**指标（MBean）**，通过 JMX（Java 管理扩展，默认端口可配，如 9999）暴露。\n2. 核心指标：\n   - **吞吐类**：BytesInPerSec / BytesOutPerSec（每秒进出字节）、MessagesInPerSec；\n   - **健康类**：UnderReplicatedPartitions（副本不同步的分区数，>0 说明有副本异常）、OfflinePartitions（离线分区）、ActiveControllerCount；\n   - **请求类**：RequestHandlerAvgIdlePercent（请求处理空闲率，过低说明 broker 忙）。\n3. 采集方式：Prometheus + JMX Exporter / Ganglia / 自研采集器，接入告警与 Grafana 看板。\n4. 排除：不是只监控生产者、开销极小、Kafka 不内置告警。\n5. 选 A。\n**延伸**：消费者端也能通过 JMX 暴露 lag 等指标（配合 kafka-consumer-groups 查看）。",
+          "enterprise_tip": "运维必盯的三个 JMX 指标：UnderReplicatedPartitions（副本不同步）、OfflinePartitions（分区离线）、BytesInPerSec（容量规划）；接入 Prometheus + Alertmanager 是标配。"
+        },
+        {
+          "task_id": "s06c06t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Kafka Streams 简述",
+          "question": "关于 **Kafka Streams**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "是 Kafka 官方提供的流处理库：无需独立集群，直接内嵌在 Java 应用中，以 Kafka 为存储做有状态流处理（窗口聚合、流表 join 等）",
+              "correct": true,
+              "explain": "正确。Kafka Streams 是库不是集群，应用自己就是计算节点。"
+            },
+            {
+              "text": "使用 Kafka Streams 必须额外部署一套 Flink 集群",
+              "correct": false,
+              "explain": "Kafka Streams 无需独立集群，普通 Java 应用引入依赖即可运行。"
+            },
+            {
+              "text": "Kafka Streams 只能处理静态文件，不能处理实时流",
+              "correct": false,
+              "explain": "它专为实时流处理设计，处理的是 Kafka 主题中的流数据。"
+            },
+            {
+              "text": "Kafka Streams 是 Kafka 的替代品，可以完全不用 Kafka",
+              "correct": false,
+              "explain": "Kafka Streams 依赖 Kafka 存储与传输，是 Kafka 生态的一部分。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Kafka Streams 的定位：Kafka 官方 **Java 流处理库**（不是独立集群），普通 Java 应用引入依赖、以 Kafka 为数据源与存储。\n2. 能力：无状态操作（map/filter）+ **有状态操作**（窗口聚合、流表 join、状态存储 changelog 主题）；把中间状态也存到 Kafka 主题，天然支持容错。\n3. 优势：无需独立集群（省运维）、与 Kafka 无缝集成、部署即应用；适合中轻量级流处理场景。\n4. 对比：Flink 是独立的流计算引擎（功能更强、生态更大），适合重场景；Kafka Streams 是轻量库。\n5. 排除：不需要 Flink 集群、处理的是实时流、不是 Kafka 替代品。\n6. 选 A。\n**延伸**：面试题『Kafka Streams 和 Flink 区别』——Kafka Streams 是库（无集群、轻量）、Flink 是引擎（独立集群、功能全）；按场景选。",
+          "enterprise_tip": "中轻量级实时处理（如实时统计、规则过滤）直接 Kafka Streams 内嵌搞定，省一套 Flink 集群成本；重量级/复杂窗口与多源 join 再上 Flink——面试答『实时方案怎么选』可提这个分层。"
+        }
+      ]
+    }
+  ]
+}

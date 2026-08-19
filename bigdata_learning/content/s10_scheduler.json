@@ -1,0 +1,2110 @@
+{
+  "stage_id": "s10_scheduler",
+  "title": "阶段 10：调度工具使用流程",
+  "subtitle": "让数据任务按依赖、按时间自动跑起来",
+  "emoji": "⏱️",
+  "estimated_days": 10,
+  "learning_goal": "理解调度系统解决的核心问题（定时、依赖、重试、监控），掌握 crontab 表达式与 Azkaban、DolphinScheduler、Airflow 三大调度工具的核心概念与完整使用流程。",
+  "chapters": [
+    {
+      "chapter_id": "s10c01",
+      "title": "10.1 调度系统概述与 crontab",
+      "goal": "理解为什么要调度，掌握 cron 五段表达式与任务接入调度的一般流程",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "在大数据平台里，几乎没有任何任务是可以「手动跑一次就完事」的：\\n\\n- **定时**：报表每天 8 点前要出，没人愿意半夜爬起来点按钮；\\n- **依赖**：下游任务必须等上游跑完才能跑（先抽数、再清洗、再汇总）；\\n- **重跑/补数**：任务失败要自动重试，历史缺数要能一键补跑；\\n- **监控**：任务挂了要第一时间告警到人。\\n\\n这四件事就是**调度系统**存在的全部意义。从最简单的 Linux **crontab**，到企业级的 Azkaban、DolphinScheduler、Airflow，核心都是解决这四件事，区别只是「能不能管依赖、能不能可视化、能不能分布式」。"
+        },
+        {
+          "type": "text",
+          "content": "**crontab** 是 Linux 自带的定时任务工具，语法极简：一行 = 一个任务。\\n格式：`分 时 日 月 周 命令`\\n\\n- 前五段时间用空格分隔，`*` 表示任意值；\\n- 常用命令：`crontab -e` 编辑、`crontab -l` 查看、`crontab -r` 删除；\\n- 服务名 `crond`，脚本输出默认以邮件形式发给用户。\\n\\ncrontab 只解决「定时」，**不解决依赖和失败重试**，所以企业里一般只用它做机器级杂活（日志清理、数据备份），复杂流程全部交给调度平台。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "cron 表达式五段：分 时 日 月 周\n* * * * * 命令\n│ │ │ │ │\n│ │ │ │ └── 星期（0-7，0 和 7 都表示周日）\n│ │ │ └──── 月份（1-12）\n│ │ └────── 日期（1-31）\n│ └──────── 小时（0-23）\n└────────── 分钟（0-59）\n\n常用示例：\n0 2 * * *         每天凌晨 2 点\n*/30 * * * *      每 30 分钟\n0 9 * * 1-5       周一至周五 9:00\n0 0 1 * *         每月 1 号 0:00\n30 23 * * 6       每周六 23:30",
+          "caption": "cron 五段式格式与常用示例"
+        },
+        {
+          "type": "code",
+          "lang": "bash",
+          "content": "# 编辑当前用户的 crontab\ncrontab -e\n\n# 示例：每天凌晨 2 点执行备份脚本，日志重定向到文件\n0 2 * * * /home/hadoop/bin/backup.sh >> /home/hadoop/logs/backup.log 2>&1\n\n# 查看已配置的任务\ncrontab -l\n\n# 重启 crond 服务（CentOS）\nsystemctl restart crond",
+          "caption": "crontab 常用操作"
+        },
+        {
+          "type": "warning",
+          "content": "**cron 三大坑**：① 脚本里的环境变量和 PATH 可能与登录 shell 不同，命令要写绝对路径；② cron 用的是系统时区，跨时区服务器要格外小心；③ 脚本输出会以邮件形式发给 root，最好重定向到日志文件，否则邮箱会被刷爆。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：为什么企业不直接全用 crontab？因为它**没有依赖管理**——B 任务依赖 A 任务，crontab 只能靠猜时间（A 跑 20 分钟，就定 25 分钟后再跑 B），一旦 A 延迟，B 就拿到脏数据。企业标准做法：**所有数据任务进调度平台**（DS/Azkaban/Airflow），平台管依赖、重试、告警、补数；crontab 只做服务器级杂活。面试高频题：**「crontab 和企业调度平台的区别？」**——答：定时 vs 定时 + 依赖 + 重试 + 监控 + 补数。"
+        }
+      ],
+      "hands_on": "1. 在命令行执行 `crontab -e`，添加一行：`* * * * * date >> ~/cron_test.log`（每分钟把当前时间写入文件）。\\n2. 等 2 分钟后 `cat ~/cron_test.log`，验证时间在增长。\\n3. 用 `crontab -l` 查看任务，最后用 `crontab -r` 删除（或注释掉）该任务。",
+      "tasks": [
+        {
+          "task_id": "s10c01t01",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：每天凌晨 2 点",
+          "question": "在 crontab 中，「**每天凌晨 2 点**执行」的 cron 表达式是 ______（五段式：分 时 日 月 周）。",
+          "answer": [
+            "0 2 * * *",
+            "00 2 * * *",
+            "0 02 * * *"
+          ],
+          "hint": "回忆 cron 五段式的顺序（分 时 日 月 周）：先想『凌晨 2 点』对应哪两位，再想『每天』在日/月/周位填什么。",
+          "analysis": "**标准解题思路**\\n1. 五段式：分 时 日 月 周。\\n2. 凌晨 2 点 → 分位 0、时位 2。\\n3. 每天 → 日、月、周都填 *。\\n4. 得到 `0 2 * * *`。\\n**易错点**：分位必须写 0 而不是 *，否则变成「2 点这一小时内每分钟都执行」；`00 2 * * *`、`0 02 * * *` 也是可接受的等价写法。",
+          "enterprise_tip": "cron 表达式是面试手写题常客，务必把五段顺序背熟。企业调度平台（DS/Airflow）里也支持 cron 表达式配置，会写 crontab 就等于会配这些平台的定时。"
+        },
+        {
+          "task_id": "s10c01t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "cron 表达式的含义",
+          "question": "cron 表达式 `30 9 * * 1` 表示在什么时间执行任务？",
+          "options": [
+            {
+              "text": "每周一 9:30",
+              "correct": true,
+              "explain": "正确。分=30、时=9、日=*、月=*、周=1（周一），即每周一 9:30。"
+            },
+            {
+              "text": "每月 1 号 9:30",
+              "correct": false,
+              "explain": "每月 1 号是日位填 1，即 `30 9 1 * *`；这里的 1 在周位，不是日位。"
+            },
+            {
+              "text": "每天 9:30 的第 30 秒",
+              "correct": false,
+              "explain": "cron 五段式没有秒字段，第一段是分钟不是秒。"
+            },
+            {
+              "text": "每年 1 月 30 日 9 点",
+              "correct": false,
+              "explain": "日位是 30 才是 30 号；这里日位是 *，30 在分位。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 逐位解析：分=30、时=9、日=*、月=*、周=1。\\n2. 日、月为 * → 每天都满足；周=1 → 只限周一（0 和 7 是周日，1 是周一）。\\n3. 每天 + 仅周一 → 每周一 9:30。\\n4. 选 A。\\n**易错点**：周位的 1 是周一，不是 1 号；每月 1 号的写法是 `30 9 1 * *`。",
+          "enterprise_tip": "记住口诀：**第五段是星期**。企业里「工作日早上 9 点跑」写成 `0 9 * * 1-5`，周末不跑，这是最常用的调度表达式之一。"
+        },
+        {
+          "task_id": "s10c01t03",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排列：把任务接入调度的流程",
+          "question": "你写好了一个数据处理脚本，现在要把它接入调度系统让它每天自动运行。请按正确顺序排列操作步骤。",
+          "steps": [
+            "确认任务命令/脚本可以独立运行",
+            "在调度平台新建任务并填写执行命令",
+            "配置执行时间（cron 表达式）",
+            "配置依赖与失败重试、告警",
+            "手动测试运行一次验证结果",
+            "上线并持续监控运行情况"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "order_explain": "先把脚本本身跑通，再在平台上登记任务、配时间，接着配置依赖和重试告警，然后手动试跑验证，最后上线监控——顺序错了容易出现「上线了才发现脚本跑不通」的尴尬。",
+          "analysis": "**标准解题思路**\\n1. 前提：脚本必须能独立运行，否则调度无意义。\\n2. 平台建任务、填命令。\\n3. 配执行时间（cron 表达式）。\\n4. 配依赖、失败重试、告警（企业必配）。\\n5. 手动试跑验证一次。\\n6. 上线 + 监控。\\n**易错点**：先配置时间就试跑，或者跳过试跑直接上线，都是常见失误。",
+          "enterprise_tip": "企业上线任务的 checklist 基本就是这 6 步。面试问「怎么保证任务稳定运行」，答「先试跑、再上线、配重试告警、持续监控」就是满分答案。"
+        },
+        {
+          "task_id": "s10c01t04",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：每周一早上 8 点",
+          "question": "在 crontab 中，「每周一早上 8 点执行」的 cron 表达式是 ______（五段式：分 时 日 月 周）。",
+          "answer": [
+            "0 8 * * 1",
+            "00 8 * * 1",
+            "0 08 * * 1"
+          ],
+          "hint": "回忆 cron 五段式：『早上 8 点』写在哪两位？『每周一』的关键在周位，先想 cron 里周一用哪个数字表示。",
+          "analysis": "**标准解题思路**\n1. 五段式：分 时 日 月 周。\n2. 早上 8 点 → 分位 0、时位 8。\n3. 每周一 → 周位填 1（cron 中 0 和 7 都表示周日，1 表示周一），日、月填 *。\n4. 得到 `0 8 * * 1`。\n**易错点**：分位必须写 0 而不是 *，否则变成 8 点这一小时内每分钟都执行；周位 1 是周一不是 1 号，`0 8 1 * *` 才是每月 1 号早上 8 点。",
+          "enterprise_tip": "「工作日早上 9 点」是 `0 9 * * 1-5`，「每周一早上 8 点」是 `0 8 * * 1`——这两种写法是调度面试手写题最高频的两种，务必背熟。"
+        },
+        {
+          "task_id": "s10c01t05",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "任务依赖缺失时的表现",
+          "question": "调度平台上，任务 B 依赖任务 A 的数据，但配置时**漏掉了依赖关系**。到点后会发生什么？",
+          "options": [
+            {
+              "text": "B 会按自己的调度时间直接开始执行，可能读到 A 未跑完产生的脏数据",
+              "correct": true,
+              "explain": "正确。没有依赖约束时调度器只按时间触发，B 不等待 A，很容易拿到不完整数据。"
+            },
+            {
+              "text": "B 会自动等待 A 执行完成后再执行",
+              "correct": false,
+              "explain": "只有显式配置了依赖，调度平台才会让 B 等 A；漏配依赖时平台不会替你等待。"
+            },
+            {
+              "text": "平台会检测到漏配依赖并自动报错",
+              "correct": false,
+              "explain": "调度平台不会主动检查依赖是否合理，漏配就是漏配，只会静默按时间跑。"
+            },
+            {
+              "text": "B 会直接跳过本次调度，等明天再跑",
+              "correct": false,
+              "explain": "没有依赖约束时 B 到点就会触发，不会自动跳过。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 调度平台的两大触发机制：定时（时间）与依赖（上游完成）。\n2. 漏配依赖 → B 只剩定时约束，到点即触发。\n3. 若 A 因数据延迟还没跑完，B 读到的就是 A 的中间态/缺数据 → 脏数据。\n4. 这正是企业要求「所有任务都进调度平台并显式配置依赖」的原因。\n**易错点**：不要把「漏配依赖」理解成「平台会自动兜底」，平台默认只认你显式声明的关系。",
+          "enterprise_tip": "面试追问常考：「依赖配置错了会怎样？」答：漏配依赖下游提前跑读到脏数据，多配依赖可能死锁/拖慢链路。数据事故排查清单里『依赖对不对』永远排在前三。"
+        },
+        {
+          "task_id": "s10c01t06",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：每天凌晨 3 点",
+          "question": "在 crontab 中，「**每天凌晨 3 点**执行」的 cron 表达式是 ______（五段式：分 时 日 月 周）。",
+          "answer": [
+            "0 3 * * *",
+            "00 3 * * *",
+            "0 03 * * *"
+          ],
+          "hint": "这道题和前面『每天凌晨 2 点』是同一类：先回忆五段式顺序，再想『凌晨 3 点』和『每天』分别落在哪几位。",
+          "analysis": "**标准解题思路**\n1. 五段式：分 时 日 月 周。\n2. 凌晨 3 点 → 分位 0、时位 3。\n3. 每天 → 日、月、周都填 *。\n4. 得到 `0 3 * * *`。\n**易错点**：分位必须写 0 而不是 *，否则变成「3 点这一小时内每分钟都执行」；`00 3 * * *`、`0 03 * * *` 是等价写法。",
+          "enterprise_tip": "企业数据任务常定在凌晨低峰跑（同步、加工都在凌晨），`0 3 * * *` 这类写法必须脱口而出；能顺便说出「分位写 0 防止小时级重复执行」更显功底。"
+        },
+        {
+          "task_id": "s10c01t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "crontab 中 PATH 环境变量不生效",
+          "question": "你在 crontab 里配了一条任务 `* * * * * python /data/run.py`，到点执行失败，日志显示 `python: command not found`。最可能的原因是？",
+          "options": [
+            {
+              "text": "cron 的执行环境与登录 shell 不同，PATH 里没有 python 的路径，应写绝对路径",
+              "correct": true,
+              "explain": "正确。cron 环境 PATH 很精简，不含登录 shell 的环境变量，命令必须写绝对路径（如 /usr/bin/python）。"
+            },
+            {
+              "text": "crontab 不支持运行 python 脚本",
+              "correct": false,
+              "explain": "crontab 能执行任意命令，python 脚本本身没问题，报错是找不到命令而非不支持。"
+            },
+            {
+              "text": "任务执行时间写错了",
+              "correct": false,
+              "explain": "任务到点已经执行了（有日志），说明时间配置生效，问题出在命令本身。"
+            },
+            {
+              "text": "python 脚本内部有语法错误",
+              "correct": false,
+              "explain": "语法错误会报 SyntaxError 而不是 command not found；报错在命令解析阶段，脚本根本没被启动。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. `command not found` 的本质：系统找不到名为 python 的可执行文件。\n2. cron 由 crond 守护进程拉起任务，环境变量与登录 shell 不同，PATH 中通常只有 /usr/bin:/bin 等基础路径。\n3. 你在登录 shell 里配的 PATH（如 ~/.bashrc 里加的）在 cron 里不生效。\n4. 解决：写绝对路径 `/usr/bin/python /data/run.py`，或脚本开头 `#!/usr/bin/python` 并配好执行权限。\n5. 选 A。\n**易错点**：不要一上来怀疑脚本逻辑，先看「命令能不能找到」。",
+          "enterprise_tip": "cron 三大坑之首就是 PATH。企业里 cron 任务的标准写法：命令全写绝对路径 + 输出重定向到日志文件（`>> /data/logs/run.log 2>&1`），否则任务悄悄失败连日志都找不到。"
+        },
+        {
+          "task_id": "s10c01t08",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排列：新任务从开发到上线的流程",
+          "question": "你写了一个新的数据处理任务，要把它接入调度系统正式运行。请按「**开发→测试→上线→监控**」的正确顺序排列操作步骤。",
+          "steps": [
+            "本地开发并调试数据处理脚本（开发）",
+            "在测试环境手动试跑，验证输出数据正确（测试）",
+            "在调度平台发布上线，并配置调度时间、依赖与告警（上线）",
+            "持续监控运行状态，处理告警与异常（监控）"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "order_explain": "先开发调试把脚本本身跑通，再测试验证数据正确，然后才发布上线并配好调度、依赖与告警，最后进入长期监控阶段——跳过测试直接上线是事故高发原因。",
+          "analysis": "**标准解题思路**\n1. 开发：本地编写并调试脚本，确认命令可独立运行。\n2. 测试：在测试环境手动试跑，核对输出数据，这一步最容易发现口径问题。\n3. 上线：在调度平台发布，同时配置调度时间、上游依赖、失败重试与告警。\n4. 监控：持续盯实例运行状态，告警及时处理。\n**易错点**：先上线后测试、或上线后不配置告警不监控，都是企业事故的常见源头。",
+          "enterprise_tip": "这就是企业任务上线 checklist 的简化版：开发→测试→上线→监控。面试被问「怎么保证任务稳定运行」，按这四个阶段答就是完整答案。"
+        },
+        {
+          "task_id": "s10c01t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "cron 表达式的匹配原理",
+          "question": "cron 表达式 `30 9 * * 1` 为什么只在「周一 9:30」触发，而不是每个 9:30 都触发？从匹配原理上看，正确的是？",
+          "options": [
+            {
+              "text": "调度器把时间点与五段字段逐段匹配：分钟、小时、日、月、周五组规则取交集，周位约束为 1（周一），所以只有周一 9:30 同时满足",
+              "correct": true,
+              "explain": "正确。cron 匹配原理就是『逐字段规则求交』：一个时间点必须同时命中五段的取值集合，周位=1 把触发范围收窄到周一。"
+            },
+            {
+              "text": "调度器只看最后一个字段，其他字段自动忽略",
+              "correct": false,
+              "explain": "五段字段是 AND 关系，任何一个字段不满足都不会触发，不存在只看某一段。"
+            },
+            {
+              "text": "cron 会按周位自动算出每月第几个周一，只触发当月第一个周一",
+              "correct": false,
+              "explain": "cron 的周位 1 表示『星期=周一』，与『每月第几个周一』无关，那是更复杂的日历表达式才有的能力。"
+            },
+            {
+              "text": "日位为 * 表示每天都触发，所以周位对结果没有影响",
+              "correct": false,
+              "explain": "日位 * 只是说『不限日期』，周位仍然参与匹配，两者是交集关系，周位照样生效。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 记住 cron 的判定模型：把『当前时间点』拆成 分/时/日/月/周 五个值。\n2. 五段表达式分别定义一个取值集合（`30`=仅 30 分、`9`=仅 9 时、`*`=任意日、`*`=任意月、`1`=仅周一）。\n3. 匹配 = 五组规则取**交集**：只有同时满足五段的时间点才触发。\n4. `30 9 * * 1`：每天 9:30 的时间点里，再筛掉非周一，只剩『每周一 9:30』。\n5. 选 A。\n**易错点**：把 cron 理解成『或』关系或只认某一段，是原理题最常见的错法；五段是 AND（求交），缺一段不触发。",
+          "enterprise_tip": "面试加分点：能说出『cron 本质是五组规则对时间点的求交匹配』，说明你理解的是机制而不是背写法；企业里排查『任务为什么没跑』时，第一步就是逐段核对表达式与期望时间是否真的相交。"
+        },
+        {
+          "task_id": "s10c01t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "cron 表达式的多值写法",
+          "question": "需要在「每周一、周三、周五早上 9 点」执行任务，正确的 cron 表达式是？",
+          "options": [
+            {
+              "text": "0 9 * * 1,3,5",
+              "correct": true,
+              "explain": "正确。周位用逗号枚举多值：1=周一、3=周三、5=周五，即每周一三五 9:00。"
+            },
+            {
+              "text": "0 9 * * 1-5",
+              "correct": false,
+              "explain": "1-5 是连续范围，表示周一至周五每天 9:00，与「周一三五」不同。"
+            },
+            {
+              "text": "0 9 * * 135",
+              "correct": false,
+              "explain": "cron 不支持把多个值连写成一个数字，必须用逗号分隔。"
+            },
+            {
+              "text": "0 9 * * 1 3 5",
+              "correct": false,
+              "explain": "cron 只有五段，多写段位会导致表达式非法或行为异常。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. cron 高级语法四件套：`*` 任意值、`1-5` 范围、`1,3,5` 多值（逗号枚举）、`*/15` 步长。\n2. 「周一、周三、周五」是非连续多值 → 用逗号枚举写 1,3,5。\n3. 因此选 A；B（1-5 是每天）、C（连写非法）、D（多段非法）都不对。\n**易错点**：1-5 是「周一到周五每天」的连续范围，逗号枚举是「挑特定的几天」，两者含义完全不同。",
+          "enterprise_tip": "面试手写题高频对比：`0 9 * * 1-5`（工作日每天）vs `0 9 * * 1,3,5`（周一三五）；能区分「范围 vs 多值」说明 cron 语法过关。"
+        },
+        {
+          "task_id": "s10c01t11",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "cron 步长语法",
+          "question": "cron 表达式 `*/15 * * * *` 表示什么？",
+          "options": [
+            {
+              "text": "每 15 分钟执行一次",
+              "correct": true,
+              "explain": "正确。`*/15` 表示步长为 15，分钟位在 0/15/30/45 分触发，即每 15 分钟一次。"
+            },
+            {
+              "text": "每小时的第 15 分钟执行",
+              "correct": false,
+              "explain": "每小时第 15 分钟是 `15 * * * *`，步长 `*/15` 是每 15 分钟一次。"
+            },
+            {
+              "text": "每天 15 点执行",
+              "correct": false,
+              "explain": "每天 15 点是 `0 15 * * *`，与步长语法无关。"
+            },
+            {
+              "text": "每 15 天执行一次",
+              "correct": false,
+              "explain": "`*/15` 写在分钟位就是分钟粒度（每 15 分钟），与天数无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 步长语法：`*/n` 表示「从该段的最小值开始，每隔 n 个单位触发一次」。\n2. `*/15` 在分钟位 → 0、15、30、45 分触发，即每 15 分钟一次。\n3. 因此选 A；B（`15 * * * *` 才是每小时第 15 分钟）、C（15 点）、D（按天）都错。\n**易错点**：`*/15` 与固定值 `15` 完全不同——固定值只在某个特定分钟触发，步长是周期性的。",
+          "enterprise_tip": "企业里「每 5 分钟拉一次增量数据」就是 `*/5 * * * *`；步长语法是 cron 高级用法里最常用的一个，面试手写必考。"
+        },
+        {
+          "task_id": "s10c01t12",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "调度时区的坑",
+          "question": "数仓集群部署在 UTC 时区，业务在北京时间（UTC+8）。如果任务按 cron `0 2 * * *` 在集群时区凌晨 2 点触发，业务侧看到的是？",
+          "options": [
+            {
+              "text": "北京时间上午 10 点触发（UTC 2 点 = 北京 10 点），如果期望北京时间凌晨 2 点跑，就会晚 8 小时",
+              "correct": true,
+              "explain": "正确。cron 按服务器本地时区触发，UTC 凌晨 2 点对应北京 10 点；跨时区必须显式统一时区。"
+            },
+            {
+              "text": "北京时间凌晨 2 点触发",
+              "correct": false,
+              "explain": "只有集群时区也是北京时间才会这样；UTC 集群按 UTC 触发，存在 8 小时偏移。"
+            },
+            {
+              "text": "不会触发，cron 不支持时区",
+              "correct": false,
+              "explain": "cron 会触发，只是按系统时区触发；问题在于时区偏移导致触发时刻不符合预期。"
+            },
+            {
+              "text": "触发时间会自动换算成北京时间",
+              "correct": false,
+              "explain": "普通 cron 不会自动换算，需要调度平台显式配置时区（如 Asia/Shanghai）才会统一。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 时区规则：cron 按操作系统/调度器的本地时区触发，不感知业务时区。\n2. 换算：UTC 0 点 = 北京 8 点，UTC 2 点 = 北京 10 点，相差 8 小时。\n3. 问题：业务期望「北京时间凌晨 2 点」跑，UTC 集群的 `0 2 * * *` 实际在北京 10 点执行，报表延迟且可能读到跨天数据。\n4. 解决：调度平台统一配置时区（DS/Airflow 都支持时区设置，如 Asia/Shanghai），cron 按业务时区解释。\n5. 因此选 A。\n**为什么**：跨时区是分布式集群的经典坑——「凌晨的任务为什么白天才跑」十有八九是时区问题。",
+          "enterprise_tip": "面试题「凌晨的任务白天才跑怎么回事」：先查集群与调度器时区（date 命令/平台时区配置），UTC vs 北京差 8 小时；企业标准：调度平台统一 Asia/Shanghai，cron 按业务时区解释。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "crontab 和企业调度平台的区别是什么？",
+          "a": "crontab 只解决『定时』，没有依赖管理、失败重试、监控告警、补数能力；企业调度平台（DolphinScheduler/Airflow/Azkaban）是『定时 + 依赖 + 重试 + 监控 + 补数』，因此企业数据任务都进平台，crontab 只做服务器级杂活。"
+        },
+        {
+          "q": "cron 表达式五段分别是什么？",
+          "a": "分 时 日 月 周。例如 0 2 * * * 表示每天凌晨 2 点；周位 0 和 7 都表示周日，1 表示周一。"
+        },
+        {
+          "q": "为什么不能用 crontab 管数据任务的依赖？",
+          "a": "crontab 没有依赖概念，只能靠『猜时间』错峰（如 A 跑 20 分钟就把 B 定在 25 分钟后），一旦上游延迟，下游就会读到脏数据；调度平台则按依赖关系严格保证上游成功后才启动下游。"
+        },
+        {
+          "q": "cron 任务脚本里为什么要写绝对路径？",
+          "a": "cron 运行环境与登录 shell 不同，PATH 环境变量可能缺失，直接写相对命令（如 python）可能找不到可执行文件，所以要写 /usr/bin/python 这样的绝对路径，并把输出重定向到日志文件。"
+        },
+        {
+          "q": "每天凌晨 2 点和每周一 8 点的 cron 表达式分别怎么写？",
+          "a": "每天凌晨 2 点：0 2 * * *；每周一 8 点：0 8 * * 1。口诀：分位时位写具体值，日/月用 *，周位用 0-7。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "crontab",
+          "desc": "Linux 自带定时任务工具，通过 crontab -e 编辑、crontab -l 查看，只解决定时触发。"
+        },
+        {
+          "term": "cron 表达式",
+          "desc": "五段式时间表达式（分 时 日 月 周），用 * 表示任意值，是调度平台通用的定时写法。"
+        },
+        {
+          "term": "依赖管理",
+          "desc": "调度系统按声明关系控制任务先后执行（上游成功才跑下游），是企业调度平台相对 crontab 的核心能力。"
+        },
+        {
+          "term": "脏数据",
+          "desc": "上游未跑完或数据缺失时下游拿到的残缺/错误数据，通常因依赖配置缺失导致。"
+        },
+        {
+          "term": "补数",
+          "desc": "对历史某几天缺失或算错的数据手动触发重跑，调度平台的一键能力。"
+        },
+        {
+          "term": "重试与告警",
+          "desc": "任务失败时按次数与间隔自动重跑、超时未恢复时通知负责人的机制。"
+        },
+        {
+          "term": "crond",
+          "desc": "Linux 上负责执行 crontab 任务的守护进程，CentOS 用 systemctl restart crond 管理。"
+        }
+      ],
+      "kps": [
+        "调度系统要解决的核心问题：定时、依赖、重试补数、监控",
+        "cron 五段式表达式（分 时 日 月 周）",
+        "常用 cron 表达式写法（每天 2 点、每周一 8 点、每天 3 点）",
+        "crontab 的环境变量坑（PATH 不生效、时区、输出邮件）",
+        "任务依赖管理：漏配依赖的后果（脏数据）",
+        "新任务接入调度的完整流程（开发→测试→上线→监控）",
+        "cron 表达式匹配原理（逐字段规则求交，五段同时满足才触发）"
+      ]
+    },
+    {
+      "chapter_id": "s10c02",
+      "title": "10.2 Azkaban",
+      "goal": "掌握 Azkaban 的定位、Web/Executor 架构与基于 .job 文件的工作流开发流程",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**Azkaban** 是 LinkedIn 开源的批处理工作流调度器，用 **Web 界面**管理项目和任务，通过 **.job 文件**定义任务与依赖，适合中小规模（几百个任务）的团队快速上手。\\n架构分两部分：\\n- **Web Server**：提供界面，管理项目、上传、调度、查看日志；\\n- **Executor Server**：真正执行任务（可多台），接收 Web Server 分发的执行请求。\\n\\n核心概念是 **Flow（工作流）**：由多个 job 按依赖关系组成的有向无环图（DAG）。"
+        },
+        {
+          "type": "text",
+          "content": "Azkaban 使用流程：**创建项目 → 编写 .job 文件 → 打成 zip 上传 → 配置调度（schedule）→ 执行并看日志**。\\n.job 文件本质是 key=value 的属性文件：\\n- `type=command` 表示执行 shell 命令；\\n- `command=...` 写具体命令；\\n- `dependencies=job1,job2` 声明依赖（job1、job2 跑完它才跑）。\\n多个 job 文件打成一个 zip 上传，Azkaban 会自动解析出依赖图。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "# extract_data.job\n type=command\n command=sh /data/scripts/extract.sh\n\n# transform_data.job —— 依赖抽数\n type=command\n dependencies=extract_data\n command=sh /data/scripts/transform.sh\n\n# load_data.job —— 依赖清洗\n type=command\n dependencies=transform_data\n command=sh /data/scripts/load.sh\n\n打包上传的 zip 结构：\norder_flow.zip\n├── extract_data.job\n├── transform_data.job\n└── load_data.job",
+          "caption": "Azkaban .job 文件与 zip 包结构示例"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "  用户浏览器（Web 界面：建项目 / 上传 / 调度 / 看日志）\n                │\n                ▼\n   ┌────────────────────────┐\n   │      Web Server        │\n   │  项目管理 / 调度 / 日志  │\n   └───────────┬────────────┘\n               │ 分发执行请求\n   ┌───────────▼────────────┐\n   │    Executor Server     │\n   │  真正执行 job 命令       │\n   └────────────────────────┘\n        （可部署多台，水平扩展）",
+          "caption": "Azkaban 架构：Web Server + Executor Server"
+        },
+        {
+          "type": "tip",
+          "content": ".job 文件用 `#` 写注释；命令里尽量写绝对路径；日志文件路径最好也配到 job 里，方便排查问题。"
+        },
+        {
+          "type": "warning",
+          "content": "**依赖写错 = 数据错误**：漏写 dependencies 会导致下游在上游没跑完时就开始执行，拿到的是脏数据；依赖写多了又会死锁（A 依赖 B、B 依赖 A 会直接报错）。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：Azkaban 是很多公司的第一代调度平台，特点是简单直接、Web 化操作，但**不支持复杂依赖版本管理、无内置血缘、告警能力弱**，所以后来被 DolphinScheduler、Airflow 逐步替代。面试高频题：**「Azkaban 怎么定义依赖？」**——.job 文件的 `dependencies` 字段，多个依赖用逗号分隔。"
+        }
+      ],
+      "hands_on": "1. 手写 3 个 .job 文件：extract → transform → load，注意 dependencies 的写法。\\n2. 把它们打成 zip（不用真的装 Azkaban，用压缩软件即可），画出上传后 Azkaban 里展示的依赖图。\\n3. 思考：如果 transform 失败了，load 会执行吗？为什么？（答：不会，依赖链保证上游成功才跑下游。）",
+      "tasks": [
+        {
+          "task_id": "s10c02t01",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排列：Azkaban 完整使用流程",
+          "question": "从零开始在 Azkaban 上跑通一个工作流，请按正确顺序排列操作步骤。",
+          "steps": [
+            "创建项目（如 order_flow）",
+            "编写 .job 文件定义任务与依赖",
+            "把 .job 文件打包成 zip",
+            "在 Web 界面创建项目并上传 zip",
+            "配置调度时间（schedule）",
+            "执行 flow 并查看执行日志"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "order_explain": "先在平台上建项目，本地写好 .job 文件并打包，然后上传 zip（Azkaban 自动解析依赖图），再配调度时间，最后执行并看日志——本地准备工作要先于上传完成。",
+          "analysis": "**标准解题思路**\\n1. 平台侧先建项目。\\n2. 本地编写 .job 文件（含 dependencies）。\\n3. 打包 zip。\\n4. 上传 zip，Azkaban 解析出 flow 依赖图。\\n5. 配置 schedule（定时触发）。\\n6. 执行 flow、查看日志验证。\\n**易错点**：不配置 schedule 也可以手动执行，但生产必须配调度；日志是排查任务失败的第一入口。",
+          "enterprise_tip": "这 6 步就是 Azkaban 面试题的标准答案。再补一句「上传后 flow 里节点颜色表示运行状态（绿=成功/红=失败/蓝=运行）」会更显真实经验。"
+        },
+        {
+          "task_id": "s10c02t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Azkaban 的组件职责",
+          "question": "Azkaban 中负责对外提供 Web 界面、管理项目与调度的组件是？",
+          "options": [
+            {
+              "text": "Web Server",
+              "correct": true,
+              "explain": "正确。Web Server 提供界面，管项目、上传、调度、日志。"
+            },
+            {
+              "text": "Executor Server",
+              "correct": false,
+              "explain": "Executor Server 负责真正执行任务命令，不提供界面。"
+            },
+            {
+              "text": "ZooKeeper",
+              "correct": false,
+              "explain": "ZooKeeper 是 DolphinScheduler 等分布式组件的协调工具，不是 Azkaban 的核心组件。"
+            },
+            {
+              "text": "HDFS",
+              "correct": false,
+              "explain": "HDFS 是分布式存储，Azkaban 的任务结果可能落 HDFS，但管理界面不是它。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. Azkaban 两大组件：Web Server（界面/管理）和 Executor Server（执行）。\\n2. 「Web 界面、项目、调度」→ Web Server。\\n3. 选 A。\\n**延伸**：多个 Executor 可以水平扩展，Web 负责把执行请求分发下去。",
+          "enterprise_tip": "类似问题也会问 DolphinScheduler（Master/Worker）和 Airflow（Scheduler/Webserver）——把「哪个组件负责执行」记牢，三种工具一通百通。"
+        },
+        {
+          "task_id": "s10c02t03",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：Azkaban 依赖关键字",
+          "question": "Azkaban 的 .job 文件中，声明当前任务依赖其他任务的关键字是 ____（写法如 ____=extract_data,clean_data）。",
+          "answer": [
+            "dependencies",
+            "dependencies=",
+            "dependencies ="
+          ],
+          "hint": "回忆 .job 文件的三个核心字段：type 管执行方式、command 管命令，声明『等谁跑完』的是哪个字段？",
+          "analysis": "**标准解题思路**\\n1. .job 文件是 key=value 格式。\\n2. 声明依赖的 key 是 `dependencies`。\\n3. 多个依赖用逗号分隔：`dependencies=extract_data,clean_data`。\\n**易错点**：不要记成 command——command 是任务要执行的命令，dependencies 才是依赖声明。",
+          "enterprise_tip": "依赖关系决定数据正确性。企业里每个 flow 的依赖都会在评审时逐一确认：漏依赖 = 脏数据事故，多依赖 = 浪费时间。"
+        },
+        {
+          "task_id": "s10c02t04",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "Azkaban 项目的打包格式",
+          "question": "在 Azkaban 中，把多个 .job 文件组织成项目上传到 Web 界面时，需要打包成什么格式？",
+          "options": [
+            {
+              "text": "zip",
+              "correct": true,
+              "explain": "正确。Azkaban 项目上传要求打成 zip 包，平台自动解析出依赖图。"
+            },
+            {
+              "text": "jar",
+              "correct": false,
+              "explain": "jar 是 Java 的打包格式，Azkaban 项目上传不认 jar。"
+            },
+            {
+              "text": "tar.gz",
+              "correct": false,
+              "explain": "Azkaban 只接受 zip 格式，tar.gz 上传会失败。"
+            },
+            {
+              "text": "war",
+              "correct": false,
+              "explain": "war 是 Web 应用部署包格式，与 Azkaban 项目无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Azkaban 用 .job 文件定义任务与依赖，多个 .job 组成一个项目。\n2. 项目必须打成 **zip** 包才能在 Web 界面上传。\n3. 上传后 Azkaban 自动解析 zip 内的 .job 文件，根据 dependencies 画出 flow 依赖图。\n**易错点**：zip 里要放 .job 文件而不是文件夹套文件夹，路径层级错了平台会解析失败。",
+          "enterprise_tip": "『Azkaban 项目上传格式』是送分题，记住 zip 即可。扩展记忆：DolphinScheduler 不用打包上传，直接在 Web 界面拖拽编排——两种工具的『项目入口』完全不同。"
+        },
+        {
+          "task_id": "s10c02t05",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：Azkaban 作业文件扩展名",
+          "question": "Azkaban 中，定义任务与依赖的作业文件的扩展名是 ____（如 extract____、transform____）。",
+          "answer": [
+            ".job",
+            "job",
+            ".JOB"
+          ],
+          "hint": "回忆 Azkaban 定义任务与依赖用的文件：文件名由主体和扩展名组成，扩展名就是『作业』的英文缩写。",
+          "analysis": "**标准解题思路**\n1. Azkaban 的任务定义文件叫 **.job 文件**。\n2. 内容是 key=value 属性格式：type、command、dependencies。\n3. 多个 .job 文件打成 zip 上传，Azkaban 据此生成 flow。\n**易错点**：.job 文件不是脚本本身，而是『描述任务怎么跑的配置文件』；真正执行的命令写在 command 字段里。",
+          "enterprise_tip": "面试问「Azkaban 怎么定义一个任务」，答：写 .job 文件，type 指定类型、command 指定命令、dependencies 指定依赖。扩展名 .job 是它的标志性特征。"
+        },
+        {
+          "task_id": "s10c02t06",
+          "type": "choice",
+          "difficulty": 1,
+          "title": ".job 文件中 type 字段的作用",
+          "question": "在 Azkaban 的 .job 文件中，`type=command` 这一行的 `type` 字段作用是？",
+          "options": [
+            {
+              "text": "指定 job 的类型，告诉 Azkaban 用哪种执行方式运行（command 表示执行 shell 命令）",
+              "correct": true,
+              "explain": "正确。type 定义任务类型，command 类型由 Executor 执行 shell 命令。"
+            },
+            {
+              "text": "指定 job 执行成功后的告警方式",
+              "correct": false,
+              "explain": "告警不是 type 字段的职责，type 只决定任务的执行方式。"
+            },
+            {
+              "text": "指定 job 的调度时间",
+              "correct": false,
+              "explain": "调度时间在 Web 界面配置 schedule，不在 .job 文件的 type 里。"
+            },
+            {
+              "text": "指定 job 依赖的上游任务",
+              "correct": false,
+              "explain": "依赖由 dependencies 字段声明，type 与依赖无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. .job 文件是 key=value 属性文件。\n2. `type` 定义任务类型：command（shell 命令）、hadoop、java 等。\n3. `command` 写具体要执行的命令；`dependencies` 写依赖。\n4. 选 A。\n**记忆**：type 管「用什么方式跑」，command 管「跑什么命令」，dependencies 管「等谁跑完」。",
+          "enterprise_tip": "type 与 command 是 .job 文件最核心的两个字段，面试写 .job 文件时这三个字段（type/command/dependencies）一个都不能少。"
+        },
+        {
+          "task_id": "s10c02t07",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：多个依赖的分隔符",
+          "question": "Azkaban 的 .job 文件中，一个任务依赖多个上游任务时，`dependencies` 字段里多个 job 名用 ____ 分隔（如 dependencies=extract_data,clean_data 中间的那个符号，1 个字符）。",
+          "answer": [
+            "逗号",
+            ","
+          ],
+          "hint": "先想 dependencies 字段要同时写多个上游任务时，中间用什么符号分隔？在英文书写里列举多个项常用哪个标点？",
+          "analysis": "**标准解题思路**\n1. dependencies 声明当前 job 依赖的上游 job。\n2. 多个依赖用**逗号**分隔：`dependencies=extract_data,clean_data`。\n3. 填「逗号」（,）。\n**易错点**：不要用空格或分号分隔，Azkaban 按逗号解析依赖列表。",
+          "enterprise_tip": "依赖写错 = 数据错误：分隔符写错会导致依赖解析失败或依赖关系错乱，下游提前跑拿到脏数据；上线评审时 dependencies 是必查项。"
+        },
+        {
+          "task_id": "s10c02t08",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "Azkaban 的适用场景与特点",
+          "question": "关于 Azkaban 的适用场景与特点，下列说法**正确**的有？（多选）",
+          "options": [
+            {
+              "text": "适合中小规模（几百个任务）的团队快速上手，Web 化操作直观",
+              "correct": true,
+              "explain": "正确。Azkaban 以简单直接著称，是很多公司的第一代调度平台。"
+            },
+            {
+              "text": "通过 Web 界面管理项目、上传 zip、配置调度与查看日志",
+              "correct": true,
+              "explain": "正确。Web Server 提供完整的项目管理与调度界面。"
+            },
+            {
+              "text": "用 .job 文件声明任务与依赖，打包 zip 上传后自动解析出依赖图",
+              "correct": true,
+              "explain": "正确。这是 Azkaban 定义工作流的标志性方式。"
+            },
+            {
+              "text": "不支持复杂依赖版本管理、无内置血缘、告警能力弱，大规模场景逐步被 DolphinScheduler/Airflow 替代",
+              "correct": true,
+              "explain": "正确。这些短板正是它被替代的原因。"
+            },
+            {
+              "text": "无法声明任务之间的依赖关系",
+              "correct": false,
+              "explain": "说反了。dependencies 字段正是用来声明依赖的。"
+            },
+            {
+              "text": "只能通过命令行使用，没有 Web 界面",
+              "correct": false,
+              "explain": "Azkaban 的核心就是 Web 界面管理，不存在这个问题。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Azkaban 的定位：简单直接、Web 化、适合中小规模。\n2. A（场景）、B（界面）、C（定义方式）、D（短板）都正确。\n3. E 错：dependencies 就是依赖管理；F 错：Azkaban 恰恰以 Web 界面为核心。\n4. 选 A、B、C、D。\n**延伸**：面试对比题「Azkaban 为什么被 DolphinScheduler 替代」就答 D 里的三点：依赖版本管理弱、无血缘、告警弱。",
+          "enterprise_tip": "把 A/B/C 讲成「优点」、D 讲成「短板」，就是一次完整的 Azkaban 面试回答；能补一句「Executors 可多台水平扩展」更完整。"
+        },
+        {
+          "task_id": "s10c02t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "Azkaban 的执行原理",
+          "question": "用户在 Azkaban Web 界面点击「执行 flow」后，一个 job 是怎么被真正跑起来的？从执行原理看，正确的是？",
+          "options": [
+            {
+              "text": "Web Server 把该 job 的执行请求分发给某个 Executor Server，由 Executor Server 启动进程执行 job 命令并回传日志",
+              "correct": true,
+              "explain": "正确。这是 Azkaban 的核心执行链路：Web Server 负责管理调度与分发，Executor Server 负责真正执行命令。"
+            },
+            {
+              "text": "Web Server 自己直接运行 job 命令",
+              "correct": false,
+              "explain": "Web Server 只做管理、调度与分发，不直接执行命令；执行是 Executor Server 的职责，两者分离才能水平扩展。"
+            },
+            {
+              "text": "浏览器直接调用底层 shell 执行 job",
+              "correct": false,
+              "explain": "浏览器只能通过 HTTP 与 Web Server 交互，不可能直接操作服务器执行命令。"
+            },
+            {
+              "text": "每个 job 都需要手动在一台机器上配置 cron 才能执行",
+              "correct": false,
+              "explain": "Azkaban 是集中式调度：执行请求由 Web Server 统一分发，不需要在每台机器上单独配 cron。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 回忆架构：Web Server（管理、调度、日志）+ Executor Server（执行）。\n2. 用户点执行 → Web Server 收到请求 → 按 job 配置把执行请求分发给一个（可用的）Executor。\n3. Executor 启动进程运行 job 里的 command，把执行日志回传 Web Server 供界面查看。\n4. Executor 可多台部署，Web Server 按负载把请求分发下去，实现水平扩展。\n5. 选 A。\n**易错点**：『谁分发、谁执行』别记反——Web 只负责下发，真正跑命令的是 Executor。",
+          "enterprise_tip": "面试追问『Azkaban 怎么做到水平扩展』：加 Executor Server 机器，Web Server 会把执行请求分发到多台 Executor 上；这个『管理端与执行端分离』的模型，和 DS 的 Master/Worker 是同一个思路。"
+        },
+        {
+          "task_id": "s10c02t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Azkaban 多 Executor 的分发",
+          "question": "企业给 Azkaban 部署了 3 台 Executor Server。用户在 Web 界面执行一个 flow 时，Web Server 会把执行请求交给哪台 Executor？",
+          "options": [
+            {
+              "text": "从多台可用 Executor 中按选择策略（如负载均衡/指定 executor 组）选一台来执行",
+              "correct": true,
+              "explain": "正确。Web Server 在可用 Executor 中分发任务，多台 Executor 实现水平扩展。"
+            },
+            {
+              "text": "固定交给第一台 Executor",
+              "correct": false,
+              "explain": "固定绑定无法负载均衡且单点故障，多 Executor 的意义就是分散执行。"
+            },
+            {
+              "text": "3 台 Executor 同时各执行一遍",
+              "correct": false,
+              "explain": "同一任务只会被一台 Executor 执行一次，重复执行会产生重复数据。"
+            },
+            {
+              "text": "Web Server 自己执行，不经过 Executor",
+              "correct": false,
+              "explain": "Web Server 只负责管理与分发，执行是 Executor 的职责。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 架构回顾：Web Server 负责管理、调度与分发，Executor Server 负责真正执行命令。\n2. 多 Executor 场景：Web Server 把执行请求分发给「可用」的 Executor（按选择策略，如轮询/负载/指定 executor 组），任务分散到多台机器并行执行。\n3. 好处：水平扩展吞吐、单台 Executor 故障不影响其他任务。\n4. 因此选 A；B（固定绑定）、C（重复执行）、D（Web 自己跑）都不对。\n**为什么**：多 Executor + 分发策略 = Azkaban 的水平扩展模型，与 DolphinScheduler 的多 Worker 是同一个思路。",
+          "enterprise_tip": "面试题「Azkaban 怎么水平扩展」：加 Executor Server，Web Server 会把执行请求分发到多台 Executor；还能指定不同 flow 用不同 executor 组实现资源隔离。"
+        },
+        {
+          "task_id": "s10c02t11",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Azkaban 的任务失败通知",
+          "question": "Azkaban 中任务执行失败后，要第一时间通知到负责人，最常用的方式是在项目中配置？",
+          "options": [
+            {
+              "text": "告警邮件地址（任务失败/成功时由 Azkaban 自动发送邮件通知）",
+              "correct": true,
+              "explain": "正确。Azkaban 支持在项目设置/作业属性中配置邮箱，任务失败（或成功）时自动发送邮件通知。"
+            },
+            {
+              "text": "短信验证码",
+              "correct": false,
+              "explain": "Azkaban 原生告警渠道是邮件，短信需依赖第三方扩展，不是原生配置项。"
+            },
+            {
+              "text": "钉钉机器人",
+              "correct": false,
+              "explain": "钉钉等 IM 告警是 DolphinScheduler 等平台的能力，Azkaban 原生只支持邮件。"
+            },
+            {
+              "text": "电话呼叫",
+              "correct": false,
+              "explain": "Azkaban 不提供电话告警，邮件是它的标准通知方式。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Azkaban 告警能力：通过项目设置中的邮件地址或作业属性配置告警邮箱。\n2. 触发时机：任务失败（也可配置成功通知）时由 Azkaban 自动发送邮件，邮件服务（SMTP）在 Web Server 侧配置。\n3. 因此选 A；B/C/D 都不是 Azkaban 的原生告警渠道。\n**为什么**：告警能力弱（仅邮件）正是 Azkaban 的短板之一，也是它被 DolphinScheduler/Airflow 替代的原因之一。",
+          "enterprise_tip": "面试题「Azkaban 告警怎么配」：项目里配告警邮箱（SMTP 由 Web Server 配置），任务失败自动发邮件；对比 DS 支持邮件/钉钉/飞书多通道，Azkaban 只有邮件——这就是它告警能力弱的体现。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "Azkaban 的两大核心组件是什么？",
+          "a": "Web Server（提供界面，管理项目、上传、调度、看日志）和 Executor Server（真正执行 job 命令，可部署多台水平扩展）。"
+        },
+        {
+          "q": "Azkaban 的 .job 文件怎么声明依赖？",
+          "a": "用 dependencies 字段，多个依赖用逗号分隔，例如 dependencies=extract_data,clean_data 表示当前任务等这两个任务跑完才执行。"
+        },
+        {
+          "q": "Azkaban 项目怎么上传？",
+          "a": "把多个 .job 文件打成 zip 包，在 Web 界面创建项目后上传 zip，Azkaban 自动解析依赖关系生成 flow 图。"
+        },
+        {
+          "q": "Azkaban 相比 DolphinScheduler 有什么短板？",
+          "a": "不支持复杂依赖版本管理、无内置血缘、告警能力弱、可视化编排能力差，所以中小规模场景适用，大规模场景多被 DolphinScheduler/Airflow 替代。"
+        },
+        {
+          "q": "Azkaban 中漏写 dependencies 会有什么后果？",
+          "a": "下游 job 会在上游还没跑完时就开始执行，拿到脏数据；反过来依赖写多了会形成死锁（A 依赖 B、B 又依赖 A）直接报错。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Web Server",
+          "desc": "Azkaban 前端组件，提供项目管理、zip 上传、调度配置与日志查看界面。"
+        },
+        {
+          "term": "Executor Server",
+          "desc": "Azkaban 执行组件，真正运行 job 命令，可多台部署实现水平扩展。"
+        },
+        {
+          "term": ".job 文件",
+          "desc": "Azkaban 任务定义文件，key=value 格式，含 type/command/dependencies 等字段。"
+        },
+        {
+          "term": "dependencies",
+          "desc": ".job 文件中声明依赖的关键字，多个依赖用逗号分隔。"
+        },
+        {
+          "term": "Flow",
+          "desc": "Azkaban 的工作流，由多个 job 按依赖关系组成的有向无环图（DAG）。"
+        },
+        {
+          "term": "zip 打包",
+          "desc": "Azkaban 项目上传的唯一格式，平台解析 zip 内的 .job 文件生成依赖图。"
+        }
+      ],
+      "kps": [
+        "Azkaban 的定位与架构（Web Server / Executor Server）",
+        "Flow（工作流）与 .job 文件（key=value 属性文件）",
+        ".job 文件核心字段：type / command / dependencies",
+        "依赖声明写法（dependencies、多个依赖用逗号分隔）",
+        "项目打包上传（zip、自动解析依赖图）",
+        "Azkaban 完整使用流程（建项目→写 job→打包→上传→调度→执行）",
+        "Azkaban 的适用场景与短板（中小规模、逐步被 DS/Airflow 替代）",
+        "Azkaban 执行原理（Web Server 分发执行请求到 Executor Server）"
+      ]
+    },
+    {
+      "chapter_id": "s10c03",
+      "title": "10.3 DolphinScheduler",
+      "goal": "掌握 DolphinScheduler 的 Master/Worker 架构、DAG 工作流定义与「定义→上线→定时→运维」完整流程",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**DolphinScheduler（DS）** 是 Apache 顶级项目，**国产开源调度平台**，以「可视化拖拽编排」著称，是目前国内使用最广泛的调度工具之一。\\n核心架构：\\n- **Master Server**：负责任务分发、流程调度、容错；\\n- **Worker Server**：真正执行任务（可水平扩展）；\\n- **ZooKeeper**：分布式协调，Master 选举、任务队列；\\n- **API Server**：提供接口；**Alert Server**：告警。\\n\\n核心概念：**工作流定义**——在 Web 界面用拖拽方式把任务节点连成 DAG，节点类型丰富（Shell、SQL、Spark、Python、子流程等）。"
+        },
+        {
+          "type": "text",
+          "content": "DS 使用流程：**登录 → 项目管理 → 工作流定义（拖拽建 DAG）→ 保存并上线 → 配置定时调度 → 运维中心看实例与日志**。\\n关键点：\\n- 工作流**必须点「上线」**才会被定时调度执行；\\n- 定时调度用 cron 表达式配置；\\n- 支持**失败重试**（重试次数、间隔）、**超时告警**、**补数**（指定日期范围重跑历史）；\\n- 告警支持邮件、钉钉、飞书、企业微信等。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "  用户浏览器（拖拽编排 / 监控运维）\n                │\n                ▼\n   ┌─────────────────────────┐\n   │      API Server         │\n   │  控制台接口 / 前端数据    │\n   └───────────┬─────────────┘\n   ┌───────────▼─────────────┐\n   │      Master Server      │\n   │  流程调度 / 任务分发 / 容错│\n   └───────────┬─────────────┘\n               │ ZooKeeper：选举、队列、协调\n   ┌───────────▼─────────────┐\n   │      Worker Server      │\n   │  真正执行任务（可多台）    │\n   └─────────────────────────┘",
+          "caption": "DolphinScheduler 架构：Master / Worker / ZooKeeper"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "每日交易汇总工作流（DAG）：\n\n  [抽取订单数据] ──▶ [清洗订单明细] ──▶ [按天汇总] ──▶ [写入报表表]\n        │                                 ▲\n        └──▶ [抽取用户数据] ──▶ [清洗用户] ──┘\n                               （维度关联后一起汇总）\n\n节点类型：Shell / SQL / Spark / Python / 子流程 ...",
+          "caption": "一个电商日汇总工作流定义示例"
+        },
+        {
+          "type": "tip",
+          "content": "DS 的「补数」功能很实用：某天任务失败或历史缺数，可以选定日期范围一键重跑，不用手动一天天点。"
+        },
+        {
+          "type": "warning",
+          "content": "**上线按钮是关键**：很多新手在 DS 里建完工作流不点「上线」，到点却不执行——因为**未上线的工作流不会被定时调度**。同理，修改工作流后要重新上线才生效。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：DS 是国内数仓调度的事实标准之一。面试高频题：**「DolphinScheduler 和 Azkaban 的区别？」**——DS：可视化拖拽、分布式架构（Master/Worker/ZooKeeper）、告警完善、社区活跃；Azkaban：.job 文件定义、架构更简单、适合小规模。再强调一次：**建完工作流必须上线**，这是 DS 使用中最高频的坑。"
+        }
+      ],
+      "hands_on": "1. 在纸上画出「订单日汇总」工作流的 DAG：至少 4 个节点（抽数、清洗、汇总、入库），用箭头标依赖。\\n2. 给每个节点标注失败重试策略（重试 2 次、间隔 5 分钟）。\\n3. 模拟一次补数：假设 3 月 5 日任务失败，说明在 DS 里你要怎么操作。",
+      "tasks": [
+        {
+          "task_id": "s10c03t01",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排列：DolphinScheduler 使用流程",
+          "question": "在 DolphinScheduler 上让一个工作流每天自动运行，请按正确顺序排列操作步骤。",
+          "steps": [
+            "登录 DolphinScheduler 控制台",
+            "创建/进入项目管理",
+            "创建工作流定义（拖拽节点、连线成 DAG）",
+            "保存并点击「上线」",
+            "配置定时调度（cron 表达式）",
+            "在运维中心查看实例运行状态与日志"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "order_explain": "先登录进项目，再拖拽建好工作流 DAG，保存后必须点「上线」才会被调度，然后配置 cron 定时，最后在运维中心盯实例和日志；告警与失败重试通常在工作流定义里一并配置。",
+          "analysis": "**标准解题思路**\\n1. 登录控制台，进入项目管理。\\n2. 创建工作流定义：拖拽节点、连线定依赖。\\n3. 保存后点「上线」——不上线不生效。\\n4. 配置定时调度（cron 表达式）。\\n5. 运维中心查看实例状态与日志。\\n**易错点**：跳过「上线」是新手最常踩的坑，到点不跑先查这个。",
+          "enterprise_tip": "DS 面试题基本围绕这个流程：最后一定要强调「工作流必须上线才生效」这个细节，面试官会觉得你是真用过。"
+        },
+        {
+          "task_id": "s10c03t02",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "DolphinScheduler 的功能特点",
+          "question": "关于 DolphinScheduler，下列说法**正确**的有？",
+          "options": [
+            {
+              "text": "支持拖拽式可视化编排 DAG 工作流",
+              "correct": true,
+              "explain": "正确。这是 DS 最核心的卖点。"
+            },
+            {
+              "text": "支持定时调度、失败重试与补数",
+              "correct": true,
+              "explain": "正确。失败重试、补数是生产必备能力。"
+            },
+            {
+              "text": "支持邮件、钉钉、飞书等告警通知",
+              "correct": true,
+              "explain": "正确。DS 的告警通道非常丰富。"
+            },
+            {
+              "text": "只能单机部署，不支持分布式集群",
+              "correct": false,
+              "explain": "DS 是分布式架构（Master/Worker 可多台），支持集群部署。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. DS 三大卖点：可视化编排、丰富调度能力、完善告警。\\n2. A/B/C 都正确。\\n3. D 错误：DS 基于 Master/Worker/ZooKeeper 的分布式架构，天然支持集群。\\n4. 选 A、B、C。",
+          "enterprise_tip": "面试对比题常考「Azkaban vs DolphinScheduler」：一个简单但弱，一个强大且分布式——记住 DS 的分布式架构是它替代 Azkaban 的关键原因。"
+        },
+        {
+          "task_id": "s10c03t03",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "DolphinScheduler 的执行组件",
+          "question": "DolphinScheduler 中真正负责任务执行、运行任务实例的组件是？",
+          "options": [
+            {
+              "text": "Master Server",
+              "correct": false,
+              "explain": "Master 负责任务分发、流程调度与容错，不直接执行任务。"
+            },
+            {
+              "text": "Worker Server",
+              "correct": true,
+              "explain": "正确。Worker 是真正跑任务命令的组件，可水平扩展。"
+            },
+            {
+              "text": "ZooKeeper",
+              "correct": false,
+              "explain": "ZooKeeper 做分布式协调（选举、队列），不执行任务。"
+            },
+            {
+              "text": "API Server",
+              "correct": false,
+              "explain": "API Server 提供接口供控制台调用，不执行任务。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 分工：Master 调度分发，Worker 执行，ZK 协调，API 提供接口。\\n2. 「真正执行任务」→ Worker。\\n3. 选 B。\\n**记忆**：Master 是大脑，Worker 是手脚。",
+          "enterprise_tip": "这个「谁负责执行」的考点三兄弟通用：Azkaban 是 Executor Server、DS 是 Worker、Airflow 是 Worker/Executor——把每个工具的『执行组件』单独记一遍。"
+        },
+        {
+          "task_id": "s10c03t04",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "DolphinScheduler 工作流定义方式",
+          "question": "DolphinScheduler 中，定义工作流（DAG）的主要方式是什么？",
+          "options": [
+            {
+              "text": "在 Web 界面拖拽节点、连线编排",
+              "correct": true,
+              "explain": "正确。DS 以可视化拖拽编排著称，节点连线即形成 DAG。"
+            },
+            {
+              "text": "编写 .job 属性文件",
+              "correct": false,
+              "explain": ".job 文件是 Azkaban 的定义方式，不是 DolphinScheduler。"
+            },
+            {
+              "text": "用 Python 代码编写 DAG 文件",
+              "correct": false,
+              "explain": "用代码定义 DAG 是 Airflow 的 Workflow as Code 理念，DS 是可视化拖拽。"
+            },
+            {
+              "text": "编辑 XML 配置文件",
+              "correct": false,
+              "explain": "DS 不通过 XML 定义工作流，全部在 Web 界面完成。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. DolphinScheduler 的核心卖点：**可视化拖拽编排**。\n2. 在『工作流定义』页面拖入节点（Shell/SQL/Spark/Python 等），用连线确定依赖，构成 DAG。\n3. 对比：Azkaban 用 .job 文件、Airflow 用 Python 代码——三种工具定义方式各不相同。\n**易错点**：别把 DS 和 Airflow 混淆，『拖拽』vs『写代码』是面试对比题的经典考点。",
+          "enterprise_tip": "面试题「DolphinScheduler 和 Airflow 怎么选？」：团队要低门槛、可视化、快速上手选 DS；团队懂 Python、要代码版本管理和 CI/CD 选 Airflow。"
+        },
+        {
+          "task_id": "s10c03t05",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "DolphinScheduler 的功能特性",
+          "question": "下列关于 DolphinScheduler 功能特性的说法，正确的有？（多选）",
+          "options": [
+            {
+              "text": "支持 Shell、SQL、Spark、Python、子流程等多种任务节点类型",
+              "correct": true,
+              "explain": "正确。DS 节点类型丰富，满足不同任务形态。"
+            },
+            {
+              "text": "支持定时调度、失败重试与补数",
+              "correct": true,
+              "explain": "正确。定时用 cron，失败可配重试次数与间隔，历史缺数可补跑。"
+            },
+            {
+              "text": "支持邮件、钉钉、飞书、企业微信等告警渠道",
+              "correct": true,
+              "explain": "正确。DS 告警通道非常丰富，是国内团队常用的能力。"
+            },
+            {
+              "text": "支持分布式集群部署，Worker 可水平扩展",
+              "correct": true,
+              "explain": "正确。DS 基于 Master/Worker/ZooKeeper 架构，天然支持集群。"
+            },
+            {
+              "text": "只能单机部署，不支持集群",
+              "correct": false,
+              "explain": "说反了。DS 是分布式架构，Worker 可多台水平扩展。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 从『任务类型』『调度能力』『告警』『架构』四个维度回忆 DS 特性。\n2. 任务类型：Shell/SQL/Spark/Python/子流程等 → A 正确。\n3. 调度：cron 定时 + 失败重试 + 补数 → B 正确。\n4. 告警：邮件/钉钉/飞书/企业微信 → C 正确。\n5. 架构：Master/Worker 分布式 → D 正确，E 错误。\n6. 选 A、B、C、D。\n**易错点**：多选要逐项独立判断，别因为 A 对就顺手把 D 也勾上——D 是对的不是错的。",
+          "enterprise_tip": "DS 面试常考『它能做什么』：可视化编排、多类型节点、失败重试、补数、多渠道告警、分布式——把这些特性串成一句话讲出来，就是完整的 DS 能力画像。"
+        },
+        {
+          "task_id": "s10c03t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Master Server 的职责",
+          "question": "DolphinScheduler 中，负责**流程调度、任务分发与容错**的组件是？",
+          "options": [
+            {
+              "text": "Master Server",
+              "correct": true,
+              "explain": "正确。Master 是调度大脑：流程调度、任务分发、容错。"
+            },
+            {
+              "text": "Worker Server",
+              "correct": false,
+              "explain": "Worker 是真正执行任务的组件，接收 Master 分发的任务。"
+            },
+            {
+              "text": "ZooKeeper",
+              "correct": false,
+              "explain": "ZooKeeper 负责分布式协调（Master 选举、任务队列），不是调度分发主体。"
+            },
+            {
+              "text": "Alert Server",
+              "correct": false,
+              "explain": "Alert Server 负责告警通知，与任务分发无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. DS 分工：Master 调度分发、Worker 执行、ZooKeeper 协调、API 提供接口、Alert 告警。\n2. 「流程调度、任务分发、容错」→ Master Server。\n3. 选 A。\n**记忆**：Master 是大脑（调度），Worker 是手脚（执行）——和上一题「谁执行」正好凑成一对考点。",
+          "enterprise_tip": "「谁调度、谁执行」是调度工具三兄弟的通用考点：Azkaban 是 Web Server 分发 / Executor 执行，DS 是 Master / Worker，Airflow 是 Scheduler / Worker。逐个记牢。"
+        },
+        {
+          "task_id": "s10c03t07",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：工作流上线",
+          "question": "DolphinScheduler 中，工作流定义保存后，必须点击「____」按钮，定时调度才会生效（2 个字）。",
+          "answer": [
+            "上线",
+            "上线按钮"
+          ],
+          "hint": "回忆 DS 使用流程：工作流保存后为什么到点不跑？关键操作与『下线』状态相对，想想按钮上写的是什么。",
+          "analysis": "**标准解题思路**\n1. DS 里工作流定义保存后默认处于「下线」状态。\n2. 必须点「上线」，定时调度才会触发。\n3. 修改工作流后也要重新上线才生效。\n4. 填「上线」。\n**易错点**：这是 DS 新手最高频的坑——建完工作流不点上线，到点不跑还找不到原因。",
+          "enterprise_tip": "三种工具「生效方式」对比记忆：DS 要点「上线」、Azkaban 上传 zip 即生效、Airflow 放入 dags 目录等 Scheduler 扫描。面试能说出这个区别，说明三种工具都用过。"
+        },
+        {
+          "task_id": "s10c03t08",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排列：任务失败后的处理流程",
+          "question": "运维发现 DolphinScheduler 里某任务实例失败，请按正确的排查处理顺序排列操作步骤。",
+          "steps": [
+            "在运维中心查看失败实例的运行日志，定位失败原因",
+            "根据原因修复代码、依赖或资源配置",
+            "重跑失败实例，验证修复效果",
+            "若持续失败，配置或触发告警通知负责人跟进"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "order_explain": "先看日志定位根因，再针对修复，然后重跑验证，最后才告警升级——不看日志直接重跑是典型的无效操作。",
+          "analysis": "**标准解题思路**\n1. 看日志：实例日志是排查失败的第一入口，先定位失败原因（代码错、依赖缺、资源不足、上游未跑）。\n2. 修复：针对根因改代码、补依赖或调资源配置。\n3. 重跑：重跑失败实例验证是否恢复。\n4. 告警：持续失败则触发告警，升级给负责人。\n**易错点**：跳过日志直接重跑（大概率重复失败）、或一上来就告警（没有可汇报的根因）。",
+          "enterprise_tip": "这就是企业数据运维值班的标准 SOP。面试答「任务失败了怎么办」：看日志→定位→修复→重跑→告警，五步就是满分答案。"
+        },
+        {
+          "task_id": "s10c03t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "Master 分配任务的原理",
+          "question": "DolphinScheduler 中，Master 生成了一个待执行的任务实例后，是怎么决定交给哪个 Worker 跑的？",
+          "options": [
+            {
+              "text": "Master 按负载均衡策略（如轮询、权重）把任务实例放进 ZooKeeper 的任务队列，空闲 Worker 领取执行",
+              "correct": true,
+              "explain": "正确。Master 负责分发，Worker 主动从任务队列领取；ZooKeeper 提供队列与协调，Worker 越多吞吐越高。"
+            },
+            {
+              "text": "每个任务固定绑定一台 Worker，永远只在那台机器上跑",
+              "correct": false,
+              "explain": "固定绑定会浪费资源且单点故障，DS 是按负载动态分配，不是写死绑定。"
+            },
+            {
+              "text": "Worker 自己扫描所有任务定义，看到到点就执行，与 Master 无关",
+              "correct": false,
+              "explain": "Worker 不会自行扫描定义，任务实例由 Master 生成并分发，Worker 只负责领取和执行。"
+            },
+            {
+              "text": "Master 直接把任务丢给 API Server 执行",
+              "correct": false,
+              "explain": "API Server 只提供接口，不执行任务；执行是 Worker 的职责。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 分工：Master 生成任务实例并分发，Worker 领取执行，ZooKeeper 维护任务队列与协调。\n2. 分发策略：Master 按负载均衡（轮询/权重等）把任务投递到队列，空闲 Worker 竞争领取。\n3. 好处：Worker 数量可水平扩展，任务分散到多台机器，单台挂掉任务由其他 Worker 承接。\n4. 选 A。\n**易错点**：别把 DS 的 Worker 想成『自己到点跑』——它是被动领取的；也别说 Master 直接调用 Worker 执行，中间隔着 ZK 队列。",
+          "enterprise_tip": "『Master 不直接执行、Worker 领取执行』是 DS 分布式调度的核心原理，也是『任务卡在等待状态』排查时的切入点：先看有没有空闲 Worker、再看队列是否堆积。"
+        },
+        {
+          "task_id": "s10c03t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "DS 告警组的作用",
+          "question": "DolphinScheduler 中把「数据仓库组」的 5 位同事配置成一个接收告警的集合，工作流失败时通知这个集合内的所有人。这个集合称为？",
+          "options": [
+            {
+              "text": "告警组（一组告警接收人，可绑定邮件/钉钉/飞书等多种通知渠道）",
+              "correct": true,
+              "explain": "正确。DS 的告警组是一组告警接收人，支持绑定多种渠道，工作流可指定关联的告警组。"
+            },
+            {
+              "text": "Worker 组",
+              "correct": false,
+              "explain": "Worker 组是执行任务的 worker 集合（用于资源隔离），与告警通知无关。"
+            },
+            {
+              "text": "租户",
+              "correct": false,
+              "explain": "租户是任务运行的身份/权限归属，不是告警接收人集合。"
+            },
+            {
+              "text": "上游任务",
+              "correct": false,
+              "explain": "上游任务是依赖关系中的前置任务，不是告警概念。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 告警组定义：把一批接收人（成员 + 渠道，如邮件/钉钉/飞书）组织成一个可复用的组。\n2. 用法：创建工作流时选择关联的告警组，任务失败/超时按组通知所有成员。\n3. 区分三概念：Worker 组管执行资源、租户管运行身份、告警组管通知，职责完全不同。\n4. 因此选 A；B/C/D 都不是告警接收人集合。\n**为什么**：告警组让「通知谁」可配置、可复用——新人入职加进告警组，就能自动收到相关告警，不用改任务配置。",
+          "enterprise_tip": "面试题「DS 怎么把告警发给指定团队」：建告警组（成员+渠道）→ 工作流关联告警组；生产上按团队建组（数仓组/BI 组），任务挂到对应组即可。"
+        },
+        {
+          "task_id": "s10c03t11",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "跨项目依赖的实现",
+          "question": "DolphinScheduler 中，A 项目的「日汇总」工作流要等 B 项目（另一团队维护）的「订单同步」工作流跑完才能跑。最合适的做法是？",
+          "options": [
+            {
+              "text": "在 A 项目的日汇总工作流里配置「上游任务」，指定依赖 B 项目的订单同步工作流（DS 支持跨项目设置上游依赖）",
+              "correct": true,
+              "explain": "正确。DS 支持工作流依赖其他项目的任务，配置上游任务后调度会等待其成功。"
+            },
+            {
+              "text": "把两个工作流硬凑进同一个项目",
+              "correct": false,
+              "explain": "强行合项目会破坏团队归属与权限边界，DS 原生支持跨项目依赖，无需合并。"
+            },
+            {
+              "text": "把 B 的调度时间提前 2 小时，靠猜时间错峰",
+              "correct": false,
+              "explain": "猜时间无法保证 B 一定跑完，A 仍可能拿到脏数据，违背依赖管理的初衷。"
+            },
+            {
+              "text": "跨项目无法配置依赖，只能手动跑",
+              "correct": false,
+              "explain": "DS 支持跨项目配置上游依赖，不需要手动执行。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 需求：A 依赖 B，且 B 属于另一个项目（另一团队）。\n2. 方案：在 A 的工作流定义里配置「上游任务」，可跨项目选择 B 的订单同步工作流；调度器在 B 成功后触发 A。\n3. 反例：猜时间错峰（C）会引入脏数据风险；合并项目（B）破坏团队权限边界；手动跑（D）不可持续。\n4. 因此选 A。\n**为什么**：跨项目依赖是生产环境的刚需——数仓链路上游可能由不同团队维护，调度平台必须支持跨项目声明依赖，用「依赖」而非「猜时间」保证数据正确。",
+          "enterprise_tip": "面试题「下游团队等你们的数据怎么办」：让对方在 DS 里把你们的工作流配成上游任务，跨项目依赖自动衔接；比「你们几点跑完，我们定几点」靠谱得多。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "DolphinScheduler 的核心架构组件有哪些？",
+          "a": "Master Server（调度分发、流程调度、容错）、Worker Server（真正执行任务）、ZooKeeper（分布式协调、Master 选举、任务队列）、API Server（接口）与 Alert Server（告警）。"
+        },
+        {
+          "q": "DolphinScheduler 里工作流建好不点「上线」会怎样？",
+          "a": "不会被定时调度执行。未上线的工作流到点不跑，这是新手最高频的坑；修改工作流后也要重新上线才生效。"
+        },
+        {
+          "q": "DolphinScheduler 的补数是什么？",
+          "a": "对指定日期范围的历史数据手动触发重跑，常用于某天任务失败或历史缺数的修复，不用一天天手动点。"
+        },
+        {
+          "q": "DolphinScheduler 和 Azkaban 的区别？",
+          "a": "DS 可视化拖拽编排、分布式架构（Master/Worker/ZooKeeper）、告警完善、社区活跃；Azkaban 用 .job 文件定义、架构简单、适合小规模。DS 是国内数仓调度的事实标准之一。"
+        },
+        {
+          "q": "DolphinScheduler 中真正执行任务的是哪个组件？",
+          "a": "Worker Server。Master 负责调度分发，Worker 负责真正运行任务命令，可水平扩展。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Master Server",
+          "desc": "DS 调度核心，负责任务分发、流程调度与容错。"
+        },
+        {
+          "term": "Worker Server",
+          "desc": "DS 执行组件，真正运行任务，可多台水平扩展。"
+        },
+        {
+          "term": "ZooKeeper",
+          "desc": "DS 的分布式协调组件，负责 Master 选举与任务队列。"
+        },
+        {
+          "term": "工作流定义",
+          "desc": "DS 中通过拖拽节点、连线依赖形成的 DAG，需保存并上线才生效。"
+        },
+        {
+          "term": "上线",
+          "desc": "让工作流被定时调度执行的关键按钮，未上线不生效。"
+        },
+        {
+          "term": "补数",
+          "desc": "按指定日期范围重跑历史任务，修复历史缺数或错误数据。"
+        },
+        {
+          "term": "Alert Server",
+          "desc": "DS 告警组件，支持邮件、钉钉、飞书、企业微信等通知渠道。"
+        }
+      ],
+      "kps": [
+        "DolphinScheduler 定位（国产开源、可视化拖拽编排）",
+        "架构组件职责（Master 调度分发 / Worker 执行 / ZooKeeper 协调 / API / Alert）",
+        "工作流定义：拖拽节点、连线成 DAG、节点类型丰富",
+        "保存并上线：工作流不上线不会被定时调度",
+        "定时调度（cron）与失败重试、补数",
+        "告警渠道（邮件、钉钉、飞书、企业微信）",
+        "任务失败后的运维处理流程（看日志→定位→修复→重跑→告警）",
+        "DolphinScheduler Master 任务分配原理（负载均衡分发到空闲 Worker）"
+      ]
+    },
+    {
+      "chapter_id": "s10c04",
+      "title": "10.4 Airflow",
+      "goal": "理解 Workflow as Code 思想，掌握 DAG 概念、核心组件与「写代码 → 调度解析 → 定时触发」流程",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**Airflow** 是 Airbnb 开源的 Apache 项目，核心理念是 **Workflow as Code**：工作流不是拖出来的，而是**用 Python 代码写出来的**。\\n核心概念 **DAG（Directed Acyclic Graph，有向无环图）**：由任务（Task）和依赖（用 `>>` 表示）组成的图结构，**无环**意味着不能出现循环依赖。\\n核心组件：\\n- **Scheduler**：周期性扫描 dags 目录、解析 DAG、到点触发任务；\\n- **Webserver**：Web 界面，查看 DAG 运行状态、日志、手动触发运行；\\n- **Executor**：调度执行任务的执行器（如 LocalExecutor、CeleryExecutor）；\\n- **Worker**：Celery 模式下真正跑任务的进程；\\n- **Metadata DB**：存 DAG 元数据与运行记录。"
+        },
+        {
+          "type": "text",
+          "content": "Airflow 开发流程：**写 DAG 的 Python 文件（定义任务 + 依赖）→ 放入 dags 目录 → Scheduler 扫描解析 → 到点自动触发 → Webserver 查看状态**。\\n常用运算符（Operator）：`BashOperator`（跑 shell）、`PythonOperator`（跑 Python 函数）、`DummyOperator`（占位）。\\n依赖设置：`t1 >> t2`（t1 完成后执行 t2）、`t1 >> [t2, t3]`（t1 完成后并行执行 t2、t3）。"
+        },
+        {
+          "type": "code",
+          "lang": "python",
+          "content": "from airflow import DAG\nfrom airflow.operators.bash import BashOperator\nfrom datetime import datetime\n\ndefault_args = {'start_date': datetime(2024, 1, 1)}\n\nwith DAG(\n    dag_id='daily_sales',\n    schedule_interval='0 2 * * *',   # 每天凌晨 2 点\n    default_args=default_args,\n    catchup=False,\n) as dag:\n    extract   = BashOperator(task_id='extract',\n                             bash_command='python /data/scripts/extract.py')\n    transform = BashOperator(task_id='transform',\n                             bash_command='python /data/scripts/transform.py')\n    load      = BashOperator(task_id='load',\n                             bash_command='python /data/scripts/load.py')\n\n    extract >> transform >> load   # 依赖链：抽数 → 清洗 → 入库",
+          "caption": "一个 Airflow DAG 的 Python 代码示例"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "   ┌────────────────┐   读写    ┌──────────────┐\n   │   Scheduler    │◀─────────▶│ Metadata DB  │\n   │ 周期扫描 dags 目录│           └──────────────┘\n   └───────┬────────┘\n           │ 提交任务实例\n   ┌───────▼────────┐\n   │    Executor    │   LocalExecutor / CeleryExecutor\n   └───────┬────────┘\n           │ 调度执行\n   ┌───────▼────────┐   ┌──────────────┐\n   │     Worker     │   │  Webserver   │\n   │  真正执行任务    │   │ 查看状态/日志  │\n   └────────────────┘   └──────────────┘",
+          "caption": "Airflow 核心组件架构"
+        },
+        {
+          "type": "warning",
+          "content": "**DAG 文件不是任务本身**：Scheduler 只解析 DAG 定义，实际执行由 Executor/Worker 完成；改了 DAG 代码要等 Scheduler 下一次扫描（默认几十秒到几分钟）才生效。另外 DAG 里**禁止出现环**（A 依赖 B、B 又依赖 A），否则永远无法调度。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：Airflow 的优势是**代码即配置**——DAG 可以进 Git 做版本管理、Code Review、测试，工程化程度最高，被数据工程师广泛用于复杂依赖场景；劣势是学习成本高于 DS。面试高频题：**「DAG 是什么？」**——Directed Acyclic Graph，有向无环图，节点是任务、边是依赖，无环保证任务一定能结束。**「Airflow 和 DolphinScheduler 怎么选？」**——团队懂 Python、要代码管理选 Airflow；要可视化、快速上手选 DolphinScheduler。"
+        }
+      ],
+      "hands_on": "1. 不用装 Airflow，用 Python 伪代码（或画图）写一个「抽取→清洗→汇总→入库」的 DAG，标出每个节点的 Operator 类型。\\n2. 写出 `t1 >> [t2, t3]` 和 `t2 >> t4`、`t3 >> t4` 的依赖关系，画出图，检查有没有环。\\n3. 给 DAG 配一个 cron 表达式：每周一早上 8 点跑（答案：`0 8 * * 1`）。",
+      "tasks": [
+        {
+          "task_id": "s10c04t01",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排列：Airflow 开发与运行流程",
+          "question": "从写代码到让一个 Airflow 工作流自动运行，请按正确顺序排列操作步骤。",
+          "steps": [
+            "编写 DAG 的 Python 文件（定义任务与依赖）",
+            "把 DAG 文件放入 dags 目录",
+            "Scheduler 周期扫描并解析 DAG",
+            "到达调度时间后触发 DAG 运行",
+            "Executor 把任务分发给 Worker 执行",
+            "在 Webserver 界面查看运行状态与日志"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "order_explain": "先写 DAG 代码、放进 dags 目录，Scheduler 扫描解析后到点触发，Executor 分发、Worker 执行，最后在 Webserver 看状态——「写代码 → 解析 → 触发 → 执行 → 查看」是 Airflow 的完整链路。",
+          "analysis": "**标准解题思路**\\n1. 写 DAG 的 Python 文件（Workflow as Code）。\\n2. 放进 dags 目录。\\n3. Scheduler 周期扫描、解析 DAG 定义。\\n4. 到调度时间自动触发。\\n5. Executor 分发、Worker 执行任务。\\n6. Webserver 查看状态与日志。\\n**易错点**：DAG 放进 dags 目录后不会立刻生效，要等 Scheduler 下一次扫描。",
+          "enterprise_tip": "Airflow 面试核心就是这个「代码驱动」流程：DAG 进 Git、评审、测试，再部署到 dags 目录——工程化程度是它区别于 DS 的最大卖点。"
+        },
+        {
+          "task_id": "s10c04t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Airflow 的依赖符号",
+          "question": "Airflow 中 `t1 >> t2` 表示什么？",
+          "options": [
+            {
+              "text": "t1 执行成功后才执行 t2",
+              "correct": true,
+              "explain": "正确。>> 表示从左到右的依赖：左边跑完右边才跑。"
+            },
+            {
+              "text": "t2 执行成功后才执行 t1",
+              "correct": false,
+              "explain": "方向反了，>> 的箭头指向右侧的依赖任务。"
+            },
+            {
+              "text": "t1 和 t2 并行执行",
+              "correct": false,
+              "explain": "并行要用 `t1 >> [t2, t3]` 这种分支写法，而不是连一条依赖。"
+            },
+            {
+              "text": "t1 和 t2 没有任何关系",
+              "correct": false,
+              "explain": ">> 正是用来声明依赖关系的。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. `>>` 是 Airflow 的依赖操作符，方向从左到右。\\n2. `t1 >> t2` = t2 依赖 t1，t1 成功后才执行 t2。\\n3. 选 A。\\n**延伸**：`t1 >> [t2, t3]` 是 t1 完成后并行执行 t2、t3；`t1 >> t2 >> t3` 是串行链。",
+          "enterprise_tip": "面试手写 Airflow 依赖是高频题，把 `>>`、`<<`、列表并行三种写法都练熟；顺带能说出「DAG 无环」的设计原因（有环则永远无法结束）就是加分项。"
+        },
+        {
+          "task_id": "s10c04t03",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：DAG 的全称",
+          "question": "Airflow 中 DAG 的全称是 ____（三个英文单词，首字母分别是 D、A、G）。",
+          "answer": [
+            "Directed Acyclic Graph",
+            "Directed acyclic graph",
+            "DAG",
+            "有向无环图"
+          ],
+          "hint": "题目已给出三个首字母和中文含义，先分别回忆『有向』『无环』『图』对应的英文单词，再按顺序拼成完整短语。",
+          "analysis": "**标准解题思路**\\n1. D → Directed（有向）。\\n2. A → Acyclic（无环）。\\n3. G → Graph（图）。\\n4. 全称 Directed Acyclic Graph（有向无环图）。\\n**要点**：比对忽略大小写，写 Directed Acyclic Graph 或直接写 DAG 均可。",
+          "enterprise_tip": "「DAG 全称 + 为什么无环」是调度相关面试的第一题：有向 = 依赖有方向，无环 = 不存在循环依赖，保证任务一定能在有限步内结束。"
+        },
+        {
+          "task_id": "s10c04t04",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：DAG 的中文全称",
+          "question": "Airflow 中 DAG（Directed Acyclic Graph）的中文全称是 ____（5 个字）。",
+          "answer": [
+            "有向无环图",
+            "Directed Acyclic Graph",
+            "DAG"
+          ],
+          "hint": "题目已给出英文全称，先拆解三个英文单词的中文含义，再组合成五个字的中文译名。",
+          "analysis": "**标准解题思路**\n1. DAG = Directed（有向）+ Acyclic（无环）+ Graph（图）。\n2. 中文全称：**有向无环图**。\n3. 含义：节点是任务，边是依赖方向，『无环』保证任务一定能在有限步内结束。\n**易错点**：有向（依赖有方向）和无环（不存在循环依赖）两个特征缺一不可；有环的工作流永远无法被调度完成。",
+          "enterprise_tip": "面试第一题「DAG 是什么」：先报英文全称，再说中文『有向无环图』，最后补一句『无环保证任务一定能结束』——三句话就是满分回答。"
+        },
+        {
+          "task_id": "s10c04t05",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Airflow 中设置任务依赖的运算符",
+          "question": "在 Airflow 中，要让任务 t2 在任务 t1 执行成功后再执行，应使用哪个运算符设置依赖？",
+          "options": [
+            {
+              "text": "t1 >> t2",
+              "correct": true,
+              "explain": "正确。>> 表示从左到右的依赖，t1 执行成功后才执行 t2。"
+            },
+            {
+              "text": "t2 >> t1",
+              "correct": false,
+              "explain": "方向反了。t2 >> t1 表示 t1 依赖 t2，即 t2 先执行。"
+            },
+            {
+              "text": "t1 -> t2",
+              "correct": false,
+              "explain": "Airflow 依赖符号是 >>，不是 ->。"
+            },
+            {
+              "text": "t1 << t2",
+              "correct": false,
+              "explain": "<< 与 >> 方向相反，t1 << t2 等价于 t2 >> t1，表示 t1 依赖 t2。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Airflow 用 **>>** 表示依赖：`a >> b` = a 执行成功后执行 b。\n2. 需求是 t2 依赖 t1 → 写成 `t1 >> t2`。\n3. 并行写法：`t1 >> [t2, t3]` 表示 t1 完成后 t2、t3 并行；`t1 >> t2 >> t3` 表示串行链。\n**易错点**：>> 的方向就是执行方向，箭头指向的是『后面执行』的任务；<< 是反向依赖，别混用。",
+          "enterprise_tip": "手写 Airflow 依赖是面试高频题：`>>`、`<<`、列表并行（[t2, t3]）三种写法都要熟练，能顺手解释『为什么 DAG 无环』更佳。"
+        },
+        {
+          "task_id": "s10c04t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Scheduler 的职责",
+          "question": "Airflow 中，负责**周期性扫描 dags 目录、解析 DAG 定义、到点触发任务**的组件是？",
+          "options": [
+            {
+              "text": "Scheduler",
+              "correct": true,
+              "explain": "正确。Scheduler 周期扫描 dags 目录、解析 DAG，到点提交任务实例。"
+            },
+            {
+              "text": "Webserver",
+              "correct": false,
+              "explain": "Webserver 提供 Web 界面查看状态与日志，不负责触发。"
+            },
+            {
+              "text": "Executor",
+              "correct": false,
+              "explain": "Executor 负责调度执行任务实例（Local/Celery），解析 DAG 的是 Scheduler。"
+            },
+            {
+              "text": "Metadata DB",
+              "correct": false,
+              "explain": "Metadata DB 只存储 DAG 元数据与运行记录，不扫描不触发。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Scheduler 是 Airflow 的调度核心：周期扫描 dags 目录 → 解析 DAG → 到点触发。\n2. Webserver 管界面、Executor/Worker 管执行、Metadata DB 管存储。\n3. 选 A。\n**易错点**：把 Executor 和 Scheduler 混为一谈——解析 DAG 与触发是 Scheduler 的活，Executor 只负责把已触发的任务实例调度执行。",
+          "enterprise_tip": "实操认知点：改了 DAG 代码，要等 Scheduler 下一次扫描（默认几十秒到几分钟）才生效；部署新 DAG 后别急着刷新界面，先等扫描。"
+        },
+        {
+          "task_id": "s10c04t07",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：失败重试参数",
+          "question": "在 Airflow 的 DAG 中，通过 default_args 或任务级别设置**任务失败后的自动重试次数**的参数是 ____（英文单词）。",
+          "answer": [
+            "retries",
+            "RETRIES"
+          ],
+          "hint": "回忆 Airflow 任务属性：失败后自动重试的次数参数叫什么？先想『重试』的英文，再注意它用的是单数还是复数。",
+          "analysis": "**标准解题思路**\n1. Airflow 任务属性 `retries` 控制失败自动重试次数。\n2. 常写在 default_args 里对所有任务全局生效，也可在单个任务上覆盖。\n3. 配合 `retry_delay`（重试间隔）使用。\n4. 填 retries。\n**易错点**：别记成单数 retry 或 attempts——Airflow 的参数名是 retries。",
+          "enterprise_tip": "生产 DAG 的标配：default_args 里配 retries=3、retry_delay=timedelta(minutes=5)，再加失败告警，避免任务悄悄失败没人管。"
+        },
+        {
+          "task_id": "s10c04t08",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "Airflow 与 DolphinScheduler 的对比",
+          "question": "关于 Airflow 与 DolphinScheduler 的对比，下列说法**正确**的有？（多选）",
+          "options": [
+            {
+              "text": "Airflow 用 Python 代码定义工作流（Workflow as Code），DolphinScheduler 用 Web 界面拖拽编排",
+              "correct": true,
+              "explain": "正确。这是两者最根本的区别：写代码 vs 拖拽。"
+            },
+            {
+              "text": "Airflow 的 DAG 文件可以进 Git 做版本管理与 Code Review，工程化程度更高",
+              "correct": true,
+              "explain": "正确。代码即配置，天然支持版本管理和评审。"
+            },
+            {
+              "text": "DolphinScheduler 可视化拖拽、上手门槛低，是国内使用广泛的国产开源调度平台",
+              "correct": true,
+              "explain": "正确。DS 以低门槛可视化著称，是国内事实标准之一。"
+            },
+            {
+              "text": "团队懂 Python、重视代码管理选 Airflow；要快速可视化上手选 DolphinScheduler",
+              "correct": true,
+              "explain": "正确。选型没有绝对优劣，看团队现状。"
+            },
+            {
+              "text": "Airflow 也支持拖拽式编排，不需要写代码",
+              "correct": false,
+              "explain": "Airflow 的核心理念就是代码定义，没有拖拽编排。"
+            },
+            {
+              "text": "DolphinScheduler 只能通过 .job 文件定义工作流",
+              "correct": false,
+              "explain": ".job 文件是 Azkaban 的定义方式，DS 是 Web 拖拽。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 对比主线一「定义方式」：Airflow 代码 vs DS 拖拽（A）。\n2. 对比主线二「工程化 vs 低门槛」：Airflow 可进 Git 管理（B），DS 上手快（C）。\n3. 选型结论：看团队（D）。\n4. E 错：Airflow 不拖拽；F 错：.job 是 Azkaban 的方式。\n5. 选 A、B、C、D。\n**易错点**：别把三种工具的定义方式记串——Azkaban .job、DS 拖拽、Airflow 代码。",
+          "enterprise_tip": "面试对比题「Airflow 和 DS 怎么选」：记住「代码 vs 拖拽、工程化 vs 低门槛」两条主线 + 「看团队现状」的结论，就是标准满分回答。"
+        },
+        {
+          "task_id": "s10c04t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "Scheduler 轮询执行的原理",
+          "question": "你把一个新 DAG 文件放进了 Airflow 的 dags 目录，它是怎么被调度起来的？从 Scheduler 的工作原理看，正确的是？",
+          "options": [
+            {
+              "text": "Scheduler 周期性扫描 dags 目录并解析 DAG 文件，到调度时间就生成 DagRun 和 TaskInstance，交给 Executor 调度执行",
+              "correct": true,
+              "explain": "正确。Scheduler 是轮询驱动：扫描→解析→按时间生成运行实例→交 Executor/Worker 执行，全程自动化。"
+            },
+            {
+              "text": "文件放入 dags 目录后，立即自动执行一次",
+              "correct": false,
+              "explain": "放文件只是『登记定义』，要等 Scheduler 扫描到、且到达调度时间才会生成实例运行，不会立即执行。"
+            },
+            {
+              "text": "Webserver 检测到新文件后手动触发执行",
+              "correct": false,
+              "explain": "Webserver 只提供界面查看和手动触发入口，自动调度由 Scheduler 负责。"
+            },
+            {
+              "text": "Metadata DB 定时检查文件变更并触发执行",
+              "correct": false,
+              "explain": "Metadata DB 只存储元数据与运行记录，不扫描文件、不触发执行。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 链路：DAG 文件进 dags 目录 → Scheduler 周期轮询扫描 → 解析 Python 代码生成 DAG 对象 → 到达调度时间生成 DagRun（本次运行）与 TaskInstance（每个任务的一次实例）→ Executor 调度、Worker 执行。\n2. 所以新 DAG 不会立刻生效，要等 Scheduler 下一次扫描（默认几十秒到几分钟）。\n3. Webserver 只是查看与手动触发的入口。\n4. 选 A。\n**易错点**：把『放文件』当成『执行』是最常见误区；DAG 定义与任务运行是两步，中间由 Scheduler 轮询衔接。",
+          "enterprise_tip": "面试能讲出『DagRun 和 TaskInstance 的区别』是加分项：DagRun 是一次完整的 DAG 运行，TaskInstance 是其中某个任务的一次运行；排查『任务没跑』先看 Scheduler 日志有没有解析到该 DAG。"
+        },
+        {
+          "task_id": "s10c04t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Airflow 全局变量",
+          "question": "团队想把数据库连接串、文件路径等全局配置从 DAG 代码中抽出来，在 Web 界面统一管理、DAG 里动态读取。应使用 Airflow 的哪个功能？",
+          "options": [
+            {
+              "text": "Variable（变量）",
+              "correct": true,
+              "explain": "正确。Airflow Variable 是全局键值配置，可在界面维护、DAG 中用 Variable.get() 读取。"
+            },
+            {
+              "text": "XCom",
+              "correct": false,
+              "explain": "XCom 用于任务间传递运行期小数据，不是全局配置。"
+            },
+            {
+              "text": "DAG 装饰器",
+              "correct": false,
+              "explain": "装饰器用于定义任务，不是配置管理功能。"
+            },
+            {
+              "text": "catchup",
+              "correct": false,
+              "explain": "catchup 控制是否补跑历史实例，与全局配置无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Variable 定位：Airflow 的全局键值存储，适合连接串、路径、开关等配置。\n2. 用法：Web 界面 Admin → Variables 维护，DAG 中 `Variable.get(\"db_conn_str\")` 读取。\n3. 价值：配置与代码分离，改配置不用改代码、不用重新部署 DAG。\n4. 因此选 A；B（XCom 传任务数据）、C（装饰器定义任务）、D（catchup 回填）都不对。\n**为什么**：生产 DAG 的「配置外置」是工程化要求——易变配置放 Variable，敏感连接放 Connection，不写死在代码里。",
+          "enterprise_tip": "面试题「Airflow 里配置怎么管理」：Variable 管普通配置、Connection 管连接信息、Secrets backend 管敏感凭据；「配置不写死在 DAG 里」是 Code Review 必查项。"
+        },
+        {
+          "task_id": "s10c04t11",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "Airflow 任务间传数据",
+          "question": "Airflow 中，任务 A 计算出「今日待处理文件路径」，需要把它传给任务 B 使用。任务间传递这类小数据的机制是？",
+          "options": [
+            {
+              "text": "XCom（Cross-Communication，任务间交换小数据的机制）",
+              "correct": true,
+              "explain": "正确。XCom 用于任务间传递小数据，如路径、ID、少量结果。"
+            },
+            {
+              "text": "Variable",
+              "correct": false,
+              "explain": "Variable 是全局配置，适合不随运行变化的静态值；运行期任务间的数据交换用 XCom。"
+            },
+            {
+              "text": "直接读写 Metadata DB",
+              "correct": false,
+              "explain": "直接读写元数据库是危险操作，Airflow 提供 XCom 就是为任务间传数设计的。"
+            },
+            {
+              "text": "文件系统共享",
+              "correct": false,
+              "explain": "大数据用文件/HDFS 传递；小数据用 XCom 更轻量，是官方机制。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. XCom 定义：Cross-Communication，任务间交换数据（小数据）。\n2. 用法：任务 A `return` 值或 `xcom_push` 写入，任务 B 用 `task_instance.xcom_pull` 读取。\n3. 适用边界：小数据（路径、ID、计数）；大数据应落 HDFS/对象存储，再通过 XCom 传路径。\n4. 因此选 A；B（配置）、C（直连库）、D（文件）都不是最优机制。\n**为什么**：依赖关系解决「先后」，XCom 解决「数据传递」——两者配合才能让任务间真正协作起来。",
+          "enterprise_tip": "面试题「Airflow 任务间怎么传数据」：小数据用 XCom（注意默认存元数据库，别传大数据）；大数据先落 HDFS/S3，再通过 XCom 传路径，这是生产标准做法。"
+        },
+        {
+          "task_id": "s10c04t12",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "Airflow 回填历史数据",
+          "question": "3 月份部署了一个新的 Airflow DAG（start_date 设为 2024-03-01，schedule 每天跑），希望把 3 月 1 日以来的历史实例全部补跑生成数据。应如何配置？",
+          "options": [
+            {
+              "text": "设置 catchup=True，Scheduler 会为 start_date 之后每个错过的调度周期生成并补跑历史实例（这就是 Airflow 的回填机制）",
+              "correct": true,
+              "explain": "正确。catchup=True 会回填 start_date 至今所有错过的实例，正是 Airflow 的 backfill 机制。"
+            },
+            {
+              "text": "设置 catchup=False",
+              "correct": false,
+              "explain": "catchup=False 只调度当前及以后的周期，历史错过的不会补跑，无法回填 3 月数据。"
+            },
+            {
+              "text": "把 start_date 修改为今天",
+              "correct": false,
+              "explain": "start_date 改成今天会丢掉 3 月 1 日至今的调度窗口，同样无法补历史。"
+            },
+            {
+              "text": "手动触发一次运行即可",
+              "correct": false,
+              "explain": "手动触发只产生一次最新实例，无法为 3 月的每一天生成独立的日分区实例。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. catchup（回填）机制：DAG 的 start_date 与当前时间之间错过的调度周期，Scheduler 会逐个生成实例补跑。\n2. catchup=True 时，3/1 到今天的每一天都会生成实例并执行，产出 3 月每天的日分区数据。\n3. catchup=False 则只从最近一个周期开始调度，历史不补。\n4. 因此选 A；B（不补历史）、C（丢窗口）、D（只跑一次）都不满足。\n**为什么**：Airflow 的回填与 DS 的补数、调度平台的补数据本质相同——按调度周期批量生成历史实例，用历史业务日期参数重算分区。",
+          "enterprise_tip": "面试题「Airflow 怎么补历史数据」：catchup=True + start_date 设历史日期，Scheduler 自动回填；注意大数据量回填会瞬间产生大量实例，生产上常配合 max_active_runs 控制并发。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "Airflow 的核心理念是什么？",
+          "a": "Workflow as Code：工作流用 Python 代码定义，DAG 文件可以进 Git 做版本管理、Code Review 与测试，工程化程度高。"
+        },
+        {
+          "q": "Airflow 的核心组件有哪些？",
+          "a": "Scheduler（周期扫描 dags 目录、解析 DAG、到点触发）、Webserver（Web 界面查看状态日志）、Executor（调度执行任务的执行器）、Worker（Celery 模式下真正执行任务）、Metadata DB（存元数据与运行记录）。"
+        },
+        {
+          "q": "t1 >> [t2, t3] 表示什么？",
+          "a": "t1 执行成功后并行执行 t2 和 t3。这是 Airflow 里『一个上游多个下游并行』的标准写法。"
+        },
+        {
+          "q": "DAG 为什么不能有环？",
+          "a": "有环意味着存在循环依赖（A 依赖 B、B 又依赖 A），任务永远无法确定先后，调度永远无法结束，所以 DAG 必须是无环图。"
+        },
+        {
+          "q": "Airflow 和 DolphinScheduler 怎么选？",
+          "a": "团队懂 Python、重视代码版本管理与工程化选 Airflow（Workflow as Code）；要可视化拖拽、快速上手选 DolphinScheduler。没有绝对优劣，看团队现状。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "DAG",
+          "desc": "Directed Acyclic Graph 有向无环图，节点是任务、边是依赖，无环保证任务可结束。"
+        },
+        {
+          "term": "Workflow as Code",
+          "desc": "Airflow 的核心理念，用 Python 代码定义工作流，可版本管理、可测试。"
+        },
+        {
+          "term": "Scheduler",
+          "desc": "Airflow 调度组件，周期扫描 dags 目录、解析 DAG、到点触发任务。"
+        },
+        {
+          "term": "Webserver",
+          "desc": "Airflow 的 Web 界面组件，查看 DAG 运行状态与日志、手动触发运行。"
+        },
+        {
+          "term": "Executor",
+          "desc": "Airflow 执行器（LocalExecutor/CeleryExecutor），负责任务的调度执行。"
+        },
+        {
+          "term": "BashOperator",
+          "desc": "Airflow 常用运算符，用于执行 shell 命令的任务节点。"
+        },
+        {
+          "term": ">> 依赖运算符",
+          "desc": "Airflow 设置任务依赖的符号，t1 >> t2 表示 t1 完成后执行 t2。"
+        },
+        {
+          "term": "Metadata DB",
+          "desc": "Airflow 元数据库，存储 DAG 元数据与运行记录。"
+        }
+      ],
+      "kps": [
+        "Workflow as Code 理念（用 Python 代码定义工作流）",
+        "DAG 概念（Directed Acyclic Graph、无环原因）",
+        "核心组件职责（Scheduler 轮询扫描 dags 目录 / Webserver / Executor / Worker / Metadata DB）",
+        "依赖设置（>>、<<、列表并行）",
+        "常用 Operator 定义任务（BashOperator、PythonOperator、DummyOperator）",
+        "失败重试参数（retries）",
+        "Airflow 与 DolphinScheduler 的对比选型",
+        "Airflow Scheduler 轮询原理（解析 DAG 文件 → 生成 DagRun/TaskInstance → 交给 Executor）"
+      ]
+    },
+    {
+      "chapter_id": "s10c05",
+      "title": "10.5 调度系统底层原理",
+      "goal": "理解任务状态机、DAG 拓扑排序、分布式锁、失败重试退避与实例管理机制，讲清调度系统与 crontab 的本质区别",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "前面四章学的是「怎么用调度工具」，这一章深入一层，讲**调度系统内部是怎么工作的**。第一个核心概念是**任务状态机**：调度器不会让任务只有『跑/没跑』两种状态，而是维护一条完整的状态流转链。\n\n- **准备（READY/PENDING）**：实例已生成，等待依赖满足或到达触发条件；\n- **运行（RUNNING）**：实例被分发到执行节点，进程正在跑；\n- **成功（SUCCESS）**：执行完成且退出码为 0，触发下游；\n- **失败（FAILED）**：执行出错；若配置了重试，先进入**重试等待**状态，到间隔时间后重新进入运行；\n- **终止/跳过**：被人工终止，或依赖不满足被置为等待超时。\n\n状态机让调度器能精确回答『这个实例现在在哪一步、为什么没跑』——这正是运维排查的基础。"
+        },
+        {
+          "type": "text",
+          "content": "第二个核心机制是 **DAG 依赖调度**。一个工作流是**有向无环图**：节点是任务、边是依赖方向。调度器按**拓扑排序**决定执行顺序：\n\n- 拓扑排序的核心规则：**每次只启动『入度为 0』（所有上游都已完成）的节点**；\n- 执行完一个节点后，把它指向的边删掉，释放下一批入度为 0 的节点；\n- 并行度由此而来：同一时刻可以有多个『入度为 0』的节点同时跑；\n- 如果图里有环，拓扑排序会卡住——没有任何节点入度为 0，这就是 DAG 必须无环的根本原因。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "状态机流转（简化）：\n\n         ┌──────────────────────────────┐\n         ▼                              │\n   准备(依赖满足) → 运行 → 成功 → 触发下游\n         │          │\n         │          ▼\n         │      失败 ── 未配重试 ──→ 失败(告警)\n         │          │\n         │   配了重试 ──→ 重试等待(退避) ──┐\n         │                                  │\n         └──────────────────────────────────┘\n\n拓扑排序伪代码：\nwhile 还有未执行的节点:\n    找所有入度=0 的节点（上游都成功）→ 并行分发执行\n    等待它们完成 → 删除它们指向下游的边\n    若找不到入度=0 的节点且有未完成节点 → 存在环，报错",
+          "caption": "任务状态机与拓扑排序伪代码"
+        },
+        {
+          "type": "text",
+          "content": "企业级调度系统都是**分布式**的：多个调度节点（Master）共同服务，谁负责调度、谁负责执行需要协调。这里的地基是**分布式锁**。\n\n- 典型实现：基于 **ZooKeeper 的临时节点（Ephemeral Node）**。多个 Master 同时去 ZK 抢着创建同一个临时节点，**谁创建成功谁就是主节点**；\n- 临时节点的特性：**客户端会话断开（宕机）时节点自动消失**，锁自动释放，无需人工干预，主备切换随即发生——备节点重新抢锁成为新主；\n- 为什么必须防重复执行：如果主节点宕机后任务继续在两个节点上同时跑，离线数据会被写两遍（重复数据事故），所以**同一时刻只有持锁的主节点能分发实例**。"
+        },
+        {
+          "type": "code",
+          "lang": "text",
+          "content": "基于 ZooKeeper 的抢主（分布式锁）流程：\n\nMaster-1 ── 尝试创建 /scheduler/lock（临时节点）\nMaster-2 ── 尝试创建 /scheduler/lock\n   │\n   ├── Master-1 创建成功 → 成为主节点，负责分发任务\n   ├── Master-2 创建失败 → 进入等待，监听该节点\n   │\n   └── Master-1 宕机 → 临时节点随会话消失\n       → Master-2 收到通知，重新抢锁 → 成为新主（主备切换）\n\n重试退避示例（指数退避）：\n第 1 次失败 → 等 1 分钟后重试\n第 2 次失败 → 等 2 分钟后重试\n第 3 次失败 → 等 4 分钟后重试\n（间隔成倍增长，避免短时间反复冲击下游/资源）",
+          "caption": "ZK 临时节点抢主与指数退避"
+        },
+        {
+          "type": "text",
+          "content": "**失败重试与告警**是生产命脉。重试配置三要素：**重试次数**（如 3 次）、**重试间隔**（固定间隔或**退避**策略）、**重试上限**（超过后置为失败并告警）。退避（Backoff）的作用：失败往往意味着资源不足或下游故障，立刻重试大概率还是失败，退避让间隔逐步拉大，给系统恢复时间，避免『重试风暴』雪崩。告警通道：邮件、钉钉、飞书、企业微信、短信，一般配置『连续失败 N 次才告警』防噪音。\n\n**调度系统与 crontab 的本质区别**，一句话：crontab 只有『时间到就执行』，调度系统是『时间到 + 依赖满足才执行』，并且**每次运行都是一个可追踪的实例**（实例管理），还能**补数据**（按指定日期批量生成历史实例重跑）。"
+        },
+        {
+          "type": "text",
+          "content": "**调度性能**：企业调度系统支持**分钟级**调度粒度（相比 crontab 的分钟下限更灵活，可做到每分钟、每 5 分钟）。性能的关键是**实例生成**与**任务队列**：\n\n- 每天凌晨会集中生成海量周期实例（几千上万个），调度器把实例放进**任务队列**，由分发线程按依赖就绪状态批量出队；\n- 依赖已满足的实例优先出队运行，未满足的留在队列等待；\n- 调度器性能瓶颈通常在『实例生成速度』与『队列吞吐』，所以大平台会把实例生成做成异步批量任务，避免到点瞬间卡死。"
+        },
+        {
+          "type": "warning",
+          "content": "**原理级三大坑**：① 分布式场景不防重复执行 = 数据写两遍，主备切换必须依赖锁的『会话断开自动释放』；② 重试不做退避，失败任务会以固定间隔疯狂重试，把下游或资源打挂（重试风暴）；③ 把补数据理解成『重新保存任务』——补数据的本质是**按指定日期批量生成历史实例**，业务日期参数随之变化，从而重算历史分区。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：面试高频原理题三连：**「调度系统怎么保证任务只跑一次？」**——分布式锁 + 主备切换 + 实例状态机（RUNNING 中的实例不会被重复分发）。**「拓扑排序为什么重要？」**——它是 DAG 依赖调度的数学基础，决定了并行度与无环校验。**「重试为什么用退避？」**——防止重试风暴打挂系统。能把这三点讲透，说明你不是只会点界面，而是理解了调度系统的设计逻辑——这正是『资深』和『会用』的分水岭。"
+        }
+      ],
+      "hands_on": "1. 在纸上画一个 5 节点的 DAG（A→B、A→C、B→D、C→D、D→E），用手动模拟拓扑排序：每轮圈出『入度为 0』的节点，写出完整的合法执行顺序（提示：B、C 可并行）。\\n2. 给其中一个节点设计失败重试策略：重试 3 次、指数退避（1/2/4 分钟），画一个带『重试等待』状态的状态机流转图。\\n3. 用文字模拟一次主备切换：Master-1 宕机，ZK 临时节点消失，Master-2 抢锁成为新主——写下每一步发生了什么。",
+      "tasks": [
+        {
+          "task_id": "s10c05t01",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "DAG 的拓扑排序",
+          "question": "一个 DAG 的依赖关系为：A→B、A→C、B→D、C→D（箭头表示上游完成后执行下游）。调度器按拓扑排序调度，下列哪个是**合法**的执行顺序？",
+          "options": [
+            {
+              "text": "A → B、C（并行）→ D",
+              "correct": true,
+              "explain": "正确。A 先执行；A 完成后 B、C 入度均为 0 可并行；B、C 都完成后 D 才能执行。"
+            },
+            {
+              "text": "D → B、C → A",
+              "correct": false,
+              "explain": "D 依赖 B 和 C，B、C 依赖 A，把 D 放最前直接违反依赖。"
+            },
+            {
+              "text": "B → A → C → D",
+              "correct": false,
+              "explain": "B 依赖 A，A 没执行完 B 不能先跑，拓扑排序要求上游先于下游。"
+            },
+            {
+              "text": "A → D → B → C",
+              "correct": false,
+              "explain": "D 依赖 B 和 C，B、C 未执行完 D 不能跑。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 拓扑排序规则：每轮只执行『入度=0』（所有上游已完成）的节点。\n2. 初始入度：A=0，B=1（A），C=1（A），D=2（B、C）。\n3. 第一轮：只有 A 入度为 0，执行 A。\n4. 第二轮：删除 A 的边，B、C 入度变为 0，可并行执行。\n5. 第三轮：B、C 都完成后 D 入度变 0，执行 D。\n6. 合法顺序：A → B、C（并行）→ D，选 A。\n**易错点**：并行节点顺序内部可交换（先 B 后 C 或先 C 后 B 都合法），但 D 必须在 B、C 之后。",
+          "enterprise_tip": "拓扑排序是调度引擎的看家算法，面试常考『为什么 DAG 必须无环』：有环则永远存在入度不为 0 的节点，拓扑排序死循环，任务永远跑不完。"
+        },
+        {
+          "task_id": "s10c05t02",
+          "type": "fill",
+          "difficulty": 3,
+          "title": "填空：ZK 分布式锁节点类型",
+          "question": "基于 ZooKeeper 实现分布式锁时，多个调度节点抢同一个锁节点，**谁创建成功谁成为主节点**。为了保证持有者宕机时锁能自动释放（会话断开节点自动消失），该节点必须是 ____ 节点（4 个字）。",
+          "answer": [
+            "临时节点",
+            "临时顺序节点",
+            "EPHEMERAL",
+            "ephemeral"
+          ],
+          "hint": "回忆 ZooKeeper 的节点类型：哪种节点会在客户端会话断开时自动消失？先想『宕机自动释放锁』需要什么特性。",
+          "analysis": "**标准解题思路**\n1. ZK 节点分两类：持久节点（手动删除）与临时节点（客户端会话断开自动删除）。\n2. 分布式锁需要『持锁者宕机自动释放』，所以锁节点必须是**临时节点**。\n3. 多个 Master 抢着创建同一路径的临时节点：创建成功=拿到锁=成为主；创建失败=等待。\n4. 主节点宕机 → 会话断开 → 临时节点消失 → 备节点重新抢锁，完成主备切换。\n5. 填「临时节点」（写 EPHEMERAL 也可）。\n**易错点**：用持久节点做锁，宕机后锁永远不释放，整个集群卡死——这是分布式锁实现中最经典的错误。",
+          "enterprise_tip": "面试题『ZK 分布式锁为什么用临时节点』标准答：临时节点随会话消失，天然实现『宕机自动释放锁』，无需人工清理；再补一句『临时顺序节点可实现公平锁』就是加分。"
+        },
+        {
+          "task_id": "s10c05t03",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "重试为什么要退避",
+          "question": "任务失败后配置了自动重试，采用**退避（Backoff）策略**（重试间隔逐步增大）的主要目的是？",
+          "options": [
+            {
+              "text": "失败往往伴随资源不足或下游故障，逐步拉大间隔给系统恢复时间，避免重试风暴把系统打挂",
+              "correct": true,
+              "explain": "正确。退避的核心价值是防雪崩：让失败任务的重试频率随时间下降。"
+            },
+            {
+              "text": "让任务在重试时跑得更快",
+              "correct": false,
+              "explain": "间隔增大与单次任务速度无关，退避改变的是『重试的节奏』而非『任务的执行速度』。"
+            },
+            {
+              "text": "减少重试总次数，让任务尽早放弃",
+              "correct": false,
+              "explain": "重试总次数由『重试次数』配置决定，退避只改变间隔；且退避不是为了放弃，是为了提高重试成功率。"
+            },
+            {
+              "text": "让告警更频繁，尽快通知负责人",
+              "correct": false,
+              "explain": "告警频率与退避无关；相反退避后系统压力减小，告警通常按『连续失败 N 次』触发。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 想清楚『失败的原因分布』：瞬时抖动（网络闪断）可以立即重试，但持续故障（磁盘满、下游宕机）立刻重试大概率还失败。\n2. 固定间隔重试的危害：大量失败任务同时按相同节奏重试，形成**重试风暴**，进一步打挂系统。\n3. 退避：间隔成倍增长（1 分钟→2 分钟→4 分钟），既给了恢复时间，又让重试频率自然衰减。\n4. 选 A。\n**易错点**：退避不是『放弃重试』也不是『加速执行』，它调节的是重试的时间节奏，目的是提高重试成功率并保护系统。",
+          "enterprise_tip": "『指数退避』在分布式系统里处处可见（调度重试、服务调用重试、消息消费重试），面试能举出『重试风暴』这个反面案例，比只背概念更有说服力。"
+        },
+        {
+          "task_id": "s10c05t04",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排列：一个周期实例从生成到完成",
+          "question": "把调度系统中『一个周期实例从生成到完成』的完整过程按正确顺序排列。",
+          "steps": [
+            "调度器按调度时间（cron）生成当天的周期实例",
+            "实例进入等待状态，检查上游依赖实例是否全部成功",
+            "上游全部成功后，实例变为可运行并进入任务队列",
+            "调度器把实例分发给执行节点，节点运行任务",
+            "运行成功，实例标记为成功并触发下游实例"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "先按时间生成实例，再检查依赖（依赖是触发闸门），就绪后进队列等待分发，分发到执行节点运行，最后标记成功并触发下游——实例管理贯穿全程。",
+          "analysis": "**标准解题思路**\n1. 生成：调度器到点按任务定义生成实例（实例=某任务在某次调度时间的运行记录）。\n2. 依赖检查：实例不能直接跑，先检查上游同业务日期的实例是否成功。\n3. 入队：依赖满足后实例变为可运行，进入任务队列等待调度。\n4. 分发执行：调度器把实例分发给执行节点（Worker/Executor），节点运行任务。\n5. 完成：成功后实例状态置为成功，并触发下游实例的依赖检查。\n**易错点**：『生成实例』与『开始执行』是两回事——实例生成了但依赖未满足，会一直在等待状态，这也是排查『实例为什么不动』的起点。",
+          "enterprise_tip": "这个五步流程就是调度引擎的主循环：生成→检查依赖→入队→分发→完成触发下游。面试答『调度系统怎么工作的』，按这五步讲就是完整答案。"
+        },
+        {
+          "task_id": "s10c05t05",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "补数据的原理",
+          "question": "某日调度任务失败，导致 6 月 1 日~6 月 3 日的数据缺失。运维在平台选择该任务并指定日期范围点「补数据」，从原理上看，平台会做什么？",
+          "options": [
+            {
+              "text": "按选定日期（6/1、6/2、6/3）各生成一个补数据实例，实例的业务日期参数分别取对应历史日期，逐个调度运行重算历史分区",
+              "correct": true,
+              "explain": "正确。补数据 = 按日期批量生成历史业务日期的实例，业务参数随日期变化，从而重算历史数据。"
+            },
+            {
+              "text": "只重新保存一遍任务定义，什么都不执行",
+              "correct": false,
+              "explain": "重新保存只是修改草稿，不会产生任何实例；补数据必须生成并运行实例。"
+            },
+            {
+              "text": "只生成一个实例，把三天数据合并跑一次",
+              "correct": false,
+              "explain": "每天一个实例、业务日期各自不同，是逐天重算，不会合并成单次运行。"
+            },
+            {
+              "text": "修改任务的代码逻辑后再运行",
+              "correct": false,
+              "explain": "补数据不修改任务定义代码，它只是按历史日期重新调度已有任务。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 补数据的本质：**按指定日期批量生成『补数据实例』**。\n2. 每个实例的业务日期（bizdate 参数）取对应的历史日期：6/1、6/2、6/3 各一个。\n3. 实例按任务已有逻辑运行，SQL 中的 ${bizdate} 替换为历史日期，重算对应的历史分区。\n4. 任务定义代码不变，只是多了一批历史业务日期的实例。\n5. 选 A。\n**易错点**：补数据 ≠ 修改代码，也不等于『跑一次最新数据』；关键是业务日期参数的切换。",
+          "enterprise_tip": "面试题『补数据是什么』标准答：按指定日期范围批量生成历史实例、以历史业务日期参数重算分区；补数据能成功的前提是任务代码本身用了调度参数（如 ${bizdate}），写死日期的任务没法补。"
+        },
+        {
+          "task_id": "s10c05t06",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：失败后的重试状态",
+          "question": "在任务状态机中，任务运行失败后若配置了重试，实例不会直接置为最终失败，而是先进入 ____ 状态，等待退避间隔结束后重新进入运行状态（2 个字）。",
+          "answer": [
+            "重试",
+            "等待重试",
+            "待重试",
+            "retry"
+          ],
+          "hint": "回忆任务状态机：失败后若配置了重试，实例不会直接置为最终失败，而是进入哪个中间状态等待退避间隔？",
+          "analysis": "**标准解题思路**\n1. 状态机完整链路：准备 → 运行 → 成功 / 失败。\n2. 失败后分两种情况：未配重试 → 直接置为最终失败并告警；配置了重试 → 先进入**重试**（等待重试）状态。\n3. 重试状态下实例不执行，只计时；退避间隔结束再次进入运行状态，重试次数 +1。\n4. 超过重试次数上限 → 置为最终失败并触发告警。\n5. 填「重试（等待重试/待重试）」。\n**易错点**：失败与重试不是同一状态——失败是结果事件，重试是介于失败与下次运行之间的中间状态。",
+          "enterprise_tip": "运维界面里『重试中/等待重试』的实例不是卡死，是策略内正常等待；判断异常的标准是『重试次数已用尽仍失败』。"
+        },
+        {
+          "task_id": "s10c05t07",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "调度系统与 crontab 的本质区别",
+          "question": "关于企业调度系统与 Linux crontab 的**本质区别**，下列说法最准确的是？",
+          "options": [
+            {
+              "text": "crontab 只有『定时触发』；调度系统在此基础上具备依赖感知、实例管理（每次运行可追踪）与补数据能力",
+              "correct": true,
+              "explain": "正确。『定时』之外的三件事——依赖、实例、补数——正是调度系统相对 crontab 的本质增量。"
+            },
+            {
+              "text": "crontab 也能感知任务依赖，只是写法不同",
+              "correct": false,
+              "explain": "crontab 没有任何依赖概念，只能靠错峰猜时间，无法感知上游是否成功。"
+            },
+            {
+              "text": "调度系统只是把 crontab 做成网页界面，功能相同",
+              "correct": false,
+              "explain": "界面只是表象，依赖检查、实例管理、补数、重试告警是 crontab 根本没有的机制。"
+            },
+            {
+              "text": "两者没有本质区别，只是调度系统跑在集群上",
+              "correct": false,
+              "explain": "跑在集群上只是部署形态；触发模型完全不同：crontab 只看时间，调度系统是时间+依赖。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. crontab 的触发模型：『时间到就执行』，一次执行没有实例概念、不查依赖、不能补数。\n2. 调度系统的触发模型：『时间到 + 依赖满足』，每次运行生成可追踪的实例，支持重试、告警、补数据。\n3. 用例子对比：crontab 里 B 想等 A，只能把 B 定晚一点（猜时间）；调度系统里 B 显式依赖 A，A 成功才触发。\n4. 选 A。\n**易错点**：不要把区别说成『有没有界面』或『单机/集群』，本质差异在触发模型与实例管理。",
+          "enterprise_tip": "这是调度方向最经典的面试题，标准答法就是『定时 vs 定时+依赖+实例+补数』；能再补一句『crontab 用于机器级杂活，数据任务必须进调度平台』就是满分。"
+        },
+        {
+          "task_id": "s10c05t08",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "调度器怎么发现 DAG 里有环",
+          "question": "运维在调度平台上保存工作流时，平台提示「存在循环依赖，无法保存」。平台是怎么发现环的？",
+          "options": [
+            {
+              "text": "保存/上线时对 DAG 做环检测（如拓扑排序或 DFS 判环），只要存在任何环就拒绝保存并提示",
+              "correct": true,
+              "explain": "正确。调度平台在定义校验阶段用拓扑排序/DFS 检测环，有环直接拦截，避免坏工作流上线。"
+            },
+            {
+              "text": "任务运行到环上时才会报错",
+              "correct": false,
+              "explain": "等运行才发现环代价太高（任务永远无法完成）；正规平台在保存/上线时就校验。"
+            },
+            {
+              "text": "随机抽检，不一定能发现",
+              "correct": false,
+              "explain": "环检测是确定性算法（拓扑排序/DFS），不是抽检。"
+            },
+            {
+              "text": "靠 DBA 手工检查",
+              "correct": false,
+              "explain": "图规模大时手工无法胜任，且平台在校验阶段就能自动拦截。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 环的危害：A 依赖 B、B 又依赖 A → 拓扑排序永远找不到入度为 0 的节点，任务永远无法开始/结束。\n2. 检测方法：保存/上线时对工作流图做拓扑排序或 DFS 判环——能完整排序则无环，排不完则存在环。\n3. 平台行为：检测到环直接拒绝保存/上线，并提示具体的循环路径。\n4. 因此选 A；B（运行期才发现）、C（抽检）、D（人工）都不是正规做法。\n**为什么**：环检测把「运行期死锁」提前到「定义期拦截」，这是调度平台的基本防御机制，也是 DAG 必须无环的原因。",
+          "enterprise_tip": "面试题「调度平台怎么防止环」：定义校验阶段用拓扑排序判环；这也解释了为什么 Airflow 要求 DAG 无环、DS 保存工作流时校验依赖图。"
+        },
+        {
+          "task_id": "s10c05t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "任务幂等的重要性",
+          "question": "调度任务支持失败重试与补数，这就要求任务必须幂等。任务幂等指的是？",
+          "options": [
+            {
+              "text": "同一任务（同一业务日期）无论执行一次还是多次，最终产出的数据结果一致，不会因重复执行产生重复或错误数据",
+              "correct": true,
+              "explain": "正确。幂等 = 重复执行不改变结果，是重试/补数能安全进行的前提。"
+            },
+            {
+              "text": "任务执行速度恒定不变",
+              "correct": false,
+              "explain": "幂等与执行速度无关，只关乎重复执行的正确性。"
+            },
+            {
+              "text": "任务永远不失败",
+              "correct": false,
+              "explain": "幂等不保证不失败，而是保证失败后重跑不会坏数据。"
+            },
+            {
+              "text": "任务只能执行一次",
+              "correct": false,
+              "explain": "恰恰相反，幂等允许执行多次只是结果不变；「只能一次」是防重而非幂等。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 幂等定义：同一输入重复执行，结果与执行一次一致。\n2. 为什么需要：调度会失败重试、补数会重跑历史——若任务不幂等，重跑一次数据就翻倍或错乱。\n3. 工程实现：先删后插/覆盖写分区（INSERT OVERWRITE）、按主键去重 upsert、唯一约束。\n4. 因此选 A；B（速度）、C（不失败）、D（只能一次）都不对。\n**为什么**：幂等是「重试/补数/重复触发」全部安全性的基石——不幂等的任务，一次重试就是一次数据事故。",
+          "enterprise_tip": "面试题「怎么保证任务重跑不出重复数据」：任务写成幂等——按分区覆盖写、按主键 upsert；DWD/DWS 加工统一 INSERT OVERWRITE 分区，重跑同一分区天然覆盖。"
+        },
+        {
+          "task_id": "s10c05t10",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "调度容错机制",
+          "question": "调度平台中，正在执行任务的 Worker 节点突然宕机，平台对该任务实例的正确处理是？",
+          "options": [
+            {
+              "text": "检测到 Worker 失联后，将任务实例状态回置（失败/等待重试），由其他空闲 Worker 重新领取执行（或按重试策略重跑）",
+              "correct": true,
+              "explain": "正确。分布式调度的容错核心：失联检测 + 实例状态回置 + 重新调度，保证任务最终能完成。"
+            },
+            {
+              "text": "任务永远卡在运行状态",
+              "correct": false,
+              "explain": "完善的调度平台有心跳/会话检测，不会让实例永久卡死；卡死是容错缺失的表现。"
+            },
+            {
+              "text": "直接判定为成功",
+              "correct": false,
+              "explain": "无法确认任务是否完成，绝不能直接标记成功，否则产生假数据。"
+            },
+            {
+              "text": "把任务丢给 Master 执行",
+              "correct": false,
+              "explain": "Master 负责调度分发而非执行，容错是重新分发给其他 Worker。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 场景：Worker 宕机，正在跑的任务实例状态悬空（既没成功也没失败）。\n2. 容错链路：平台通过心跳/会话检测到 Worker 失联 → 把该节点上运行中的实例状态回置（失败/等待重试）→ 按重试策略由其他空闲 Worker 重新领取执行。\n3. 配合机制：分布式锁保证同一实例不会被两台 Worker 同时执行（防重复）；实例状态机保证可追踪。\n4. 因此选 A；B（卡死）、C（假成功）、D（Master 执行）都不对。\n**为什么**：调度容错 = 失联检测 + 状态恢复 + 重新调度，让「机器挂了任务不挂」，这是企业级调度与 crontab 的关键差异之一。",
+          "enterprise_tip": "面试题「Worker 挂了怎么办」：DS/Airflow 都有心跳与重新调度机制——实例失败重试、其他 Worker 接手；结合「ZK 临时节点自动释放锁 + 状态机回置」讲就是完整答案。"
+        },
+        {
+          "task_id": "s10c05t11",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：历史实例清理",
+          "question": "调度平台运行久了，数据库里的历史运行记录越来越多、查询变慢。运维通常会配置清理策略，定期删除 N 天以前的 ____（指每次调度产生的一条可追踪的运行记录），只保留最近数据（填两个字）。",
+          "answer": [
+            "实例",
+            "实例记录",
+            "运行记录",
+            "历史实例",
+            "实例数据"
+          ],
+          "hint": "回忆实例管理概念：每次调度运行生成的那条可追踪记录叫什么？题目说的是定期清理历史运行记录，对应哪两个字。",
+          "analysis": "**标准解题思路**\n1. 背景：每次调度都会生成实例记录，日积月累数据库膨胀、查询变慢。\n2. 方案：配置清理策略，定期删除 N 天前的历史实例/运行记录（保留窗口如 90~180 天）。\n3. 注意：清理前确认无需再补数/审计，重要实例先归档再删。\n4. 因此填「实例」（实例记录/运行记录均可）。\n**为什么**：业务数据要保留，但实例元数据不需要无限期保留——历史实例清理是调度平台的常规运维动作，控制数据库大小与查询性能。",
+          "enterprise_tip": "面试题「调度库越来越大怎么办」：定期清理 N 天前历史实例（保留 90~180 天）+ 日志归档；清理前评估补数与审计需求，重要实例先归档再删。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "调度系统的任务状态机有哪些状态？",
+          "a": "准备（等待依赖/触发）、运行、成功、失败、重试等待；失败后若配了重试先进重试状态，超过重试上限才置为最终失败并告警。"
+        },
+        {
+          "q": "拓扑排序是什么？为什么 DAG 必须无环？",
+          "a": "拓扑排序是 DAG 依赖调度的执行顺序算法：每轮只启动入度为 0（上游全部成功）的节点。有环则永远存在入度不为 0 的节点，调度死循环，所以 DAG 必须无环。"
+        },
+        {
+          "q": "ZooKeeper 分布式锁为什么用临时节点？",
+          "a": "临时节点在客户端会话断开时自动删除，持锁者宕机锁自动释放，无需人工清理，从而支持主备切换且避免分布式场景重复执行。"
+        },
+        {
+          "q": "重试为什么要用退避（Backoff）？",
+          "a": "失败常伴随资源不足或下游故障，固定间隔重试会形成重试风暴打挂系统；退避让间隔成倍增长，给系统恢复时间，提高重试成功率。"
+        },
+        {
+          "q": "调度系统和 crontab 的本质区别？",
+          "a": "crontab 只有定时触发；调度系统是『时间+依赖』双触发，且具备实例管理（每次运行可追踪）、失败重试、告警与补数据（按历史日期批量生成实例重算）能力。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "任务状态机",
+          "desc": "任务实例的状态流转模型：准备→运行→成功/失败→重试等待，是调度系统精确追踪每次运行的基础。"
+        },
+        {
+          "term": "拓扑排序",
+          "desc": "DAG 依赖调度的执行顺序算法：每轮执行入度为 0 的节点，决定并行度并校验无环。"
+        },
+        {
+          "term": "分布式锁",
+          "desc": "多调度节点互斥的机制，常用 ZooKeeper 临时节点实现：创建成功者为主，会话断开自动释放。"
+        },
+        {
+          "term": "临时节点",
+          "desc": "ZooKeeper 节点类型，客户端会话断开自动删除，天然支持锁的自动释放。"
+        },
+        {
+          "term": "主备切换",
+          "desc": "主节点宕机后，备节点重新抢锁成为新主的过程，保证调度服务不中断。"
+        },
+        {
+          "term": "指数退避",
+          "desc": "重试间隔成倍增长（1/2/4 分钟）的策略，防止重试风暴。"
+        },
+        {
+          "term": "周期实例",
+          "desc": "调度器按调度时间生成的实例，代表某任务在某一时刻的一次运行，可追踪状态与日志。"
+        },
+        {
+          "term": "补数据",
+          "desc": "按指定日期范围批量生成历史业务日期的实例并调度重算，修复历史缺数。"
+        }
+      ],
+      "kps": [
+        "任务状态机（准备/运行/成功/失败/重试等待）",
+        "DAG 依赖调度与拓扑排序（入度为 0 才执行、无环原因）",
+        "分布式锁与 ZooKeeper 临时节点（抢主、自动释放）",
+        "主备切换与避免重复执行",
+        "失败重试与退避策略（重试次数/间隔/上限、防重试风暴）",
+        "告警机制（多渠道、连续失败才告警）",
+        "周期实例生成与任务队列（分钟级粒度、批量生成、队列调度）",
+        "补数据原理（按指定日期批量生成历史实例）",
+        "调度系统与 crontab 的本质区别（依赖感知、实例管理、补数据）"
+      ]
+    }
+  ]
+}

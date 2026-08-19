@@ -1,0 +1,2654 @@
+{
+  "stage_id": "s02_sql",
+  "title": "阶段 2：SQL 从入门到精通",
+  "subtitle": "数据工程师的通用语言：会写 SQL，就会取数、会分析、会面试",
+  "emoji": "🗄️",
+  "estimated_days": 14,
+  "learning_goal": "掌握 SQL 查询、聚合、连接、子查询、窗口函数与优化思维，能独立完成电商业务场景的取数与指标统计，并具备面试中 SQL 题的通关能力。",
+  "chapters": [
+    {
+      "chapter_id": "s02c01",
+      "title": "2.1 SELECT 基础查询",
+      "goal": "学会 SELECT 查列、别名 AS、WHERE 过滤、ORDER BY 排序、LIMIT 截断与 DISTINCT 去重",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "在电商公司里，用户、订单、商品、支付、流量日志，全部以**表**的形式存在数据库和数仓中。而 SQL（Structured Query Language）就是读取这些数据的**通用语言**：Hive、Spark SQL、Doris、ClickHouse 的语法都基本一致，学会 SQL，等于拿到了所有数据平台的通行证。\n\n先建立最核心的思维：**表 = 行 × 列**。一行是一条记录（比如一个用户），一列是一种属性（比如姓名、年龄）。而 SELECT 就是在「行」和「列」两个维度上做挑选：选哪些列、过滤哪些行、按什么排序、取前几条。"
+        },
+        {
+          "type": "text",
+          "content": "SELECT 的完整骨架（按书写顺序）：\n\n```\nSELECT 列1, 列2, ...      -- 选哪些列（可带别名 AS）\nFROM 表名                 -- 从哪张表\nWHERE 条件                -- 过滤行\nORDER BY 列 [ASC|DESC]    -- 排序（默认 ASC 升序）\nLIMIT n;                  -- 只取前 n 行\n```\n\n三个常用补充：**别名** `SELECT name AS 姓名` 给列起个可读的名字；**去重** `SELECT DISTINCT city` 去掉重复值；**注释** 用 `--` 或 `/* */` 给 SQL 写说明，团队协作离不开。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "-- 电商用户表：id 主键、姓名、年龄、性别\nCREATE TABLE users (id INTEGER, name TEXT, age INTEGER, gender TEXT);\nINSERT INTO users VALUES (1,'张三',25,'M'),(2,'李四',30,'F'),(3,'王五',22,'M');\n\n-- 1. 查所有列（学习阶段可用，生产环境慎用）\nSELECT * FROM users;\n\n-- 2. 只查姓名和年龄，按年龄降序\nSELECT name, age FROM users ORDER BY age DESC;\n\n-- 3. 过滤 + 截断：男性用户取前 1 条\nSELECT name FROM users WHERE gender='M' LIMIT 1;\n\n-- 4. 别名 + 表达式：年龄加 1 变成「明年年龄」\nSELECT name AS 姓名, age + 1 AS 明年年龄 FROM users;",
+          "caption": "SELECT 基础：建表、过滤、排序、别名"
+        },
+        {
+          "type": "tip",
+          "content": "**三个小习惯**：① 关键字大小写不敏感，但团队规范通常全大写，一眼分清关键字和字段；② 字符串和日期值必须加**单引号**（`'M'`、`'2024-01-01'`），数字不用加；③ 每条语句以分号结尾。"
+        },
+        {
+          "type": "warning",
+          "content": "**新手三大坑**：① 字符串忘加引号，`WHERE gender=M` 会报错；② 把等号写成 `==`，SQL 里比较只有一个 `=`；③ 在 WHERE 里写别名，如 `WHERE 明年年龄 > 26`——这是错的，因为 WHERE 在 SELECT 之前执行，别名还没算出来。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：数仓团队对查询有硬性规范——必须显式写出需要的列、禁止无脑 `SELECT *`（后面第 7 章讲为什么）、别名要语义化（`AS user_name` 而不是 `AS a`）、每个字段一行方便代码评审。你现在养成的习惯，就是入职后 code review 的标准。面试官常拿「`SELECT *` 为什么不好」当第一道送分题。"
+        }
+      ],
+      "hands_on": "1. 在平台内置 SQLite 或本机命令行执行上面的建表和 4 条查询，逐条理解输出。\\n2. 给 users 表加一列 city，插入 5 条带城市的数据，用 DISTINCT 查出去重后的城市列表。\\n3. 组合练习：查年龄大于 22 的用户姓名，按年龄升序，只取前 2 条。\\n4. 故意写一遍 `WHERE name = 张三`（字符串不加引号），记录报错信息，加深记忆。",
+      "tasks": [
+        {
+          "task_id": "s02c01t01",
+          "type": "sql",
+          "difficulty": 2,
+          "title": "查询男性用户并按年龄降序",
+          "question": "从 users 表中查出所有性别为 'M' 的用户的姓名和年龄，按年龄**降序**排列。\\n\\n输出列要求：name、age（保持此顺序）。\\n\\n本题环境为 SQLite（Hive/Spark SQL 语法基本一致）。",
+          "setup": "CREATE TABLE users (id INTEGER, name TEXT, age INTEGER, gender TEXT);\nINSERT INTO users VALUES (1,'张三',25,'M'),(2,'李四',30,'F'),(3,'王五',22,'M'),(4,'赵六',35,'M');",
+          "expected_sql": "SELECT name, age FROM users WHERE gender='M' ORDER BY age DESC;",
+          "hint": "先想：过滤条件放哪个子句？排序放哪个子句？两者的先后顺序是什么？",
+          "analysis": "**标准解题思路**\\n1. 读题：要「男性用户」→ 行过滤 → WHERE gender='M'。\\n2. 要「姓名和年龄」→ 列选择 → SELECT name, age。\\n3. 要「按年龄降序」→ ORDER BY age DESC。\\n4. 组装：SELECT name, age FROM users WHERE gender='M' ORDER BY age DESC;\\n5. 验证：男性有张三(25)、王五(22)、赵六(35)，降序为赵六、张三、王五。\\n**易错点**：'M' 必须加单引号；忘记 DESC 默认是升序，结果顺序会不一样。",
+          "enterprise_tip": "企业里这种「按某指标取 TopN」的查询是最高频需求，比如按消费金额取 VIP 用户。注意：生产环境数据量大时，ORDER BY 前一定要先用 WHERE 缩小数据范围。"
+        },
+        {
+          "task_id": "s02c01t02",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "哪个子句用于过滤行",
+          "question": "SQL 中用于**按条件过滤行**的子句是？",
+          "options": [
+            {
+              "text": "SELECT",
+              "correct": false,
+              "explain": "SELECT 负责选「列」，不负责过滤行。"
+            },
+            {
+              "text": "WHERE",
+              "correct": true,
+              "explain": "正确。WHERE 逐行判断条件，只保留满足条件的行。"
+            },
+            {
+              "text": "ORDER BY",
+              "correct": false,
+              "explain": "ORDER BY 负责排序，不改变行的去留。"
+            },
+            {
+              "text": "LIMIT",
+              "correct": false,
+              "explain": "LIMIT 只是截断返回行数，不参与条件判断。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 过滤行 = 行级别筛选。\\n2. SELECT 管列、WHERE 管行、ORDER BY 管顺序、LIMIT 管条数。\\n3. 选 B。\\n**延伸**：分组后过滤「组」用的是 HAVING，下一章会学到，注意区分。",
+          "enterprise_tip": "面试连环问：WHERE 和 HAVING 有什么区别？答：WHERE 在分组前过滤行，HAVING 在分组后过滤组——下一章就能完整回答。"
+        },
+        {
+          "task_id": "s02c01t03",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：去重关键字",
+          "question": "SQL 中用于对查询结果**去重**的关键字是 ____（与 SELECT 搭配使用）。",
+          "answer": [
+            "DISTINCT",
+            "distinct",
+            "Distinct"
+          ],
+          "hint": "先判断：这道题考 SELECT 的哪个可选关键字？它放在 SELECT 和列名之间。",
+          "analysis": "**标准解题思路**\\n1. 去重 = 去掉重复行。\\n2. 关键字 DISTINCT，写法是 SELECT DISTINCT 列。\\n3. 填 `DISTINCT`。\\n**延伸**：DISTINCT 作用在所有选中列上，`SELECT DISTINCT city, gender` 表示城市+性别组合不重复。"
+        },
+        {
+          "task_id": "s02c01t04",
+          "type": "sql",
+          "difficulty": 2,
+          "title": "多条件过滤 + 分页查询",
+          "question": "从 users 表中查出**城市为 '上海' 且性别为 'M'** 的用户姓名和年龄，按年龄**升序**排列，分页显示**第 2 页**（每页 2 条，即跳过前 2 条只取 2 条）。\\n\\n输出列要求：name、age（保持此顺序）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE users (id INTEGER, name TEXT, age INTEGER, gender TEXT, city TEXT);\nINSERT INTO users VALUES (1,'张三',25,'M','上海'),(2,'李四',30,'F','北京'),(3,'王五',22,'M','上海'),(4,'赵六',35,'M','广州'),(5,'孙七',28,'M','上海'),(6,'周八',24,'F','上海');",
+          "expected_sql": "SELECT name, age FROM users WHERE city='上海' AND gender='M' ORDER BY age, id LIMIT 2 OFFSET 2;",
+          "hint": "两个条件同时满足用什么连接词？「第 2 页、每页 2 条」要跳过几条、取几条？回忆分页的两个子句。",
+          "analysis": "**标准解题思路**\\n1. 读题：两个过滤条件「城市='上海'」和「性别='M'」→ WHERE city='上海' AND gender='M'。\\n2. 要「姓名和年龄」→ SELECT name, age。\\n3. 要「按年龄升序」→ ORDER BY age（补上 id 作为次级排序键，保证同年龄时顺序也确定）。\\n4. 分页：每页 2 条、取第 2 页 → 跳过 2 条取 2 条 → LIMIT 2 OFFSET 2。\\n5. 组装完整 SQL 并验证：上海且男性的用户按年龄排序为 王五(22)、张三(25)、孙七(28)，第 2 页只返回 张三, 25。\\n**易错点**：OFFSET 是「跳过多少条」而不是「第几页」，第 n 页每页 m 条应写 OFFSET (n-1)*m；两个条件之间用 AND，不要写成逗号。",
+          "enterprise_tip": "分页是报表和接口的高频需求，但 OFFSET 越大越慢（数据库要跳过前面所有行）。企业大表分页常用「键集分页」：WHERE id > 上一页最后一条id LIMIT n。"
+        },
+        {
+          "task_id": "s02c01t05",
+          "type": "sql",
+          "difficulty": 2,
+          "title": "DISTINCT 去重查城市列表",
+          "question": "用 **DISTINCT** 查出 users 表中所有**不重复的城市**，按城市名**升序**排列。\\n\\n输出列要求：city。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE users (id INTEGER, name TEXT, age INTEGER, gender TEXT, city TEXT);\nINSERT INTO users VALUES (1,'张三',25,'M','上海'),(2,'李四',30,'F','北京'),(3,'王五',22,'M','上海'),(4,'赵六',35,'M','广州'),(5,'孙七',28,'M','上海'),(6,'周八',24,'F','上海');",
+          "expected_sql": "SELECT DISTINCT city FROM users ORDER BY city;",
+          "hint": "题目已提示用 DISTINCT，想清楚它放在哪个位置？去重后还要排序，别忘 ORDER BY。",
+          "analysis": "**标准解题思路**\\n1. 读题：要「不重复的城市」→ 去重 → SELECT DISTINCT city。\\n2. 原表城市有 上海、北京、广州、上海、上海 → 去重后只剩 上海、北京、广州。\\n3. 要「按城市名升序」→ ORDER BY city。\\n4. 验证：结果 3 行，且每个城市只出现一次。\\n**易错点**：DISTINCT 作用于所有选中列的组合，`SELECT DISTINCT city, gender` 表示「城市+性别」组合去重，不是城市单独去重。",
+          "enterprise_tip": "城市/渠道/品类这类维度列表，就是数仓里的「维度枚举」。注意 DISTINCT 需要全量去重，超大表上代价高，企业常用 GROUP BY 或物化维度表实现同样效果。"
+        },
+        {
+          "task_id": "s02c01t06",
+          "type": "sql",
+          "difficulty": 2,
+          "title": "表达式计算与别名：查询明年年龄",
+          "question": "从 users 表中查出每个用户的**姓名、年龄**，以及「**明年年龄**」（age + 1，列名用别名 **next_age**），按年龄**升序**、id **升序**排列，保证结果确定。\\n\\n输出列要求：name、age、next_age（保持此顺序）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE users (id INTEGER, name TEXT, age INTEGER, gender TEXT);\nINSERT INTO users VALUES (1,'张三',25,'M'),(2,'李四',30,'F'),(3,'王五',22,'M'),(4,'赵六',35,'M');",
+          "expected_sql": "SELECT name, age, age + 1 AS next_age FROM users ORDER BY age, id;",
+          "hint": "「明年年龄」在 SQL 里就是一个表达式；给表达式起名字用什么关键字？排序要两个字段。",
+          "analysis": "**标准解题思路**\\n1. 读题：要三列 name、age、next_age，其中 next_age 是 age + 1 的别名。\\n2. 表达式：age + 1 对每一行计算，得到「明年年龄」。\\n3. 别名：AS next_age，让输出列名符合题目要求。\\n4. 排序：ORDER BY age, id——按年龄升序，同年龄时再按 id 保证顺序确定（这是结果比对通过的关键）。\\n5. 验证：王五 22→23、张三 25→26、李四 30→31、赵六 35→36。\\n**易错点**：忘写 AS 时输出列名是表达式本身，列名不匹配；只写 ORDER BY age 时若年龄相同行序可能不稳定，应补 id 作为次级排序键。",
+          "enterprise_tip": "「现价 + 折扣」「年龄 + 1」这类列上表达式在报表里很常见。企业规范：表达式列必须起语义化别名（next_age 而不是 a），方便下游直接引用。"
+        },
+        {
+          "task_id": "s02c01t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "LIMIT 与 OFFSET 分页",
+          "question": "用户列表按 id 排序后需要**分页**展示：**每页 10 条**，要显示**第 3 页**的数据，正确的 SQL 写法是？",
+          "options": [
+            {
+              "text": "LIMIT 10 OFFSET 20",
+              "correct": true,
+              "explain": "正确。第 3 页 = 跳过前 2 页（2×10=20 条）再取 10 条，即 LIMIT 10 OFFSET 20。"
+            },
+            {
+              "text": "LIMIT 10 OFFSET 30",
+              "correct": false,
+              "explain": "OFFSET 30 是跳过 30 条，取到的是第 4 页，不是第 3 页。"
+            },
+            {
+              "text": "LIMIT 30 OFFSET 10",
+              "correct": false,
+              "explain": "LIMIT 30 一次取 30 条且只跳过 10 条，条数和页数都写反了。"
+            },
+            {
+              "text": "LIMIT 3 OFFSET 10",
+              "correct": false,
+              "explain": "LIMIT 3 只取 3 条，不是每页 10 条。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 分页公式：第 n 页、每页 m 条 → LIMIT m OFFSET (n-1)*m。\\n2. 本题 n=3、m=10 → OFFSET (3-1)*10 = 20，LIMIT 10。\\n3. 所以是 LIMIT 10 OFFSET 20，选第一项。\\n**易错点**：OFFSET 是「跳过多少条」而不是「第几页」；把 OFFSET 写成 30 会直接跳到第 4 页。",
+          "enterprise_tip": "OFFSET 越大越慢（数据库要跳过前面所有行），企业大表分页常用「键集分页」：WHERE id > 上一页最后一条 id LIMIT n。"
+        },
+        {
+          "task_id": "s02c01t08",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：最先执行的子句",
+          "question": "SQL 实际执行时，**最先执行**的子句是 ____（在 SELECT / FROM / WHERE 三者中选一个填）。",
+          "answer": [
+            "FROM",
+            "FROM 子句",
+            "from"
+          ],
+          "hint": "先确定数据从哪张表来，再逐层过滤与计算。",
+          "analysis": "**标准解题思路**\\n1. 执行顺序：FROM → WHERE → GROUP BY → HAVING → SELECT → ORDER BY → LIMIT。\\n2. 第一步确定数据来源 → FROM。\\n3. 填 FROM。\\n**延伸**：这个顺序解释了为什么 WHERE 里不能用别名（别名在 SELECT 阶段才生成）、为什么聚合函数不能出现在 WHERE 里（WHERE 执行时还没分组）。"
+        },
+        {
+          "task_id": "s02c01t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "SELECT 不写 WHERE 为什么慢：全表扫描",
+          "question": "在几千万行的用户表上执行 `SELECT * FROM users;`（不带 WHERE），比带 WHERE 且命中索引的查询慢得多。从**底层执行原理**看，最准确的原因是？",
+          "options": [
+            {
+              "text": "引擎只能把整张表的所有数据页从头到尾读一遍（全表扫描），没有任何条件可以跳过无关数据",
+              "correct": true,
+              "explain": "正确。没有过滤条件时优化器只能选择全表扫描，磁盘 IO 量 ≈ 整张表的大小。"
+            },
+            {
+              "text": "不带 WHERE 的查询会自动给整张表加锁，导致大量等待",
+              "correct": false,
+              "explain": "错误。加锁与 WHERE 无关，且普通 SELECT 走 MVCC 快照读，不会锁住整张表。"
+            },
+            {
+              "text": "不带 WHERE 的查询结果必须额外做一次全量排序",
+              "correct": false,
+              "explain": "错误。没有 ORDER BY 就不排序，慢的核心是读取的数据量太大。"
+            },
+            {
+              "text": "引擎会先把整张表复制一份到内存再返回",
+              "correct": false,
+              "explain": "错误。数据库不会复制整表，而是直接扫描数据页并流式返回结果。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 执行计划视角：无 WHERE → 优化器只能选全表扫描（Full Table Scan），顺序读表的所有数据页。\\n2. 索引视角：B+ 树索引只对带等值/范围条件的查询有效，没有条件就「无可跳过」，索引帮不上忙。\\n3. IO 视角：磁盘 IO 是性能瓶颈，全表扫描的 IO 量 = 表占用的全部页面。\\n4. 大数据视角：亿行订单表全表扫描要读几百 GB，耗时以分钟甚至小时计。\\n5. 结论：选 A。\\n**延伸**：带 WHERE 且命中索引时，只沿 B+ 树读少量页，IO 相差几个数量级——这就是「少扫数据」的第一性原理。",
+          "enterprise_tip": "数仓里最贵的 SQL 事故就是「忘写分区/过滤条件导致全表扫描」。面试问「SELECT 不写 WHERE 为什么慢」，答出「全表扫描 + 页 IO + 索引失效」三层，就是底层原理级别的标准答案。"
+        },
+        {
+          "task_id": "s02c01t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "SQL 字符串拼接的方言差异",
+          "question": "关于 SQL 中的**字符串拼接**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "SQLite / PostgreSQL 用 || 拼接（'a' || 'b' 得 'ab'），MySQL 用 CONCAT() 函数，SQL Server 用 + 号，各数据库语法有差异",
+              "correct": true,
+              "explain": "正确。|| 是 SQL 标准拼接符，但 MySQL 默认把 || 当逻辑或，需用 CONCAT()，不同引擎写法要分清。"
+            },
+            {
+              "text": "所有数据库的字符串拼接语法完全一致",
+              "correct": false,
+              "explain": "错误。||、CONCAT()、+ 三种写法并存，换数据库时拼接代码要跟着改。"
+            },
+            {
+              "text": "字符串可以用 + 号直接和数字相加得到新数字",
+              "correct": false,
+              "explain": "错误。字符串与数字相加会触发类型转换或直接报错；想拼接数字要先 CAST 成字符串。"
+            },
+            {
+              "text": "拼接结果不能用于 ORDER BY 排序",
+              "correct": false,
+              "explain": "错误。拼接后的表达式可以正常出现在 ORDER BY 中（如按全名排序）。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 拼接的本质：把多个字符串合并成一个字符串，常用于拼全名、拼订单号前缀、拼完整地址。\n2. 标准写法：'a' || 'b' → 'ab'（SQLite、PostgreSQL、Oracle 都支持）。\n3. 方言差异：MySQL 中 || 默认是逻辑或，拼接用 CONCAT('a', 'b')；SQL Server 用 'a' + 'b'。\n4. 混类型注意：数字拼进字符串前先 CAST 成 TEXT，避免隐式转换出意外。\n5. 选 A。",
+          "enterprise_tip": "数仓团队常同时维护 Hive/Spark（|| 和 concat 都支持）与 MySQL 两套查询，拼接函数写错是最常见的「换引擎翻车点」；面试常问各数据库拼接语法区别。"
+        },
+        {
+          "task_id": "s02c01t11",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：类型转换函数",
+          "question": "SQL 中把某列或表达式**显式转换**为另一种类型的函数是 ____（如 `____(age AS TEXT)`、`____(amount AS INTEGER)`）。",
+          "answer": [
+            "CAST",
+            "cast",
+            "Cast",
+            "CAST()",
+            "cast()"
+          ],
+          "hint": "2.1 节讲了类型转换：字符串要变成整数/日期等类型时用的语法结构，题中已经给了它的调用格式提示。",
+          "analysis": "**标准解题思路**\n1. CAST(表达式 AS 目标类型) 是 SQL 标准的显式类型转换函数。\n2. 常见转换：CAST('2024' AS INTEGER) 字符串转整数、CAST(amount AS TEXT) 数字转字符串、CAST(age AS REAL) 整数转小数。\n3. 为什么需要：JOIN 时两表关联列类型不一致、日期字符串与数值比较、拼接数字前先转字符串。\n4. 对比隐式转换：数据库会自动做部分转换，但行为不可控，显式 CAST 更安全可读。\n5. 填 CAST。",
+          "enterprise_tip": "企业 JOIN 事故的第一大原因就是关联列类型不一致（INTEGER vs TEXT 匹配不上）；连接前统一用 CAST 对齐类型，是数仓取数的基本功。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "SELECT * 和 SELECT 指定列有什么区别？",
+          "a": "SELECT * 返回表的所有列，写起来方便但浪费磁盘 IO 和网络传输，生产环境禁止；指定列只读取需要的列，能配合列存引擎做列裁剪，速度更快、下游依赖也更稳定。"
+        },
+        {
+          "q": "WHERE 里能不能用 SELECT 里定义的别名？",
+          "a": "不能。SQL 的执行顺序是 FROM → WHERE → GROUP BY → HAVING → SELECT → ORDER BY，别名在 SELECT 阶段才生成，所以 WHERE 里用别名会报错；ORDER BY 阶段可以安全使用别名。"
+        },
+        {
+          "q": "SQL 里字符串和数字写法有什么不同？",
+          "a": "字符串和日期值必须用单引号包裹（如 'M'、'2024-01-01'），不加引号会被当成列名或数字导致报错；数字直接写，不用引号。关键字大小写不敏感，但团队规范通常统一大写。"
+        },
+        {
+          "q": "LIMIT 和 OFFSET 怎么实现分页？",
+          "a": "LIMIT 限制返回的行数，OFFSET 跳过前面的行。第 n 页（每页 m 条）写成 LIMIT m OFFSET (n-1)*m。注意 OFFSET 是跳过条数而不是页号，深分页时 OFFSET 越大性能越差。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "SELECT",
+          "desc": "查询语句主关键字，用于选择需要的列。"
+        },
+        {
+          "term": "WHERE",
+          "desc": "行级过滤子句，在分组前按条件筛选行。"
+        },
+        {
+          "term": "ORDER BY",
+          "desc": "排序子句，ASC 升序、DESC 降序，可跟多个排序列。"
+        },
+        {
+          "term": "LIMIT",
+          "desc": "限制返回行数的子句，常与 OFFSET 配合实现分页。"
+        },
+        {
+          "term": "OFFSET",
+          "desc": "跳过前面 N 行的子句，与 LIMIT 配合做分页。"
+        },
+        {
+          "term": "DISTINCT",
+          "desc": "对查询结果去重的关键字，作用于所有选中列的组合。"
+        },
+        {
+          "term": "AS 别名",
+          "desc": "给列或表起可读名字的关键字，如 SELECT name AS 用户名。"
+        },
+        {
+          "term": "SQL 执行顺序",
+          "desc": "FROM → WHERE → GROUP BY → HAVING → SELECT → ORDER BY → LIMIT 的实际执行次序。"
+        }
+      ],
+      "kps": [
+        "表 = 行 × 列：SELECT/FROM/WHERE/ORDER BY/LIMIT 查询骨架",
+        "列选择、表达式计算与别名 AS",
+        "WHERE 行过滤与书写规范（字符串加引号、多条件 AND、分号结尾）",
+        "ORDER BY 排序（ASC/DESC 与多级排序）",
+        "LIMIT 与 OFFSET 分页",
+        "DISTINCT 去重",
+        "SQL 执行顺序（WHERE 里不能用别名、先过滤后排序）",
+        "SELECT 无 WHERE 的全表扫描原理（为什么慢）"
+      ]
+    },
+    {
+      "chapter_id": "s02c02",
+      "title": "2.2 聚合与分组",
+      "goal": "掌握 COUNT/SUM/AVG/MAX/MIN 聚合函数与 GROUP BY 分组，理解 WHERE 与 HAVING 的过滤时机差异",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "上一章的查询是「一行对一行」。但业务上我们更常问的是「一共多少钱」「平均多少」「哪个用户买得多」——这种把**多行压成一行**的计算就是**聚合**。\\n五个聚合函数：`COUNT` 计数、`SUM` 求和、`AVG` 平均、`MAX` 最大、`MIN` 最小。\\n注意 `COUNT(*)` 数所有行，而 `COUNT(列)` 只数该列**非 NULL** 的行——这个区别后面讲 NULL 时会反复出现。"
+        },
+        {
+          "type": "text",
+          "content": "光有聚合函数只能算全表一个数，业务上要按维度拆开算：**每个用户**买多少、**每天**成交多少——这就是 `GROUP BY`（分组）。\\n分组的两条铁律：\\n① SELECT 里出现的**非聚合列**，必须出现在 GROUP BY 里（否则 SQLite 会报错或结果无意义）；\\n② 分组后再过滤用 `HAVING`：WHERE 在**分组前**过滤行，HAVING 在**分组后**过滤组。\\n\\n理解时机差异是本章核心：`WHERE` 先挑出「要算哪些行」，`HAVING` 再挑出「要保留哪些组」。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL, status TEXT, order_date TEXT);\nINSERT INTO orders VALUES\n (1,101,150.0,'paid','2024-01-01'),\n (2,101,80.0,'paid','2024-01-02'),\n (3,102,300.0,'paid','2024-01-03'),\n (4,103,50.0,'refunded','2024-01-04');\n\n-- 1. 全站指标：订单数、总金额、平均金额、最大单\nSELECT COUNT(*) AS order_cnt, SUM(amount) AS total_gmv, AVG(amount) AS avg_amount, MAX(amount) AS max_amount FROM orders;\n\n-- 2. 每个用户的订单数与总金额（按总金额降序）\nSELECT user_id, COUNT(*) AS order_cnt, SUM(amount) AS total_amount\nFROM orders GROUP BY user_id ORDER BY total_amount DESC;\n\n-- 3. WHERE 先行、HAVING 后到：只统计 paid，且总金额超过 200 的用户\nSELECT user_id, SUM(amount) AS total_amount\nFROM orders\nWHERE status = 'paid'\nGROUP BY user_id\nHAVING SUM(amount) > 200\nORDER BY total_amount DESC;",
+          "caption": "聚合 + 分组 + WHERE/HAVING 组合"
+        },
+        {
+          "type": "warning",
+          "content": "**WHERE 和 HAVING 搞混是高频面试陷阱**：`WHERE SUM(amount) > 200` 直接报错——聚合函数不能出现在 WHERE 里（WHERE 执行时分组还没发生，SUM 无从算起）。想过滤「组」，必须用 HAVING。"
+        },
+        {
+          "type": "tip",
+          "content": "**先 WHERE 再 GROUP BY 更高效**：能用 WHERE 提前滤掉的行（如退款单），不要等分组算完再用 HAVING 滤组——少算一个组就少一份计算量。这也叫「先缩小数据再聚合」。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：数仓里所有经营指标——GMV、订单量、客单价、退款率——本质就是这条 SQL 的不同变体。而指标最容易出问题的就是**口径**：GMV 算不算退款？算不算未支付？统计「每天」按哪个时区？写 SQL 前先和业务方对齐口径，是企业取数第一原则。面试必问题：WHERE 与 HAVING 的区别与执行时机。"
+        }
+      ],
+      "hands_on": "1. 自建 orders 表（含 status、order_date 字段，插入 8~10 行数据），用 GROUP BY 统计每天的订单量和总金额。\\n2. 只统计 status='paid' 的订单，按用户分组求总额，再用 HAVING 筛出总额大于 200 的用户。\\n3. 造一条 amount 为 NULL 的订单，分别跑 COUNT(*) 和 COUNT(amount)，观察结果差异并思考原因。\\n4. 试试在 WHERE 里写 SUM(amount)，记录报错信息。",
+      "tasks": [
+        {
+          "task_id": "s02c02t01",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "统计每个用户的订单数与总金额",
+          "question": "统计每个用户的**订单数**和**订单总金额**，按总金额**降序**排列。\\n\\n输出列要求：user_id、order_cnt、total_amount（保持此顺序，total_amount 为 SUM(amount)）。\\n\\n本题环境为 SQLite（Hive/Spark SQL 语法基本一致）。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL, status TEXT, order_date TEXT);\nINSERT INTO orders VALUES (1,101,150.0,'paid','2024-01-01'),(2,101,80.0,'paid','2024-01-02'),(3,102,300.0,'paid','2024-01-03'),(4,103,50.0,'refunded','2024-01-04'),(5,102,120.0,'paid','2024-01-05');",
+          "expected_sql": "SELECT user_id, COUNT(*) AS order_cnt, SUM(amount) AS total_amount FROM orders GROUP BY user_id ORDER BY total_amount DESC;",
+          "hint": "先想：按什么字段分组？「订单数」「总金额」各用哪个聚合函数？排序依据是哪一列？",
+          "analysis": "**标准解题思路**\\n1. 读题：按「每个用户」→ GROUP BY user_id。\\n2. 「订单数」→ COUNT(*)；「总金额」→ SUM(amount)。\\n3. 输出列 user_id、order_cnt、total_amount。\\n4. 「按总金额降序」→ ORDER BY total_amount DESC（别名可以直接用于 ORDER BY）。\\n5. 验证：102 有 2 单共 420.0，101 有 2 单共 230.0，103 有 1 单 50.0，降序排列正确。\\n**易错点**：SELECT 里非聚合列（user_id）必须出现在 GROUP BY 中；不要漏掉 AS 别名，否则输出列名不匹配。",
+          "enterprise_tip": "这就是「用户维度订单汇总」的雏形，数仓里常物化成用户宽表。真实场景注意：金额一般按「分」存整数，避免浮点误差；先 WHERE 滤掉无效订单再聚合。"
+        },
+        {
+          "task_id": "s02c02t02",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "用 HAVING 筛出高价值用户",
+          "question": "统计每个用户的订单总金额，只保留总金额**大于 200** 的用户，按总金额**降序**排列。\\n\\n输出列要求：user_id、total_amount（保持此顺序，total_amount 为 SUM(amount)）。\\n\\n本题环境为 SQLite（Hive/Spark SQL 语法基本一致）。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL, status TEXT, order_date TEXT);\nINSERT INTO orders VALUES (1,101,150.0,'paid','2024-01-01'),(2,101,80.0,'paid','2024-01-02'),(3,102,300.0,'paid','2024-01-03'),(4,103,50.0,'refunded','2024-01-04'),(5,102,120.0,'paid','2024-01-05');",
+          "expected_sql": "SELECT user_id, SUM(amount) AS total_amount FROM orders GROUP BY user_id HAVING SUM(amount) > 200 ORDER BY total_amount DESC;",
+          "hint": "想一想：过滤发生在分组之前还是之后？什么时候才需要「对组」进行过滤？",
+          "analysis": "**标准解题思路**\\n1. 读题：按用户分组 → GROUP BY user_id；求总额 → SUM(amount)。\\n2. 「总金额大于 200」是分组**之后**的条件 → HAVING SUM(amount) > 200。\\n3. 排序 → ORDER BY total_amount DESC。\\n4. 验证：102 总额 420.0、101 总额 230.0 被保留；103 总额 50.0 被过滤。\\n**易错点**：写 `WHERE SUM(amount) > 200` 会直接报错——聚合不能出现在 WHERE；HAVING 里也可以直接写别名（如 HAVING total_amount > 200），但规范上建议写完整表达式，更清晰。",
+          "enterprise_tip": "「高价值用户筛选」是电商运营的日常需求（如消费超过 1000 元的用户进 VIP 池）。HAVING 是大表上的「后置过滤器」，能用 WHERE 提前滤掉的数据一定不要拖到 HAVING。"
+        },
+        {
+          "task_id": "s02c02t03",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "WHERE 与 HAVING 的过滤时机",
+          "question": "关于 WHERE 与 HAVING，下列说法正确的是？",
+          "options": [
+            {
+              "text": "WHERE 在分组之后过滤组",
+              "correct": false,
+              "explain": "分组之后过滤组的是 HAVING，WHERE 在分组之前过滤行。"
+            },
+            {
+              "text": "WHERE 在分组前过滤行，HAVING 在分组后过滤组",
+              "correct": true,
+              "explain": "正确。这是两者最本质的区别，也是面试高频考点。"
+            },
+            {
+              "text": "HAVING 可以不跟 GROUP BY 单独使用来过滤行",
+              "correct": false,
+              "explain": "HAVING 语义上针对「组」，单独使用时会把整表当成一个组，不是常规过滤行的用法。"
+            },
+            {
+              "text": "WHERE 中可以写聚合函数如 SUM(amount) > 200",
+              "correct": false,
+              "explain": "聚合函数不能出现在 WHERE 中，因为 WHERE 执行时还没有分组，SUM 无从计算。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 记住执行顺序：FROM → WHERE（过滤行）→ GROUP BY（分组）→ HAVING（过滤组）。\\n2. WHERE 管行、HAVING 管组，时机一前一后。\\n3. 聚合函数只能在 HAVING（或 SELECT）中使用，不能在 WHERE 中使用。\\n4. 选 B。",
+          "enterprise_tip": "面试升级版：WHERE 和 HAVING 哪个先执行、哪个效率高？答：WHERE 先执行且通常更高效，因为它提前减少了分组计算的数据量。"
+        },
+        {
+          "task_id": "s02c02t04",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "用 HAVING 筛出销售额超过 500 的日期",
+          "question": "统计**每天的销售总额**，只保留销售总额**大于 500** 的日期，按日期**升序**排列。\\n\\n输出列要求：order_date、daily_amount（保持此顺序，daily_amount 为 SUM(amount)）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL, status TEXT, order_date TEXT);\nINSERT INTO orders VALUES (1,101,300.0,'paid','2024-01-01'),(2,101,280.0,'paid','2024-01-01'),(3,102,300.0,'paid','2024-01-02'),(4,103,50.0,'refunded','2024-01-02'),(5,102,120.0,'paid','2024-01-02'),(6,104,600.0,'paid','2024-01-03'),(7,101,90.0,'paid','2024-01-03');",
+          "expected_sql": "SELECT order_date, SUM(amount) AS daily_amount FROM orders GROUP BY order_date HAVING SUM(amount) > 500 ORDER BY order_date;",
+          "hint": "先想：先分组还是先过滤？「每天销售额」是分组后才算出来的，对它的条件该放哪一步？",
+          "analysis": "**标准解题思路**\\n1. 读题：要「每天的销售总额」→ 按日期分组 → GROUP BY order_date，总额 → SUM(amount)。\\n2. 要「只保留总额大于 500 的日期」→ 这是分组**之后**的条件 → HAVING SUM(amount) > 500。\\n3. 要「按日期升序」→ ORDER BY order_date。\\n4. 计算每日总额：1 月 1 日 580.0、1 月 2 日 470.0、1 月 3 日 690.0。\\n5. 过滤后保留 1 月 1 日与 1 月 3 日两行，升序输出。\\n**易错点**：写 WHERE SUM(amount) > 500 会直接报错（WHERE 阶段还没有分组，聚合函数无从计算）；SUM 不要漏写别名，否则输出列名不匹配。",
+          "enterprise_tip": "「每日 GMV 达标日」是电商运营看板的标准查询。企业里先 WHERE status='paid' 滤掉无效订单再聚合，能把 HAVING 前的计算量大幅缩小——先缩小数据再聚合是铁律。"
+        },
+        {
+          "task_id": "s02c02t05",
+          "type": "sql",
+          "difficulty": 2,
+          "title": "统计活跃下单用户数",
+          "question": "统计 orders 表中**下过单的活跃用户数量**（同一用户多次下单只算一次），输出列名为 active_users。\\n\\n输出列要求：active_users。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL, status TEXT, order_date TEXT);\nINSERT INTO orders VALUES (1,101,300.0,'paid','2024-01-01'),(2,101,280.0,'paid','2024-01-01'),(3,102,300.0,'paid','2024-01-02'),(4,103,50.0,'refunded','2024-01-02'),(5,102,120.0,'paid','2024-01-02'),(6,104,600.0,'paid','2024-01-03'),(7,101,90.0,'paid','2024-01-03');",
+          "expected_sql": "SELECT COUNT(DISTINCT user_id) AS active_users FROM orders;",
+          "hint": "「同一用户多次下单只算一次」——要去重的是哪一列？去重和计数怎么组合？",
+          "analysis": "**标准解题思路**\\n1. 读题：统计「不同的用户数量」→ 对 user_id 去重计数。\\n2. 函数：COUNT(DISTINCT user_id)，它先去掉重复的 user_id 再数个数。\\n3. 给结果列起名 active_users。\\n4. 验证：orders 里有 user 101、102、103、104 共 4 个不同用户（101 和 102 各下了多单，只算一次）→ 结果 4。\\n**易错点**：直接 COUNT(user_id) 会数 7 行（不去重）；COUNT(*) 数所有行，同样不对。",
+          "enterprise_tip": "活跃用户数（UV）是日活、转化率等核心指标的分母，数仓几乎每天都要算。超大表上 COUNT(DISTINCT) 代价高，企业常用 HyperLogLog 近似算法或「用户维表」预先去重物化。"
+        },
+        {
+          "task_id": "s02c02t06",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "WHERE 先行、HAVING 后到：统计有效支付总额",
+          "question": "统计每个用户的**已支付订单（status='paid'）总金额**，只保留总金额**大于 200** 的用户，按总金额**降序**排列。\\n\\n要求：先用 **WHERE** 过滤 status='paid'，再用 **HAVING** 过滤总金额大于 200（两者组合使用）。\\n\\n输出列要求：user_id、total_amount（保持此顺序，total_amount 为 SUM(amount)）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL, status TEXT);\nINSERT INTO orders VALUES (1,101,150.0,'paid'),(2,101,80.0,'refunded'),(3,102,300.0,'paid'),(4,103,50.0,'paid'),(5,102,120.0,'refunded'),(6,104,400.0,'paid');",
+          "expected_sql": "SELECT user_id, SUM(amount) AS total_amount FROM orders WHERE status='paid' GROUP BY user_id HAVING SUM(amount) > 200 ORDER BY total_amount DESC;",
+          "hint": "题目已要求先 WHERE 再 HAVING，想想为什么：哪个条件是行级、哪个是组级？",
+          "analysis": "**标准解题思路**\\n1. 读题：两个过滤——「只要已支付订单」是行级条件 → WHERE status='paid'；「总金额大于 200」是组级条件 → HAVING SUM(amount) > 200。\\n2. 分组：GROUP BY user_id；总额：SUM(amount) AS total_amount。\\n3. 只算 paid：101 的 80 元退款单被 WHERE 滤掉 → 101 总额 150；102 的 120 元退款单被滤掉 → 102 总额 300；103 总额 50；104 总额 400。\\n4. HAVING 过滤组：102(300)、104(400) 保留；101(150)、103(50) 被过滤。\\n5. 排序：ORDER BY total_amount DESC → 104(400)、102(300)。\\n**易错点**：把退款过滤写进 HAVING 或漏掉 WHERE 会算错总额；写 WHERE SUM(amount) > 200 会直接报错（WHERE 阶段没有分组，聚合函数无从计算）。",
+          "enterprise_tip": "这就是「有效 GMV」的取数口径：先把退款/未支付行用 WHERE 滤掉，再按用户聚合。先 WHERE 后 HAVING 不只是语法正确，还能大幅减少分组计算量——能用 WHERE 滤掉的行绝不等分组后再滤。"
+        },
+        {
+          "task_id": "s02c02t07",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：COUNT(列) 与 COUNT(*) 的区别",
+          "question": "某张订单表共 **100 行**，其中 amount 列为 NULL 的有 **30 行**。执行 `COUNT(amount)` 返回 ____（填数字；作为对比，`COUNT(*)` 返回 100）。",
+          "answer": [
+            "70",
+            "70 行",
+            "70行"
+          ],
+          "hint": "先回忆 COUNT(*) 与 COUNT(列) 的区别：COUNT(列) 会跳过什么？再用题中两个数字算一算。",
+          "analysis": "**标准解题思路**\\n1. COUNT(*) 数表中所有行 → 100。\\n2. COUNT(列) 只数该列非 NULL 的行 → 100 - 30 = 70。\\n3. 填 70。\\n**延伸**：这就是统计口径差异的根源——某列 NULL 越多，COUNT(*) 与 COUNT(列) 差距越大。企业指标必须说清楚用哪个：数「订单数」用 COUNT(*)，数「有支付金额的订单」用 COUNT(amount)。"
+        },
+        {
+          "task_id": "s02c02t08",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "GROUP BY 的底层实现",
+          "question": "从**底层原理**看，数据库 / 大数据引擎实现 `GROUP BY` 分组聚合时，常见的两种策略是？",
+          "options": [
+            {
+              "text": "哈希分组（Hash Aggregation）：把分组键哈希后映射到桶，同键数据进同一桶累积；排序分组（Sort Aggregation）：先按键排序，相邻同键行一起聚合",
+              "correct": true,
+              "explain": "正确。这是 GROUP BY 的两种主流实现：哈希单遍扫描、排序可落盘且输出有序。"
+            },
+            {
+              "text": "流式分组：按数据写入顺序依次累加，无需任何额外结构",
+              "correct": false,
+              "explain": "错误。数据写入顺序与分组键无关，不做哈希或排序就无法把同键数据聚到一起。"
+            },
+            {
+              "text": "索引分组：只扫描索引叶子节点就能直接得到分组结果",
+              "correct": false,
+              "explain": "错误。即使走索引，引擎仍需要按分组键做聚合计算，索引只是省去排序的一部分。"
+            },
+            {
+              "text": "全表复制分组：先把整张表复制一份再按行数平分",
+              "correct": false,
+              "explain": "错误。没有这种实现，复制整表只会更慢。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 两种主流策略：Hash Aggregation——把分组键哈希进桶，同键数据进同一桶累积聚合值，单遍扫描、内存友好；Sort Aggregation——先按分组键排序，排序后同键行相邻，线性扫描合并，输出天然有序、可溢写处理超内存数据。\\n2. 大数据引擎（Spark/Hive）默认多用哈希聚合，并拆成两阶段：局部聚合（Partial）→ Shuffle → 全局聚合（Final）。\\n3. 为什么 GROUP BY 慢：需要 Shuffle 把同 key 数据汇集到同一节点，再逐组计算。\\n4. 结论：选 A。\\n**易错点**：把「哈希 vs 排序」与「内存 vs 磁盘」搞混——哈希也能溢写、排序也不一定全内存，区别在组织方式。",
+          "enterprise_tip": "面试升级题「GROUP BY 慢怎么优化」：① 热点 key 加盐两阶段聚合；② 预聚合（物化中间表）；③ 先 WHERE 缩小数据再分组。答出「Shuffle 是分组代价的来源」就是底层视角。"
+        },
+        {
+          "task_id": "s02c02t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "GROUP_CONCAT 聚合拼接",
+          "question": "users 表的 name 列有 '张三'、'李四'、'王五' 三行，执行 `SELECT GROUP_CONCAT(name) FROM users;`，结果是？",
+          "options": [
+            {
+              "text": "'张三,李四,王五'",
+              "correct": true,
+              "explain": "正确。GROUP_CONCAT 把组内多行值拼成一个字符串，默认用英文逗号分隔，结果是一个字符串。"
+            },
+            {
+              "text": "'张三李四王五'",
+              "correct": false,
+              "explain": "错误。那是没有分隔符的拼接；GROUP_CONCAT 默认分隔符是英文逗号。"
+            },
+            {
+              "text": "3",
+              "correct": false,
+              "explain": "错误。3 是 COUNT(*) 的结果；GROUP_CONCAT 返回拼接后的字符串，不是行数。"
+            },
+            {
+              "text": "'张三 李四 王五'",
+              "correct": false,
+              "explain": "错误。默认分隔符是英文逗号不是空格；想要空格分隔要写 GROUP_CONCAT(name, ' ')。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. GROUP_CONCAT 是聚合函数，把组内多行的值拼接成一行一列（字符串）。\n2. 默认分隔符为英文逗号：GROUP_CONCAT(name) 等价于 GROUP_CONCAT(name, ',')。\n3. 自定义分隔符：GROUP_CONCAT(name, '|') 用竖线拼接。\n4. 常与 GROUP BY 配合：SELECT city, GROUP_CONCAT(name) FROM users GROUP BY city 得到每个城市的人员名单。\n5. 选 A。",
+          "enterprise_tip": "「一个用户的所有标签」「一个门店的所有员工」这类「一对多压成一列」的需求就用 GROUP_CONCAT；Hive 里对应 concat_ws(',', collect_list(列))，两个引擎要学会互译。"
+        },
+        {
+          "task_id": "s02c02t10",
+          "type": "fill",
+          "difficulty": 3,
+          "title": "填空：多列组合去重计数",
+          "question": "统计「(城市, 渠道) 组合」的去重数量，SQL 写法是 `COUNT(DISTINCT ____)`（填两个列名：city 与 channel，用英文逗号分隔）。",
+          "answer": [
+            "city, channel",
+            "city,channel",
+            "(city, channel)",
+            "(city,channel)"
+          ],
+          "hint": "先回忆 COUNT(DISTINCT …) 括号里的写法：多列组合去重时，列名之间用什么分隔？",
+          "analysis": "**标准解题思路**\n1. COUNT(DISTINCT 列) 对单列去重计数；COUNT(DISTINCT 列1, 列2) 对多列的组合去重计数。\n2. 组合去重的语义：只要 (city, channel) 二元组相同就算重复，只计一次。\n3. 示例：('北京', 'APP') 出现 3 次也只算 1 个组合。\n4. 与 GROUP BY 对比：SELECT city, channel, COUNT(*) FROM t GROUP BY city, channel 数的是每个组合的行数，COUNT(DISTINCT ...) 直接给组合总数。\n5. 填 city, channel。",
+          "enterprise_tip": "电商里「按 (设备, 日期) 去重算 UV」「按 (用户, 渠道) 去重算拉新」都是多列去重计数；超大表上代价高，常用近似算法或预先物化组合维度。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "WHERE 和 HAVING 有什么区别？",
+          "a": "执行时机不同：WHERE 在分组之前逐行过滤，不能使用聚合函数；HAVING 在分组之后过滤组，可以使用聚合函数（如 SUM(amount) > 200）。能用 WHERE 提前滤掉的行一定要先 WHERE，减少分组计算量。"
+        },
+        {
+          "q": "GROUP BY 的「铁律」是什么？",
+          "a": "SELECT 中出现的非聚合列必须全部出现在 GROUP BY 中，否则结果无意义或直接报错；GROUP BY 之后 SELECT 里只能写分组列和聚合函数。"
+        },
+        {
+          "q": "COUNT(*) 和 COUNT(列) 有什么区别？",
+          "a": "COUNT(*) 数表中的所有行；COUNT(列) 只数该列非 NULL 的行。当某列存在大量 NULL 时，两者结果差异很大，统计口径必须说清楚用的是哪个。"
+        },
+        {
+          "q": "为什么 WHERE SUM(amount) > 200 会报错？",
+          "a": "SQL 执行顺序中 WHERE 在 GROUP BY 之前执行，此时分组还没发生，聚合函数 SUM 无从计算；聚合函数只能出现在 SELECT 或 HAVING 中。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "COUNT / SUM / AVG / MAX / MIN",
+          "desc": "五个基本聚合函数：计数、求和、平均、最大、最小。"
+        },
+        {
+          "term": "GROUP BY",
+          "desc": "分组子句，把分组键相同的行合并成一组后再聚合。"
+        },
+        {
+          "term": "HAVING",
+          "desc": "分组后的过滤子句，可使用聚合函数过滤组。"
+        },
+        {
+          "term": "COUNT(DISTINCT 列)",
+          "desc": "对某列去重后计数的写法，如统计活跃用户数。"
+        },
+        {
+          "term": "聚合函数",
+          "desc": "把多行压成一行的函数族，是分组统计的核心。"
+        },
+        {
+          "term": "指标口径",
+          "desc": "指标统计的规则定义（统计哪些行、怎么算），企业取数前必须先和业务对齐口径。"
+        }
+      ],
+      "kps": [
+        "聚合函数五兄弟：COUNT / SUM / AVG / MAX / MIN",
+        "GROUP BY 分组与「非聚合列必须进 GROUP BY」铁律",
+        "WHERE 与 HAVING 的过滤时机（先滤行、后滤组）",
+        "HAVING 过滤组与聚合条件",
+        "COUNT(*) 与 COUNT(列) 的区别",
+        "COUNT(DISTINCT 列) 去重计数",
+        "先 WHERE 再聚合的优化与指标口径",
+        "GROUP BY 的底层：哈希分组与排序分组"
+      ]
+    },
+    {
+      "chapter_id": "s02c03",
+      "title": "2.3 多表连接",
+      "goal": "掌握 INNER/LEFT/RIGHT/FULL JOIN 与 ON 条件，理解连接和子查询的取舍与笛卡尔积陷阱",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "业务数据不会只放一张表：用户信息在 `users`，订单在 `orders`，商品在 `products`，支付在 `payments`。订单表里只存 `user_id` 而不重复存用户名——这就是**主键-外键**设计，避免数据冗余。\\n但取数时我们又需要「订单 + 用户名 + 商品名」拼在一起看，这就靠 **JOIN（连接）**：按某个关联条件（ON），把多张表的行拼起来。"
+        },
+        {
+          "type": "text",
+          "content": "四种连接（以 A JOIN B 为例）：\\n- **INNER JOIN**：只保留两表都匹配上的行（交集）。\\n- **LEFT JOIN**：左表 A 全部保留，右表没匹配上就补 NULL。\\n- **RIGHT JOIN**：右表 B 全部保留，左表补 NULL（SQLite 高版本支持，Hive 支持）。\\n- **FULL JOIN**：两表都全保留，互相补 NULL（并集）。\\n\\n两个高频陷阱：① **ON 条件写错或漏写** → 变成笛卡尔积（A 的每行 × B 的每行，行数爆炸）；② LEFT JOIN 后统计右表要用 `COUNT(B.主键)` 而不是 `COUNT(*)`，否则 NULL 行也被数进去。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "CREATE TABLE users (id INTEGER, name TEXT, city TEXT);\nINSERT INTO users VALUES (1,'张三','上海'),(2,'李四','北京'),(3,'王五','广州');\nCREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (101,1,150.0),(102,1,80.0),(103,2,300.0),(104,4,200.0);\n\n-- 1. INNER JOIN：订单 104 的 user_id=4 在 users 中不存在，整行被丢弃\nSELECT o.order_id, u.name, o.amount\nFROM orders o INNER JOIN users u ON o.user_id = u.id\nORDER BY o.order_id;\n\n-- 2. LEFT JOIN：users 全部保留，王五没有订单补 NULL；用 COUNT(o.order_id) 正确计数\nSELECT u.name, COUNT(o.order_id) AS order_cnt\nFROM users u LEFT JOIN orders o ON u.id = o.user_id\nGROUP BY u.name;\n\n-- 3. 从未下过单的用户：LEFT JOIN + 右表主键 IS NULL\nSELECT u.name FROM users u\nLEFT JOIN orders o ON u.id = o.user_id\nWHERE o.order_id IS NULL;",
+          "caption": "INNER / LEFT JOIN 与「补 NULL」的经典用法"
+        },
+        {
+          "type": "warning",
+          "content": "**笛卡尔积灾难**：`FROM users, orders` 或 JOIN 忘写 ON，会产生 3×4=12 行。在小表上无所谓，在百万行的大表上直接是内存灾难。写 JOIN 先写 ON，是肌肉记忆级别的习惯。"
+        },
+        {
+          "type": "tip",
+          "content": "**连接 vs 子查询怎么选**：能表达同一需求时，两表 JOIN 通常比嵌套子查询更高效、更易读；但「存在性判断」（某个 id 存不存在）用 EXISTS 更快。原则：先保证正确，再谈优化；能用 JOIN 说清楚就别绕。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：数仓建模常用**星型模型**——事实表（订单、支付流水）在中间，维度表（用户、商品、门店）围着它，取数就是事实表 JOIN 维度表。企业里 JOIN 的三大坑：① 关联字段类型不一致（字符串 vs 整数）导致匹配不上；② 关联字段有 NULL，NULL 永远匹配不上任何值；③ **数据倾斜**——某个 key（如大促爆款商品）数据特别多，把单机拖垮。面试必问：INNER 与 LEFT JOIN 的区别、如何避免笛卡尔积。"
+        }
+      ],
+      "hands_on": "1. 自建 users（3 人）、orders（4 单，含一个 users 中不存在的 user_id）两张表，分别跑 INNER JOIN 和 LEFT JOIN，对比结果差异。\\n2. 用 LEFT JOIN + WHERE o.order_id IS NULL 找出「从未下过单」的用户。\\n3. 建一张 products 表（product_id、name、price），把 orders 表加一列 product_id，练习三表连接：订单 + 用户名 + 商品名。\\n4. 故意写一个不带 ON 的 JOIN，观察结果行数（3×4），感受笛卡尔积。",
+      "tasks": [
+        {
+          "task_id": "s02c03t01",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "INNER JOIN 查询订单所属用户",
+          "question": "把 orders 与 users 连接起来，查出每个订单的订单号、用户名、金额，按订单号**升序**排列。\\n\\n输出列要求：order_id、name、amount（保持此顺序）。\\n\\n本题环境为 SQLite（Hive/Spark SQL 语法基本一致）。",
+          "setup": "CREATE TABLE users (id INTEGER, name TEXT, city TEXT);\nINSERT INTO users VALUES (1,'张三','上海'),(2,'李四','北京'),(3,'王五','广州');\nCREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (101,1,150.0),(102,1,80.0),(103,2,300.0),(104,4,200.0);",
+          "expected_sql": "SELECT o.order_id, u.name, o.amount FROM orders o INNER JOIN users u ON o.user_id = u.id ORDER BY o.order_id;",
+          "hint": "先想：两张表靠哪个字段对应起来？关联条件写在哪个子句？表名太长可用什么简化？",
+          "analysis": "**标准解题思路**\\n1. 读题：需要订单表和用户表的字段 → 两表连接。\\n2. 关联条件：订单的 user_id 对应用户的 id → ON o.user_id = u.id。\\n3. 用 INNER JOIN 只保留匹配行；给表起别名 o、u 简化书写。\\n4. 选列：o.order_id、u.name、o.amount；排序 ORDER BY o.order_id。\\n5. 验证：订单 101/102 属于张三、103 属于李四；订单 104 的 user_id=4 在 users 中不存在，INNER JOIN 会把它丢弃，这是预期行为。\\n**易错点**：忘记 ON 条件会变笛卡尔积；字段名冲突时（如两边都有 id）必须加表名前缀。",
+          "enterprise_tip": "连接字段一定先确认类型一致：users.id 是 INTEGER、orders.user_id 若是 TEXT，匹配会全部落空，这是企业里最隐蔽的 JOIN 事故。"
+        },
+        {
+          "task_id": "s02c03t02",
+          "type": "sql",
+          "difficulty": 4,
+          "title": "LEFT JOIN 统计每个用户的订单数",
+          "question": "统计每个用户的订单数和订单总金额，**没有下过单的用户也要显示**（订单数显示 0、金额显示 0）。\\n\\n输出列要求：id、name、order_cnt、total_amount（保持此顺序；total_amount 用 COALESCE 把 NULL 兜底为 0）。\\n\\n本题环境为 SQLite（Hive/Spark SQL 语法基本一致）。",
+          "setup": "CREATE TABLE users (id INTEGER, name TEXT, city TEXT);\nINSERT INTO users VALUES (1,'张三','上海'),(2,'李四','北京'),(3,'王五','广州');\nCREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (101,1,150.0),(102,1,80.0),(103,2,300.0),(104,4,200.0);",
+          "expected_sql": "SELECT u.id, u.name, COUNT(o.order_id) AS order_cnt, COALESCE(SUM(o.amount), 0) AS total_amount FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id, u.name ORDER BY u.id;",
+          "hint": "题目已指定 LEFT JOIN 和 COALESCE：先想左右表各是谁、计数用哪列、SUM 为何可能为 NULL。",
+          "analysis": "**标准解题思路**\\n1. 读题：「每个用户都要显示」→ 用户表在左、订单表在右 → LEFT JOIN。\\n2. 关联条件 ON u.id = o.user_id。\\n3. 订单数必须 COUNT(o.order_id)（右表主键）：王五无订单时补的是 NULL 行，COUNT(*) 会把它数成 1，COUNT(o.order_id) 才正确数成 0。\\n4. 金额 SUM(o.amount) 对无订单用户是 NULL，用 COALESCE(..., 0) 显示为 0。\\n5. GROUP BY u.id, u.name（SELECT 中的非聚合列都要进 GROUP BY），ORDER BY u.id。\\n6. 验证：张三 2 单 230.0、李四 1 单 300.0、王五 0 单 0.0。\\n**易错点**：COUNT(*) 数错 NULL 行；忘记 COALESCE 时王五金额显示 NULL 而非 0。",
+          "enterprise_tip": "「留存分析」的雏形：LEFT JOIN 找出从未下单/长期未活跃的用户做召回。企业里 COALESCE 兜底是标配，指标表里出现 NULL 会让下游报表直接显示空白。"
+        },
+        {
+          "task_id": "s02c03t03",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "关于 JOIN 的正确说法",
+          "question": "关于 SQL 多表连接，下列说法**正确**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "INNER JOIN 只返回两表中都能匹配上的行",
+              "correct": true,
+              "explain": "正确。INNER JOIN 就是取两表的交集。"
+            },
+            {
+              "text": "LEFT JOIN 保留左表的全部行，右表没有匹配时补 NULL",
+              "correct": true,
+              "explain": "正确。LEFT JOIN 以左表为准，这是它和 INNER JOIN 的根本区别。"
+            },
+            {
+              "text": "两张表 JOIN 时不写 ON 条件，会产生笛卡尔积",
+              "correct": true,
+              "explain": "正确。没有连接条件就是每行两两组合，行数 = 左表行数 × 右表行数。"
+            },
+            {
+              "text": "一次查询最多只能连接两张表",
+              "correct": false,
+              "explain": "错误。SQL 支持多表连接（三表、四表都常见），如订单连用户再连商品。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 逐项判断：A 交集定义正确；B LEFT JOIN 语义正确；C 无 ON 即笛卡尔积正确；D 多表连接完全可以，错误。\\n2. 选 A、B、C。\\n**延伸**：LEFT JOIN 后想只保留「右表无匹配」的行，加 WHERE 右表主键 IS NULL 即可——这是查「孤儿数据」的标准写法。",
+          "enterprise_tip": "面试追问：LEFT JOIN 结果行数为什么会变多？答：如果右表同一个 key 有多行（一对多），左表的行会被复制成多行——这叫行数膨胀，统计前要先确认关联字段是否唯一。"
+        },
+        {
+          "task_id": "s02c03t04",
+          "type": "sql",
+          "difficulty": 4,
+          "title": "三表连接计算实付金额",
+          "question": "连接 users、orders、payments 三张表，查询每笔订单的**订单号、用户名、订单金额、实付金额**（payments 表中该订单的支付金额），按订单号**升序**排列。\\n\\n输出列要求：order_id、name、amount、pay_amount（保持此顺序）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE users (id INTEGER, name TEXT, city TEXT);\nINSERT INTO users VALUES (1,'张三','上海'),(2,'李四','北京'),(3,'王五','广州');\nCREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (101,1,150.0),(102,1,80.0),(103,2,300.0);\nCREATE TABLE payments (payment_id INTEGER, order_id INTEGER, pay_amount REAL, pay_time TEXT);\nINSERT INTO payments VALUES (1001,101,135.0,'2024-01-01 10:00:00'),(1002,102,80.0,'2024-01-02 11:00:00'),(1003,103,280.0,'2024-01-03 12:00:00');",
+          "expected_sql": "SELECT o.order_id, u.name, o.amount, p.pay_amount FROM orders o INNER JOIN users u ON o.user_id = u.id INNER JOIN payments p ON o.order_id = p.order_id ORDER BY o.order_id;",
+          "hint": "三张表要连两次：先确定每张表的关联字段分别是什么，再写 JOIN 顺序。",
+          "analysis": "**标准解题思路**\\n1. 读题：需要三张表的字段 → 三表连接。\\n2. 关系链：orders.user_id → users.id，orders.order_id → payments.order_id。\\n3. 第一跳：INNER JOIN users u ON o.user_id = u.id 拿到用户名。\\n4. 第二跳：INNER JOIN payments p ON o.order_id = p.order_id 拿到实付金额。\\n5. 选列：o.order_id、u.name、o.amount、p.pay_amount，排序 ORDER BY o.order_id。\\n6. 验证：订单 101 张三 150.0/实付 135.0（优惠后）、102 张三 80.0/80.0、103 李四 300.0/280.0，共 3 行。\\n**易错点**：两个 ON 条件容易写串（第二跳的关联键是 order_id 而不是 user_id）；字段名有歧义时（如两边都有 id）必须加表名前缀。",
+          "enterprise_tip": "这就是数仓「订单事实表 + 用户维度表 + 支付事实表」的星型取数。企业里实付金额通常单独建支付流水表、金额按「分」存整数，避免浮点误差；连接前先确认关联字段类型一致。"
+        },
+        {
+          "task_id": "s02c03t05",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "LEFT JOIN 找出从未下单的用户",
+          "question": "用 **LEFT JOIN** 找出 users 中**从未下过单**的用户，输出姓名，按 id **升序**排列。\\n\\n输出列要求：name。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE users (id INTEGER, name TEXT, city TEXT);\nINSERT INTO users VALUES (1,'张三','上海'),(2,'李四','北京'),(3,'王五','广州');\nCREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (101,1,150.0),(102,1,80.0),(103,2,300.0);",
+          "expected_sql": "SELECT u.name FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE o.order_id IS NULL ORDER BY u.id;",
+          "hint": "先想：LEFT JOIN 后没匹配上的行，右表字段是什么值？怎么用这个特征筛出「从未下单」？",
+          "analysis": "**标准解题思路**\\n1. 读题：找出「从未下单」的用户 → 先 LEFT JOIN 保留全部用户，再筛出没匹配上订单的那部分。\\n2. 连接：users u LEFT JOIN orders o ON u.id = o.user_id，左表 users 全部保留。\\n3. 未下单的特征：右表补出的行所有字段都是 NULL → WHERE o.order_id IS NULL。\\n4. 选列 u.name，按 u.id 升序。\\n5. 验证：张三、李四都有订单被过滤；王五(id=3) 无订单 → 结果只有 王五。\\n**易错点**：判断 NULL 必须用 IS NULL，写成 o.order_id = NULL 永远匹配不到；如果用 INNER JOIN 则未下单用户一开始就被丢掉了。",
+          "enterprise_tip": "这是「流失用户 / 未转化用户」圈选的标准写法，也是 LEFT JOIN 最经典的应用。企业里配合时间条件（如近 90 天无订单）就能产出运营召回名单。"
+        },
+        {
+          "task_id": "s02c03t06",
+          "type": "sql",
+          "difficulty": 4,
+          "title": "三表连接加条件：订单关联用户与商品",
+          "question": "连接 **users、products、orders** 三张表，查询每笔订单的**订单号、用户名、商品名**，只保留金额**大于 100** 的订单，按订单号**升序**排列。\\n\\n输出列要求：order_id、name、product_name（保持此顺序）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE users (id INTEGER, name TEXT);\nINSERT INTO users VALUES (1,'张三'),(2,'李四'),(3,'王五');\nCREATE TABLE products (product_id INTEGER, product_name TEXT);\nINSERT INTO products VALUES (101,'手机'),(102,'耳机'),(103,'键盘');\nCREATE TABLE orders (order_id INTEGER, user_id INTEGER, product_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (1001,1,101,150.0),(1002,1,102,80.0),(1003,2,103,300.0),(1004,3,101,50.0),(1005,2,101,120.0);",
+          "expected_sql": "SELECT o.order_id, u.name, p.product_name FROM orders o INNER JOIN users u ON o.user_id = u.id INNER JOIN products p ON o.product_id = p.product_id WHERE o.amount > 100 ORDER BY o.order_id;",
+          "hint": "先梳理三张表的关联关系：orders 分别和 users、products 通过哪个字段相连？",
+          "analysis": "**标准解题思路**\\n1. 读题：三张表各取一列 → 三表连接；两跳关系：订单连用户（user_id）、订单连商品（product_id）。\\n2. 第一跳：INNER JOIN users u ON o.user_id = u.id 拿用户名。\\n3. 第二跳：INNER JOIN products p ON o.product_id = p.product_id 拿商品名。\\n4. 条件过滤：WHERE o.amount > 100。\\n5. 逐单核对：1001(150)✓、1002(80)✗、1003(300)✓、1004(50)✗、1005(120)✓ → 剩 1001、1003、1005。\\n6. 排序：ORDER BY o.order_id。\\n**易错点**：第二个 ON 的关联键是 product_id 而不是 user_id，写串会让商品名错乱；字段有歧义时（两边都有 id/product_id）必须加表名前缀 o/p/u。",
+          "enterprise_tip": "订单事实表 + 用户维度表 + 商品维度表就是数仓星型模型的标准取数。企业里注意：关联前先确认字段类型一致（INTEGER vs TEXT 会全部匹配不上），大促热点商品的数据倾斜也要提前评估。"
+        },
+        {
+          "task_id": "s02c03t07",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "四种 JOIN 类型辨析",
+          "question": "关于 INNER / LEFT / RIGHT / FULL 四种 JOIN，下列说法**正确**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "RIGHT JOIN 以右表为准，右表全部保留，左表未匹配时补 NULL",
+              "correct": true,
+              "explain": "正确。RIGHT JOIN 与 LEFT JOIN 方向相反，右表是主表。"
+            },
+            {
+              "text": "FULL JOIN（全外连接）两表都全保留，互相补 NULL",
+              "correct": true,
+              "explain": "正确。FULL JOIN 是交集 + 左独有 + 右独有的并集，两边未匹配都补 NULL。"
+            },
+            {
+              "text": "INNER JOIN 返回两表的并集",
+              "correct": false,
+              "explain": "错误。INNER JOIN 只保留两表都匹配上的行，是交集不是并集。"
+            },
+            {
+              "text": "LEFT JOIN 的结果行数一定等于左表行数",
+              "correct": false,
+              "explain": "错误。右表同一个 key 有多行（一对多）时，左表行会被复制成多行，行数可能膨胀。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 四个连接一句话：INNER 交集、LEFT 左全保留、RIGHT 右全保留、FULL 两表全保留。\\n2. A：RIGHT JOIN 右表全保留、左表补 NULL → 正确。\\n3. B：FULL JOIN 两表都全保留、互相补 NULL → 正确。\\n4. C：INNER JOIN 是交集不是并集 → 错误。\\n5. D：一对多时行数会膨胀 → 错误。\\n6. 选 A、B。\\n**延伸**：LEFT JOIN 后行数变多（膨胀）是面试高频陷阱——统计前先确认关联字段在右表是否唯一。",
+          "enterprise_tip": "面试必问「LEFT JOIN 结果行数为什么会比左表多？」答：右表关联键不唯一，一对多导致左表行被复制。企业里 JOIN 前先对右表关联键做去重检查，是防止指标翻倍事故的基本功。"
+        },
+        {
+          "task_id": "s02c03t08",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "笛卡尔积的底层原理",
+          "question": "`SELECT * FROM users, orders;`（无 JOIN、无 ON 条件）会产生笛卡尔积。从**底层执行原理**看，正确的描述是？",
+          "options": [
+            {
+              "text": "引擎把左表每一行与右表每一行两两组合，结果行数 = 左表行数 × 右表行数",
+              "correct": true,
+              "explain": "正确。没有连接条件时每对行都匹配，相当于无过滤的双重循环，行数按乘积爆炸。"
+            },
+            {
+              "text": "引擎随机抽样两表各一半数据合并",
+              "correct": false,
+              "explain": "错误。笛卡尔积是全量两两组合，不是抽样。"
+            },
+            {
+              "text": "引擎只保留两表主键相等的行",
+              "correct": false,
+              "explain": "错误。那是有连接条件的等值连接，不是笛卡尔积。"
+            },
+            {
+              "text": "引擎把两表按行号逐行拼接，结果行数取两表行数的最大值",
+              "correct": false,
+              "explain": "错误。按行号拼接不是笛卡尔积，笛卡尔积是每行 × 每行的全组合。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 无连接条件 → 引擎对两表做两两组合（等价于 Nested Loop 且无条件过滤）。\\n2. 行数计算：左表 m 行 × 右表 n 行 = m × n 行，乘积式增长。\\n3. 大表场景：百万 × 百万 = 万亿行，直接内存/磁盘灾难。\\n4. 这就是 JOIN 必须写 ON 的原因；`FROM a, b` 的逗号写法同样是笛卡尔积。\\n5. 结论：选 A。\\n**延伸**：写 JOIN 先写 ON 是肌肉记忆级别的习惯；上线前用行数预估（m × n）也能快速发现漏写 ON。",
+          "enterprise_tip": "企业事故：漏写 ON 条件的 JOIN 结果集翻亿倍，下游报表全错还不报错。排查「结果行数异常多」时，第一反应就是检查有没有 JOIN 漏写 ON。"
+        },
+        {
+          "task_id": "s02c03t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "USING 简化连接条件",
+          "question": "关于 `USING` 子句（如 `SELECT * FROM orders JOIN users USING(user_id)`），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "USING(列) 是 ON 的简写：要求两边连接列**同名**且是等值连接，连接结果中该列只保留一份",
+              "correct": true,
+              "explain": "正确。USING 本质是「ON 两边列名相同的等值连接」的简写，且输出时合并成单列。"
+            },
+            {
+              "text": "USING 要求两边的连接列必须不同名",
+              "correct": false,
+              "explain": "错误。恰恰相反：USING 的前提就是两边列名相同；不同名只能用 ON 指定。"
+            },
+            {
+              "text": "USING 可以写非等值条件，如 USING(user_id > 100)",
+              "correct": false,
+              "explain": "错误。USING 只支持等值连接，非等值条件（>、<、!=）必须写 ON。"
+            },
+            {
+              "text": "USING 与 ON 完全等价，任何场景都可以互换",
+              "correct": false,
+              "explain": "错误。两者有差异：USING 要求同名且结果列合并为一列；ON 可以处理不同名、非等值、多条件。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. USING(列) 是等值连接简写：JOIN ... USING(user_id) 等价于 JOIN ... ON 左表.user_id = 右表.user_id。\n2. 两个前提：连接列两边同名；只能是等值（=）条件。\n3. 输出差异：USING 的结果里连接列只保留一份；ON 写法会保留两边的两列（加前缀区分）。\n4. 应用场景：两表连接列命名统一（都叫 user_id）时 USING 更简洁，还能避免 SELECT * 出现重复列。\n5. 选 A。",
+          "enterprise_tip": "数仓建模规范「关联键统一命名」后，JOIN 里大量用 USING 简化；Hive/Spark SQL 都支持，面试常问 USING 和 ON 的区别（同名、等值、列去重三点）。"
+        },
+        {
+          "task_id": "s02c03t10",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "自连接：一张表和自己连接",
+          "question": "关于**自连接**（Self Join），下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "把一张表用两个不同别名和自己连接（如 SELECT a.name, b.name FROM emp a JOIN emp b ON a.manager_id = b.id），用于查询同一张表内部的层级 / 对照关系",
+              "correct": true,
+              "explain": "正确。自连接是同一张表取两个别名做连接，能查员工-经理、商品上下级等行内关系。"
+            },
+            {
+              "text": "自连接必须连接两张完全不同的表才能实现",
+              "correct": false,
+              "explain": "错误。自连接的要点恰恰是「同一张表」；连接两张不同表是普通连接。"
+            },
+            {
+              "text": "自连接在 SQL 中会直接报语法错误",
+              "correct": false,
+              "explain": "错误。自连接是合法且常见的写法，只要给表起两个别名即可。"
+            },
+            {
+              "text": "自连接只能用 UNION 实现，不能用 JOIN",
+              "correct": false,
+              "explain": "错误。自连接用 JOIN 实现（INNER / LEFT 都行），与 UNION 无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 自连接：FROM emp a JOIN emp b——同一张表起两个别名，当成两张逻辑表使用。\n2. 典型场景：员工表 emp 里存 manager_id（经理也是员工），查「每个员工及其经理姓名」：emp a JOIN emp b ON a.manager_id = b.id。\n3. 另一场景：商品对照表查同品类相邻价格商品、订单表按不同日期自连接做环比对照。\n4. 注意点：必须用别名区分两边，否则列名歧义；想包含没有经理的顶层员工用 LEFT JOIN。\n5. 选 A。",
+          "enterprise_tip": "组织架构树、环比对照（同一张订单表按不同日期自连接）都是自连接的真实应用；面试常考「员工-经理」这道经典自连接题。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "INNER JOIN 和 LEFT JOIN 有什么区别？",
+          "a": "INNER JOIN 只保留两表都匹配上的行（交集）；LEFT JOIN 以左表为准，左表全部保留，右表没匹配上的行补 NULL。需要「左表全量」时用 LEFT JOIN。"
+        },
+        {
+          "q": "为什么 JOIN 必须写 ON 条件？",
+          "a": "不写 ON 条件会把两表做笛卡尔积（每行两两组合，行数 = 左表行数 × 右表行数），大表上会直接内存爆炸。写 JOIN 先写 ON 是肌肉记忆级别的习惯。"
+        },
+        {
+          "q": "LEFT JOIN 后统计右表为什么用 COUNT(右表主键) 而不是 COUNT(*)?",
+          "a": "LEFT JOIN 未匹配时右表补 NULL 行，COUNT(*) 会把 NULL 行也数进去导致多算；COUNT(右表主键) 只数真正匹配上的行，结果才是正确的订单数。"
+        },
+        {
+          "q": "连接字段类型不一致会怎样？",
+          "a": "两边关联键类型不一致（如一边 INTEGER 一边 TEXT）会全部匹配不上，结果行数异常变少，而且不报错——这是最隐蔽的 JOIN 事故，连接前一定要确认字段类型和格式。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "INNER JOIN",
+          "desc": "内连接，只保留两表匹配上的行。"
+        },
+        {
+          "term": "LEFT JOIN",
+          "desc": "左连接，左表全部保留，右表未匹配补 NULL。"
+        },
+        {
+          "term": "RIGHT JOIN / FULL JOIN",
+          "desc": "右连接（右表全保留）与全外连接（两表全保留互补 NULL）。"
+        },
+        {
+          "term": "ON",
+          "desc": "连接条件子句，指定两表如何关联。"
+        },
+        {
+          "term": "笛卡尔积",
+          "desc": "无连接条件的全组合，行数等于两表行数乘积。"
+        },
+        {
+          "term": "主键 / 外键",
+          "desc": "表间关联的字段设计：主键唯一标识一行，外键引用另一表的主键。"
+        },
+        {
+          "term": "星型模型",
+          "desc": "事实表居中、维度表环绕的数仓建模方式，取数就是事实表 JOIN 维度表。"
+        },
+        {
+          "term": "数据倾斜",
+          "desc": "JOIN 或 GROUP BY 的 key 数据分布极不均匀，导致单任务过载。"
+        }
+      ],
+      "kps": [
+        "主键-外键：表间关联字段设计",
+        "INNER JOIN：只保留两表匹配上的行（交集）",
+        "LEFT JOIN：左表全保留、右表补 NULL、COUNT(右表主键)",
+        "RIGHT JOIN / FULL JOIN：右表全保留 / 两表全保留",
+        "ON 连接条件与笛卡尔积陷阱",
+        "三表/多表连接与表别名",
+        "连接字段类型与 NULL 关联陷阱",
+        "笛卡尔积的底层：无连接条件的全组合"
+      ]
+    },
+    {
+      "chapter_id": "s02c04",
+      "title": "2.4 子查询与集合",
+      "goal": "掌握标量子查询、IN/EXISTS 与 UNION/UNION ALL，理解相关子查询概念",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**子查询**就是「查询里套查询」：把内层查询的结果当成外层查询的输入。三种典型形态：\\n- **标量子查询**：内层返回**一个值**，像普通列一样用。例如给每个订单拼上全站平均金额；\\n- **表子查询**：内层返回**多行多列**，配合 IN / EXISTS 做存在性判断；\\n- **相关子查询**：内层查询**引用外层**的列，逐行执行。比如「查金额高于自己所在用户平均水平的订单」。"
+        },
+        {
+          "type": "text",
+          "content": "**集合操作**解决「合并两个查询结果」的问题：\\n- `UNION`：合并并**去重**（隐含排序，慢）；\\n- `UNION ALL`：合并**不去重**（快，大表优先）。\\n\\n**IN 与 EXISTS**：`WHERE id IN (子查询)` 会先算出子查询全集再匹配；`WHERE EXISTS (子查询)` 是「找到一条就停」的存在性检查。两者结果常等价，性能因数据而异；子查询结果含 **NULL** 时 IN 会「悄悄丢结果」，是经典坑。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "CREATE TABLE users (id INTEGER, name TEXT);\nINSERT INTO users VALUES (1,'张三'),(2,'李四'),(3,'王五'),(4,'赵六');\nCREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (101,1,150.0),(102,1,80.0),(103,2,300.0),(104,3,120.0);\n\n-- 1. 标量子查询：每个订单金额 vs 全站平均金额\nSELECT order_id, amount,\n       (SELECT AVG(amount) FROM orders) AS avg_amount\nFROM orders ORDER BY order_id;\n\n-- 2. IN 子查询：下过单的用户（赵六没下过单，不在结果里）\nSELECT id, name FROM users\nWHERE id IN (SELECT user_id FROM orders) ORDER BY id;\n\n-- 3. UNION 与 UNION ALL：合并两批用户，观察去重差异\nSELECT name FROM users WHERE id IN (1,2)\nUNION\nSELECT name FROM users WHERE id IN (2,3);\n\nSELECT name FROM users WHERE id IN (1,2)\nUNION ALL\nSELECT name FROM users WHERE id IN (2,3);",
+          "caption": "标量子查询 / IN / UNION 与 UNION ALL"
+        },
+        {
+          "type": "warning",
+          "content": "**IN 的 NULL 陷阱**：`WHERE id NOT IN (SELECT ...)` 时，如果子查询结果里含有 NULL，`NOT IN` 会**一条都查不出来**（因为 `id <> NULL` 永远不成立）。这是新手最容易懵的坑，稳妥做法是用 `NOT EXISTS`。"
+        },
+        {
+          "type": "tip",
+          "content": "**UNION 默认去重是要付出代价的**：它内部要做排序去重。大结果集上（几千万行）UNION 比 UNION ALL 慢一个量级。确定两边没有重复时，直接用 UNION ALL 是常识。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：数仓里「圈人」需求（找出满足条件的用户群体做营销）大量使用子查询；用户画像标签表也常用 UNION 合并多张来源表。面试三连问：① IN 和 EXISTS 的区别；② UNION 与 UNION ALL 的区别；③ 子查询结果含 NULL 会怎样。这一章答好这三问，SQL 面试就稳了一半。"
+        }
+      ],
+      "hands_on": "1. 用标量子查询输出每个订单金额与全站平均金额的差额（amount - 平均）。\\n2. 用 NOT IN 找出从未下过单的用户；再往 orders 里插一行 user_id 为 NULL 的数据，观察 NOT IN 的结果变化，验证 NULL 陷阱。\\n3. 用 UNION ALL 合并 1 月和 2 月的下单用户，再改用 UNION，对比两者输出差异（去重与否）。\\n4. 尝试写一个相关子查询：查出金额高于自己用户平均金额的订单。",
+      "tasks": [
+        {
+          "task_id": "s02c04t01",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "用 IN 子查询找出下单用户",
+          "question": "用 **IN 子查询**从 users 表中找出**下过订单**的用户，输出 id 和 name，按 id **升序**排列。\\n\\n输出列要求：id、name（保持此顺序）。\\n\\n本题环境为 SQLite（Hive/Spark SQL 语法基本一致）。",
+          "setup": "CREATE TABLE users (id INTEGER, name TEXT);\nINSERT INTO users VALUES (1,'张三'),(2,'李四'),(3,'王五'),(4,'赵六');\nCREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (101,1,150.0),(102,1,80.0),(103,2,300.0),(104,3,120.0);",
+          "expected_sql": "SELECT id, name FROM users WHERE id IN (SELECT user_id FROM orders) ORDER BY id;",
+          "hint": "题目已指定 IN 子查询：外层查什么？内层子查询返回什么？IN 怎么把内外联系起来？",
+          "analysis": "**标准解题思路**\\n1. 读题：要「下过订单的用户」→ 从 orders 里找有哪些 user_id，再看 users 里谁的 id 在其中。\\n2. 内层子查询：SELECT user_id FROM orders → 得到 {1,2,3}。\\n3. 外层：WHERE id IN (子查询) 过滤 users。\\n4. 选列 id、name，按 id 升序 → ORDER BY id。\\n5. 验证：张三、李四、王五都在结果中；赵六(id=4) 没下过单，被正确排除。\\n**易错点**：别把 users 和 orders 搞混；IN 后面必须是「一列」的子查询，不能是多列。",
+          "enterprise_tip": "这个需求的企业版叫「下单用户去重口径」：IN 子查询自带去重（user_id 重复只算一次），比 JOIN 后再 DISTINCT 更直观。面试延伸：如果 users 有百万行、orders 有千万行，IN 与 EXISTS 哪个更快？——数据分布决定，通常用 EXPLAIN 看执行计划。"
+        },
+        {
+          "task_id": "s02c04t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "UNION 与 UNION ALL 的区别",
+          "question": "关于 UNION 与 UNION ALL，下列说法正确的是？",
+          "options": [
+            {
+              "text": "UNION 不去重，UNION ALL 去重",
+              "correct": false,
+              "explain": "说反了。UNION 去重，UNION ALL 不去重。"
+            },
+            {
+              "text": "UNION 会去重，UNION ALL 保留全部行",
+              "correct": true,
+              "explain": "正确。UNION 隐含去重（代价是排序），UNION ALL 直接拼接、更快。"
+            },
+            {
+              "text": "两者都会自动去重",
+              "correct": false,
+              "explain": "只有 UNION 去重，UNION ALL 不处理重复。"
+            },
+            {
+              "text": "两者都保留全部行",
+              "correct": false,
+              "explain": "UNION ALL 保留全部行，UNION 会去掉重复行。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 记忆锚点：ALL = 全部保留 = 不去重。\\n2. UNION 去重需要排序比较，数据量大时明显更慢。\\n3. 选 B。\\n**延伸**：确认两边无重复时用 UNION ALL，是性能和语义双赢的选择。",
+          "enterprise_tip": "面试升级：合并 1 月、2 月订单表求总订单量，用 UNION 还是 UNION ALL？答：月份天然不重叠，用 UNION ALL，省去去重排序的开销。"
+        },
+        {
+          "task_id": "s02c04t03",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：合并结果并去重的关键字",
+          "question": "SQL 中用于合并两个查询结果、并且会自动**去重**的关键字是 ____。",
+          "answer": [
+            "UNION",
+            "union",
+            "Union"
+          ],
+          "hint": "回忆合并两个查询结果的关键字：它与 UNION ALL 同族，区别在于是否去重。",
+          "analysis": "**标准解题思路**\\n1. 合并两个查询结果 → UNION 或 UNION ALL。\\n2. 会去重 → UNION。\\n3. 填 `UNION`。\\n**延伸**：UNION 对列数和列类型有要求：两边 SELECT 的列数必须一致，类型要兼容。"
+        },
+        {
+          "task_id": "s02c04t04",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "用 EXISTS 相关子查询找出下单用户",
+          "question": "用 **EXISTS 相关子查询**从 users 表中找出**下过订单**的用户，输出 id 和 name，按 id **升序**排列。\\n\\n输出列要求：id、name（保持此顺序）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE users (id INTEGER, name TEXT);\nINSERT INTO users VALUES (1,'张三'),(2,'李四'),(3,'王五'),(4,'赵六');\nCREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (101,1,150.0),(102,1,80.0),(103,2,300.0),(104,3,120.0);",
+          "expected_sql": "SELECT id, name FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id) ORDER BY id;",
+          "hint": "先想：相关子查询和普通子查询的区别——内层如何引用外层？EXISTS 只关心「有没有」。",
+          "analysis": "**标准解题思路**\\n1. 读题：用 EXISTS 找「下过订单的用户」→ 外层遍历 users，内层检查该用户在 orders 里是否存在。\\n2. 外层：SELECT id, name FROM users u。\\n3. 内层：SELECT 1 FROM orders o WHERE o.user_id = u.id——这里 u.id 引用外层当前行，是**相关子查询**，对每个用户逐行执行。\\n4. 只要内层查到任意一行，EXISTS 即为真，该用户保留。\\n5. 排序 ORDER BY id，验证：张三、李四、王五有订单；赵六(id=4) 没订单被排除，结果 3 行。\\n**易错点**：忘记写外层别名 u 或把关联条件写反，会变成「查所有用户都存在」而全量返回；EXISTS 只关心有没有行，SELECT 里写 1 即可。",
+          "enterprise_tip": "存在性判断在「圈人」场景大量使用：找出买过某品类的人、有过退款的人等。大表上 EXISTS 找到一条即停，常比 IN 快；面试三连问：IN / EXISTS / JOIN 三种写法的区别与取舍。"
+        },
+        {
+          "task_id": "s02c04t05",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：UNION 与 UNION ALL 的区别",
+          "question": "合并两个查询结果时，`UNION` 会自动**去重**，而 ____ **不会去重**、直接拼接全部行（大表合并时通常更快）。",
+          "answer": [
+            "UNION ALL",
+            "union all",
+            "Union ALL"
+          ],
+          "hint": "回忆 UNION 的兄弟版本：不去重、直接拼接全部行的是哪个？",
+          "analysis": "**标准解题思路**\\n1. 记住锚点：ALL = 全部保留 = 不去重。\\n2. UNION 去重需要在内部做排序比较，数据量大时明显更慢。\\n3. 填 `UNION ALL`。\\n**延伸**：两边结果确定无重复时（如按月份合并订单表），用 UNION ALL 是性能和语义双赢的选择。"
+        },
+        {
+          "task_id": "s02c04t06",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "标量子查询：订单金额对比全站平均",
+          "question": "查询每个订单的**订单号、金额**，以及**全站平均订单金额**（用标量子查询 `(SELECT AVG(amount) FROM orders)` 计算，列名 **avg_amount**），按订单号**升序**排列。\\n\\n输出列要求：order_id、amount、avg_amount（保持此顺序）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (1,101,150.0),(2,101,80.0),(3,102,300.0),(4,103,50.0);",
+          "expected_sql": "SELECT order_id, amount, (SELECT AVG(amount) FROM orders) AS avg_amount FROM orders ORDER BY order_id;",
+          "hint": "先想：标量子查询返回一个值，怎么把它当普通列放进 SELECT？再给它起个别名。",
+          "analysis": "**标准解题思路**\\n1. 读题：每行要拼上一个「全站平均金额」→ 内层查询返回单个值 → 标量子查询。\\n2. 内层：SELECT AVG(amount) FROM orders → (150+80+300+50)/4 = 145.0。\\n3. 外层：SELECT order_id, amount, (内层) AS avg_amount FROM orders。\\n4. 排序：ORDER BY order_id，结果 4 行，每行都带 avg_amount = 145.0。\\n**易错点**：标量子查询必须只返回一行一列，返回多行会报错；别忘了给结果列起别名 avg_amount，否则输出列名不匹配。",
+          "enterprise_tip": "「每个订单 vs 平均值/中位数」是运营分析的常客。企业大表上这种不引用外层的标量子查询会被引擎优化为一次扫描；如果是相关子查询（每行执行一次）就要警惕性能，必要时改写为窗口函数。"
+        },
+        {
+          "task_id": "s02c04t07",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "IN 与 EXISTS 的区别",
+          "question": "关于 `IN` 与 `EXISTS`，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "EXISTS 对外层每一行做存在性检查，内层找到一条匹配就停止，常用于存在性判断",
+              "correct": true,
+              "explain": "正确。EXISTS 只关心「有没有」，找到即停，不关心返回什么列。"
+            },
+            {
+              "text": "IN 与 EXISTS 在任何数据量下性能都完全相同",
+              "correct": false,
+              "explain": "错误。性能取决于数据分布：子查询结果小时 IN 可能更快，外层表小、内层表大时 EXISTS 常更快。"
+            },
+            {
+              "text": "子查询结果含 NULL 时，NOT IN 依然能正常查出结果",
+              "correct": false,
+              "explain": "错误。NOT IN 遇到 NULL 时比较结果为未知，整行被过滤，一条都查不出来——这是经典 NULL 陷阱。"
+            },
+            {
+              "text": "EXISTS 的子查询必须返回具体列值，不能写 SELECT 1",
+              "correct": false,
+              "explain": "错误。EXISTS 只判断有没有行，子查询写 SELECT 1 甚至 SELECT NULL 都可以。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 语义：IN 先算出子查询全集再逐值匹配；EXISTS 对外层每行做存在性检查、找到即停。\\n2. 性能：没有绝对优劣，由数据分布决定，大表上 EXISTS 往往更稳（提前短路）。\\n3. NULL 陷阱：NOT IN 的子查询含 NULL 时会全查不到，稳妥做法是 NOT EXISTS。\\n4. EXISTS 子查询写 SELECT 1 即可，不需要具体列。\\n5. 选 A。\\n**延伸**：面试三连问——同一需求用 IN / EXISTS / JOIN 三种写法怎么选？先保证正确，再看执行计划。",
+          "enterprise_tip": "「圈人」场景（买过某品类的人、有退款的人）大量用 EXISTS。企业排查「为什么 NOT IN 查出来是空」时，第一反应就是检查子查询结果里有没有 NULL。"
+        },
+        {
+          "task_id": "s02c04t08",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "EXISTS 的底层执行方式",
+          "question": "关于 `EXISTS` 相关子查询的**底层执行方式**，下列说法正确的是？",
+          "options": [
+            {
+              "text": "外层表每来一行，就带着该行的关联列值去执行一次内层查询，找到一条匹配就停止（短路），是典型的逐行驱动执行",
+              "correct": true,
+              "explain": "正确。相关子查询逐行驱动内层执行，EXISTS 找到一条即停，不关心返回什么列。"
+            },
+            {
+              "text": "先一次性执行内层查询拿到全集，再和外层逐值比对（类似 IN）",
+              "correct": false,
+              "explain": "错误。先算全集再比对是 IN 的典型做法，EXISTS 是逐行驱动 + 短路。"
+            },
+            {
+              "text": "内层查询只执行一次，结果与外层当前行无关",
+              "correct": false,
+              "explain": "错误。相关子查询引用外层列，每行的关联值不同，内层要重新执行。"
+            },
+            {
+              "text": "引擎先把两张表复制合并成一张大表再扫描",
+              "correct": false,
+              "explain": "错误。没有这种实现，EXISTS 不会做整表复制。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 相关子查询的定义：内层查询引用外层表的列（如 `WHERE o.user_id = u.id`）。\\n2. 底层执行：外层表每取一行，就把该行的关联列值代入内层执行一次，判断内层有没有行返回。\\n3. 短路特性：EXISTS 只要找到第一条匹配就停止内层扫描，不读完整个内层结果。\\n4. 对比 IN：IN 会先把子查询结果集物化出来再逐值匹配；所以外层小、内层大时 EXISTS 往往更快。\\n5. 结论：选 A。\\n**易错点**：把 EXISTS 与 IN 的执行模型混为一谈——一个是「逐行探针」，一个是「先算全集」。",
+          "enterprise_tip": "面试三连问：同一需求用 IN / EXISTS / JOIN 三种写法怎么选？答：先保证正确，再看数据分布——外层小内层大用 EXISTS，子查询结果小用 IN，还要聚合明细用 JOIN。"
+        },
+        {
+          "task_id": "s02c04t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "CTE 公共表表达式",
+          "question": "关于 **CTE（公共表表达式，WITH 子句）**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "WITH tmp AS (SELECT ...) 把一段子查询命名成临时结果集，可在后续查询中多次引用，把复杂查询拆成可读的步骤",
+              "correct": true,
+              "explain": "正确。CTE 让查询先定义「中间结果」再使用，可读性和复用性都更好。"
+            },
+            {
+              "text": "CTE 定义的结果会被持久化到磁盘，长期保存在数据库里",
+              "correct": false,
+              "explain": "错误。CTE 只在该条查询执行期间存在，查询结束即消失，不会建表落盘。"
+            },
+            {
+              "text": "一条查询最多只能定义一个 CTE",
+              "correct": false,
+              "explain": "错误。可以用逗号分隔定义多个 CTE，后面的 CTE 还能引用前面的。"
+            },
+            {
+              "text": "CTE 不支持递归查询",
+              "correct": false,
+              "explain": "错误。WITH RECURSIVE 支持递归 CTE，常用于遍历层级（组织树、菜单树）。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. CTE 语法：WITH 名字 AS (子查询) SELECT ... FROM 名字。\n2. 作用一：命名中间结果，让多层嵌套子查询变成平铺可读的步骤。\n3. 作用二：同一中间结果被引用多次时只需写一次（内联子查询多处引用会重复书写甚至重复执行）。\n4. 生命周期：仅当前查询有效，不落盘；多个 CTE 用逗号分隔，后面的可引用前面的。\n5. 选 A。",
+          "enterprise_tip": "数仓团队写复杂取数 SQL 的标准姿势就是「清洗一层 CTE、加工一层 CTE、输出一层 CTE」，评审好读、逻辑好复用；Hive / Spark SQL / Doris 都支持。"
+        },
+        {
+          "task_id": "s02c04t10",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "NOT EXISTS 找出未下单用户",
+          "question": "用 `NOT EXISTS` 从 users 表找出**从未下过订单**的用户，下列写法**正确**的是？",
+          "options": [
+            {
+              "text": "SELECT * FROM users u WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id)",
+              "correct": true,
+              "explain": "正确。内层关联外层（相关子查询）：某用户在 orders 中查不到任何一行，NOT EXISTS 为真，该用户被保留。"
+            },
+            {
+              "text": "SELECT * FROM users WHERE NOT EXISTS (SELECT 1 FROM orders)",
+              "correct": false,
+              "explain": "错误。内层没有关联外层，只要 orders 表非空，对所有用户 NOT EXISTS 都为假，结果恒为空。"
+            },
+            {
+              "text": "SELECT * FROM users WHERE NOT EXISTS (SELECT 1 FROM orders WHERE user_id = user_id)",
+              "correct": false,
+              "explain": "错误。内层两边都是 orders 自己的 user_id，条件恒成立，同样查不出任何用户。"
+            },
+            {
+              "text": "NOT EXISTS 只能和 GROUP BY 一起使用",
+              "correct": false,
+              "explain": "错误。NOT EXISTS 是独立的过滤条件，与 GROUP BY 无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. NOT EXISTS 语义：内层查不到任何行时为真，配合相关子查询做「不存在判断」。\n2. 正确写法：外层遍历 users 每一行 u，内层查 orders 里有没有 o.user_id = u.id 的订单；查不到 → 该用户从未下单 → 保留。\n3. 常见错误：内层忘了关联外层（选项 B）或关联条件写错（选项 C），导致逻辑恒真 / 恒假。\n4. 等价写法：LEFT JOIN orders o ON u.id = o.user_id WHERE o.order_id IS NULL；NOT EXISTS 写法更直观且不受 NULL 影响。\n5. 选 A。",
+          "enterprise_tip": "圈选「未转化 / 未复购 / 未活跃」人群是运营标配；NOT EXISTS 比 NOT IN 更安全（子查询含 NULL 时 NOT IN 会失效），企业 SQL 规范常要求优先用 NOT EXISTS。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "UNION 和 UNION ALL 有什么区别？",
+          "a": "UNION 合并两个查询结果并自动去重，代价是内部要做排序去重，慢；UNION ALL 直接拼接全部行、不去重，快。当确定两边没有重复时，大表合并优先用 UNION ALL。"
+        },
+        {
+          "q": "IN 和 EXISTS 有什么区别？",
+          "a": "IN 会先执行子查询算出全集再逐值匹配；EXISTS 对外层每一行做存在性检查，找到一条匹配就停止。两者在很多场景结果等价，性能取决于数据分布，大表上 EXISTS 往往更稳。"
+        },
+        {
+          "q": "子查询结果含 NULL 时 NOT IN 会怎样？",
+          "a": "NOT IN 遇到 NULL 时比较结果为「未知」，整行被过滤，导致一条都查不出来。稳妥做法是改用 NOT EXISTS 或先过滤掉子查询里的 NULL。"
+        },
+        {
+          "q": "UNION 对两边的 SELECT 有什么要求？",
+          "a": "两边的列数必须一致、对应列的类型要兼容，否则报错；结果集的列名取第一个 SELECT 的列名。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "子查询",
+          "desc": "嵌套在另一个查询里的查询，内层结果作为外层输入。"
+        },
+        {
+          "term": "标量子查询",
+          "desc": "返回单个值的子查询，可像普通列一样使用。"
+        },
+        {
+          "term": "相关子查询",
+          "desc": "引用外层查询列的逐行执行的子查询。"
+        },
+        {
+          "term": "IN",
+          "desc": "集合成员判断，判断某值是否在子查询结果中。"
+        },
+        {
+          "term": "EXISTS",
+          "desc": "存在性判断，找到一条匹配即返回真。"
+        },
+        {
+          "term": "UNION / UNION ALL",
+          "desc": "集合合并：UNION 去重、UNION ALL 不去重。"
+        },
+        {
+          "term": "NULL 陷阱",
+          "desc": "子查询结果含 NULL 时 NOT IN 失效，需改用 NOT EXISTS。"
+        }
+      ],
+      "kps": [
+        "子查询概念与三种形态（标量 / 表 / 相关子查询）",
+        "标量子查询：返回单个值当普通列用",
+        "IN 表子查询：集合成员判断",
+        "EXISTS 与相关子查询",
+        "IN vs EXISTS 性能取舍与 NOT IN 的 NULL 陷阱",
+        "UNION：合并结果并去重",
+        "UNION ALL：合并不去重，大表优先",
+        "EXISTS 的底层：相关子查询逐行判断"
+      ]
+    },
+    {
+      "chapter_id": "s02c05",
+      "title": "2.5 窗口函数",
+      "goal": "掌握 ROW_NUMBER/RANK/DENSE_RANK 与 SUM() OVER(PARTITION BY ...)，理解 LAG/LEAD，能解决分组 TopN 与去重取最新",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "GROUP BY 有个「副作用」：分组后多行被压成一行，**明细丢了**。但业务上经常既要明细、又要聚合结果——比如「每个订单，它属于用户 101 的第几单」「每个订单金额在全部订单里排第几」。\\n**窗口函数**就是为此而生：它不压行，每一行原样保留，同时在一组「窗口」内计算排名、累计值等。语法：\\n\\n```\n函数() OVER (PARTITION BY 分组列 ORDER BY 排序列)\n```\\n\\n`PARTITION BY` 相当于窗口内的 GROUP BY，`ORDER BY` 决定窗口内怎么排。"
+        },
+        {
+          "type": "text",
+          "content": "三个最常用的窗口函数族：\\n- **排名**：`ROW_NUMBER()` 序号 1,2,3...（并列也强行分先后）；`RANK()` 并列同号但**跳号**（1,1,3）；`DENSE_RANK()` 并列同号**不跳号**（1,1,2）。\\n- **聚合**：`SUM(amount) OVER (PARTITION BY user_id ORDER BY order_date)` 分组累计求和；AVG/COUNT 同理。\\n- **前后行**：`LAG(列)` 取窗口内上一行的值，`LEAD(列)` 取下一行——做环比、同比的基础。\\n\\n经典场景：**分组 TopN**（每组取前 3）和**去重取最新**（按时间排序取每组第 1 行）。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL, order_date TEXT);\nINSERT INTO orders VALUES\n (1,101,150.0,'2024-01-01'),(2,101,80.0,'2024-01-02'),\n (3,102,300.0,'2024-01-03'),(4,102,120.0,'2024-01-04'),\n (5,103,200.0,'2024-01-05');\n\n-- 1. 分组 TopN：每个用户按金额降序编号\nSELECT user_id, order_id, amount,\n       ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn\nFROM orders ORDER BY user_id, rn;\n\n-- 2. 累计求和：每个用户按日期累加金额\nSELECT user_id, order_date, amount,\n       SUM(amount) OVER (PARTITION BY user_id ORDER BY order_date) AS cum_sum\nFROM orders ORDER BY user_id, order_date;\n\n-- 3. LAG：与上一单金额对比\nSELECT user_id, order_id, amount,\n       LAG(amount) OVER (PARTITION BY user_id ORDER BY order_id) AS prev_amount\nFROM orders ORDER BY user_id, order_id;",
+          "caption": "窗口函数三件套：排名 / 累计 / 前后行"
+        },
+        {
+          "type": "warning",
+          "content": "**三个高频错**：① RANK 并列跳号、DENSE_RANK 不跳号，面试必考区别；② 窗口函数不能出现在 WHERE 里（它属于 SELECT 阶段的计算）；③ PARTITION BY 是「分组」，ORDER BY 是「组内排序」，两者别写反，也别漏掉。"
+        },
+        {
+          "type": "tip",
+          "content": "**去重取最新**是窗口函数的王牌用法：`ROW_NUMBER() OVER (PARTITION BY 实体 ORDER BY 时间 DESC) = 1`，再包一层子查询过滤 rn=1，就能拿到每个实体的最新一条记录——比 GROUP BY MAX 更稳（同一天多条时也不丢数据）。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：窗口函数是数仓取数的进阶分水岭，面试必考。真实场景：① 每个品类销售额 Top3（分组 TopN）；② 用户首单/最近一单时间（去重取最新）；③ 订单环比、同比（LAG/LEAD）；④ 用户累计消费曲线（SUM OVER）。能写对这三道题，基本就过了 SQL 关。"
+        }
+      ],
+      "hands_on": "1. 用 ROW_NUMBER 给每个用户的订单按金额降序编号，再包一层子查询取每个用户金额最大的 2 个订单（分组 TopN）。\\n2. 造两个金额相同的订单，分别用 ROW_NUMBER、RANK、DENSE_RANK 编号，对比 1,1,3 与 1,1,2 的差异。\\n3. 用 LAG 计算每个用户相邻两单的金额差（amount - prev_amount）。\\n4. 用「去重取最新」取出每个用户最近一单的 order_date 和金额。",
+      "tasks": [
+        {
+          "task_id": "s02c05t01",
+          "type": "sql",
+          "difficulty": 4,
+          "title": "窗口函数：每个用户的订单金额排名",
+          "question": "用 `ROW_NUMBER()` 给每个用户的订单按金额**降序**编号（每个用户独立从 1 开始），输出 user_id、order_id、amount、rn（rn 为排名列）。\\n\\n要求整体结果先按 user_id **升序**、再按 rn **升序**排列，保证结果确定。\\n\\n输出列要求：user_id、order_id、amount、rn（保持此顺序）。\\n\\n本题环境为 SQLite（Hive/Spark SQL 语法基本一致，SQLite 支持窗口函数）。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL, order_date TEXT);\nINSERT INTO orders VALUES (1,101,150.0,'2024-01-01'),(2,101,80.0,'2024-01-02'),(3,102,300.0,'2024-01-03'),(4,102,120.0,'2024-01-04'),(5,103,200.0,'2024-01-05');",
+          "expected_sql": "SELECT user_id, order_id, amount, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn FROM orders ORDER BY user_id, rn;",
+          "hint": "先想窗口函数三要素：按什么分区、组内按什么排序、用什么函数编号？别忘了外层整体排序。",
+          "analysis": "**标准解题思路**\\n1. 读题：按用户分组编号 → PARTITION BY user_id；组内按金额降序 → ORDER BY amount DESC。\\n2. 编号函数 ROW_NUMBER()，结果列命名 rn。\\n3. 输出列 user_id、order_id、amount、rn。\\n4. 最外层 ORDER BY user_id, rn 让整体顺序确定（这是比对通过的关键，也符合「结果必须确定」的规范）。\\n5. 验证：101 组 → 单1(150.0) rn1、单2(80.0) rn2；102 组 → 单3(300.0) rn1、单4(120.0) rn2；103 组 → 单5(200.0) rn1。\\n**易错点**：漏 ORDER BY 结果行序随机，比对会不稳定；把 PARTITION BY 和 ORDER BY 写反会得到全局编号而不是分组编号。",
+          "enterprise_tip": "这就是「每个类目销量 Top3」的核心骨架：窗口编号 + 外层 WHERE rn <= 3。面试手写题几乎必考，建议背熟这行模板。"
+        },
+        {
+          "task_id": "s02c05t02",
+          "type": "sql",
+          "difficulty": 4,
+          "title": "窗口函数：按日期累计求和",
+          "question": "用 `SUM() OVER` 计算每个用户按订单日期**累计**的金额（cum_sum），输出 user_id、order_date、amount、cum_sum。\\n\\n要求整体结果先按 user_id **升序**、再按 order_date **升序**排列，保证结果确定。\\n\\n输出列要求：user_id、order_date、amount、cum_sum（保持此顺序）。\\n\\n本题环境为 SQLite（Hive/Spark SQL 语法基本一致，SQLite 支持窗口函数）。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL, order_date TEXT);\nINSERT INTO orders VALUES (1,101,150.0,'2024-01-01'),(2,101,80.0,'2024-01-02'),(3,102,300.0,'2024-01-03'),(4,102,120.0,'2024-01-04'),(5,103,200.0,'2024-01-05');",
+          "expected_sql": "SELECT user_id, order_date, amount, SUM(amount) OVER (PARTITION BY user_id ORDER BY order_date) AS cum_sum FROM orders ORDER BY user_id, order_date;",
+          "hint": "「累计」用哪个窗口函数？按用户分区后，窗口内按什么顺序累加？回忆 OVER 的两个子句。",
+          "analysis": "**标准解题思路**\\n1. 读题：每个用户单独累计 → PARTITION BY user_id。\\n2. 累计的顺序是日期 → 窗口内 ORDER BY order_date（注意这里窗口的 ORDER BY 会同时决定累计范围：从窗口第一行累加到当前行）。\\n3. 求和函数 SUM(amount)，结果列 cum_sum。\\n4. 外层 ORDER BY user_id, order_date 保证整体确定。\\n5. 验证：101 用户 1 月 1 日 cum=150.0、1 月 2 日 cum=230.0；102 用户 1 月 3 日 cum=300.0、1 月 4 日 cum=420.0；103 用户 cum=200.0。\\n**易错点**：窗口内不写 ORDER BY 时 SUM 是「组内全量求和」而非累计——累计必须带 ORDER BY；外层 ORDER BY 不能省。",
+          "enterprise_tip": "累计曲线是用户生命周期分析的核心（消费累计额、活跃天数累计）。企业里日期是 TEXT 存储时，`'2024-01-01'` 这种格式恰好字典序=时间序，设计表时按此约定可以省去类型转换。"
+        },
+        {
+          "task_id": "s02c05t03",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排列 SQL 子句的执行顺序",
+          "question": "把 SQL 各子句的**执行顺序**拖成正确顺序（这是理解 WHERE 不能放聚合、别名不能进 WHERE 的理论根基）。",
+          "steps": [
+            "FROM/JOIN 确定数据来源",
+            "WHERE 过滤行",
+            "GROUP BY 分组",
+            "HAVING 过滤组",
+            "SELECT 计算列与别名",
+            "ORDER BY 排序",
+            "LIMIT 限制行数"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "order_explain": "SQL 先确定数据从哪来（FROM/JOIN），再逐层处理：过滤行（WHERE）→ 分组（GROUP BY）→ 过滤组（HAVING）→ 计算列（SELECT）→ 排序（ORDER BY）→ 截断（LIMIT）。所以 WHERE 里不能写聚合函数（还没分组），WHERE 里不能用别名（别名在 SELECT 才算出来）。",
+          "analysis": "**标准解题思路**\\n1. 记忆口诀：**从哪来 → 滤行 → 分组 → 滤组 → 算列 → 排序 → 截断**。\\n2. FROM/JOIN 最先执行，确定数据全集。\\n3. WHERE 逐行过滤，此时分组未发生。\\n4. GROUP BY 分组、HAVING 过滤组。\\n5. SELECT 才计算表达式和别名。\\n6. ORDER BY 排序、LIMIT 截断在最后。\\n**应用**：这个顺序解释了三个经典报错——WHERE 里用聚合函数、WHERE 里用别名、HAVING 里用 SELECT 的别名（部分数据库不允许）。",
+          "enterprise_tip": "执行顺序是 SQL 优化的理论地基：WHERE 能滤掉的行绝不拖到 HAVING（减少分组计算），SELECT 能后算的表达式绝不提前（减少每行开销）。面试官问「为什么 SELECT * 慢」，一半答案也藏在这个顺序里。"
+        },
+        {
+          "task_id": "s02c05t04",
+          "type": "sql",
+          "difficulty": 5,
+          "title": "ROW_NUMBER 分组取热销商品 Top3",
+          "question": "连接 products 与 sales，先统计每个商品的**总销售额**，再用 `ROW_NUMBER()` 按**品类**分组、组内按销售额**降序编号**，取出每个品类销售额 **Top3** 的商品，输出 category、product_name、amount、rn。\\n\\n要求整体结果先按 category **升序**、再按 rn **升序**排列，保证结果确定。\\n\\n输出列要求：category、product_name、amount、rn（保持此顺序；amount 为该商品总销售额 SUM(s.amount)；rn 为组内排名）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE products (product_id INTEGER, product_name TEXT, category TEXT);\nINSERT INTO products VALUES (1,'手机','数码'),(2,'耳机','数码'),(3,'平板','数码'),(4,'T恤','服饰'),(5,'牛仔裤','服饰'),(6,'连衣裙','服饰'),(7,'背包','服饰'),(8,'键盘','数码');\nCREATE TABLE sales (sale_id INTEGER, product_id INTEGER, amount REAL);\nINSERT INTO sales VALUES (1,1,1000.0),(2,1,800.0),(3,2,500.0),(4,3,300.0),(5,4,600.0),(6,5,400.0),(7,6,200.0),(8,7,100.0),(9,8,50.0);",
+          "expected_sql": "SELECT category, product_name, amount, rn FROM (\n  SELECT category, product_name, amount,\n         ROW_NUMBER() OVER (PARTITION BY category ORDER BY amount DESC) AS rn\n  FROM (\n    SELECT p.category, p.product_name, SUM(s.amount) AS amount\n    FROM products p JOIN sales s ON p.product_id = s.product_id\n    GROUP BY p.category, p.product_name\n  )\n) WHERE rn <= 3 ORDER BY category, rn;",
+          "hint": "从内到外拆三层：① 每个商品总销售额怎么算？② 按品类组内编号用什么？③ 取前 3 怎么过滤？",
+          "analysis": "**标准解题思路**\\n1. 读题：先要「每个商品的总销售额」→ 连接两表并分组聚合。\\n2. 最内层：SELECT p.category, p.product_name, SUM(s.amount) AS amount FROM products p JOIN sales s ON p.product_id = s.product_id GROUP BY p.category, p.product_name。\\n3. 中层：ROW_NUMBER() OVER (PARTITION BY category ORDER BY amount DESC) 在**每个品类内**按销售额降序编号 → 数码：手机1、耳机2、平板3、键盘4；服饰：T恤1、牛仔裤2、连衣裙3、背包4。\\n4. 外层：WHERE rn <= 3 只保留每品类前三。\\n5. 排序 ORDER BY category, rn 保证整体顺序确定，共 6 行。\\n**易错点**：必须在「分组聚合后的结果」上开窗，不能在原始 sales 明细上直接 PARTITION BY（会按单笔销售而不是商品总额排名）；漏掉外层 WHERE rn <= 3 会把 8 行全返回。",
+          "enterprise_tip": "分组 TopN 是「品类排行榜 / 门店 TOP 榜」的通用解法，也是面试手写必考题。企业大表上先聚合再开窗，避免窗口函数扫描全表明细；熟练后把 WHERE rn <= N 换成 rn = 1 就是「每组取最大」。"
+        },
+        {
+          "task_id": "s02c05t05",
+          "type": "sql",
+          "difficulty": 4,
+          "title": "SUM() OVER 计算每日累计销售额",
+          "question": "先按订单日期聚合出**每日销售额**，再用 `SUM() OVER` 计算**截至当日的累计销售额**，输出 order_date、daily_amount、cum_amount，按日期**升序**排列。\\n\\n输出列要求：order_date、daily_amount、cum_amount（保持此顺序；cum_amount 为 SUM(daily_amount) OVER (ORDER BY order_date)）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL, order_date TEXT);\nINSERT INTO orders VALUES (1,101,150.0,'2024-01-01'),(2,101,80.0,'2024-01-02'),(3,102,300.0,'2024-01-02'),(4,102,120.0,'2024-01-03'),(5,103,200.0,'2024-01-03');",
+          "expected_sql": "SELECT order_date, daily_amount, SUM(daily_amount) OVER (ORDER BY order_date) AS cum_amount\nFROM (SELECT order_date, SUM(amount) AS daily_amount FROM orders GROUP BY order_date)\nORDER BY order_date;",
+          "hint": "先想：每日销售额从哪来？「截至当日累计」的窗口按什么排序？",
+          "analysis": "**标准解题思路**\\n1. 读题：要「每日销售额」和「累计销售额」→ 先聚合出每日值，再开窗累计。\\n2. 内层：SELECT order_date, SUM(amount) AS daily_amount FROM orders GROUP BY order_date → 1 月 1 日 150.0、1 月 2 日 380.0、1 月 3 日 320.0。\\n3. 外层：SUM(daily_amount) OVER (ORDER BY order_date)——窗口内带 ORDER BY 时，从窗口第一行累加到当前行，即累计值。\\n4. 逐行验证：1 月 1 日累计 150.0；1 月 2 日累计 150+380=530.0；1 月 3 日累计 530+320=850.0。\\n5. 外层 ORDER BY order_date 保证整体顺序确定。\\n**易错点**：窗口内不写 ORDER BY 时 SUM 变成「全量求和」而不是累计；不能在明细行上直接开窗，必须先按日聚合。",
+          "enterprise_tip": "累计销售额曲线是「销售爬坡 / 大促进度」分析的基础，SUM() OVER (ORDER BY 时间) 是累计类指标的标准模板。企业里日期存 TEXT（'2024-01-01'）时字典序恰好等于时间序，可以直接排序。"
+        },
+        {
+          "task_id": "s02c05t06",
+          "type": "sql",
+          "difficulty": 4,
+          "title": "RANK 与 DENSE_RANK 对比：并列跳号",
+          "question": "用 **RANK()** 和 **DENSE_RANK()** 同时给订单按金额**降序**编号，输出 order_id、amount、rk（RANK 结果）、drk（DENSE_RANK 结果）。\\n\\n要求：结果先按 amount **降序**、再按 order_id **升序**排列，保证结果确定。\\n\\n输出列要求：order_id、amount、rk、drk（保持此顺序）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (1,101,150.0),(2,102,150.0),(3,103,80.0),(4,104,50.0);",
+          "expected_sql": "SELECT order_id, amount, RANK() OVER (ORDER BY amount DESC) AS rk, DENSE_RANK() OVER (ORDER BY amount DESC) AS drk FROM orders ORDER BY amount DESC, order_id;",
+          "hint": "先回忆两者区别：遇到并列名次时跳号还是不跳号？重点对比并列时的编号。",
+          "analysis": "**标准解题思路**\\n1. 读题：两个排名函数对比 → RANK 并列同号但跳号（1,1,3），DENSE_RANK 并列同号不跳号（1,1,2）。\\n2. 排序依据：ORDER BY amount DESC，150 出现两次（并列第一）。\\n3. 逐行计算：金额 150、150、80、50 → RANK：1、1、3、4；DENSE_RANK：1、1、2、3。\\n4. 外层 ORDER BY amount DESC, order_id → (1,150)、(2,150)、(3,80)、(4,50)。\\n5. 验证输出 4 行，rk/drk 依次为 1/1、1/1、3/2、4/3。\\n**易错点**：窗口内不写 ORDER BY 时排名无意义；漏掉外层 ORDER BY 行序随机，比对不稳定；DENSE_RANK 的第 3 行是 2 而不是 3（不跳号），这是两者本质区别。",
+          "enterprise_tip": "排行榜需求要分清用哪个排名：并列不跳号（比赛名次 1、1、2）用 DENSE_RANK；需要唯一序号（取前 N 名）用 ROW_NUMBER。面试必考三者区别，务必背熟。"
+        },
+        {
+          "task_id": "s02c05t07",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "窗口函数与 GROUP BY 的区别",
+          "question": "关于**窗口函数**与 **GROUP BY**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "GROUP BY 把多行压成一行、丢失明细；窗口函数不压行，每行原样保留并同时计算窗口值",
+              "correct": true,
+              "explain": "正确。这是窗口函数存在的根本原因：既要明细、又要聚合。"
+            },
+            {
+              "text": "窗口函数和 GROUP BY 一样会把多行合并成一行",
+              "correct": false,
+              "explain": "错误。窗口函数不改变行数，每一行都保留。"
+            },
+            {
+              "text": "窗口函数只能配合 GROUP BY 使用，二者必须同时出现",
+              "correct": false,
+              "explain": "错误。窗口函数可以独立使用，如全局排名 ROW_NUMBER() OVER (ORDER BY ...)。"
+            },
+            {
+              "text": "GROUP BY 可以直接给每一行生成排名，不需要窗口函数",
+              "correct": false,
+              "explain": "错误。GROUP BY 只能输出组级聚合结果，无法在明细行上生成排名。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 行数视角：GROUP BY 压缩行数（每组一行），窗口函数保留全部行。\\n2. 场景视角：只要组级指标用 GROUP BY；既要明细又要排名/累计用窗口函数。\\n3. 语法视角：窗口函数写在 SELECT 里（OVER 定义窗口），不能出现在 WHERE 中。\\n4. 选 A。\\n**延伸**：窗口函数里也可以写聚合函数（SUM() OVER），所以二者不是对立关系，而是「压缩」与「保留」的区别。",
+          "enterprise_tip": "面试连环问：同一需求什么时候用 GROUP BY、什么时候用窗口函数？答：只要明细就选窗口函数；只要组级汇总就选 GROUP BY；「每组 TopN」两者结合（先聚合再开窗）。"
+        },
+        {
+          "task_id": "s02c05t08",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：取上一行的窗口函数",
+          "question": "窗口函数中，取窗口内**上一行**某列值的函数是 ____（4 个英文字母）；取下一行用 LEAD。",
+          "answer": [
+            "LAG",
+            "lag",
+            "LAG()",
+            "lag()"
+          ],
+          "hint": "回忆窗口函数里取「上一行」的一对函数：题目已说取下一行是 LEAD，那取上一行叫什么？",
+          "analysis": "**标准解题思路**\\n1. 前后行函数：LAG(列) 取上一行、LEAD(列) 取下一行。\\n2. 用法：LAG(amount) OVER (PARTITION BY user_id ORDER BY order_date) 取该用户上一单的金额。\\n3. 填 LAG。\\n**延伸**：LAG(amount, 2) 可以往前取两行；环比计算 = (本期 - LAG(本期)) / LAG(本期)。"
+        },
+        {
+          "task_id": "s02c05t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "窗口函数的底层计算",
+          "question": "从**底层原理**看，`ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC)` 这类窗口函数的计算过程是？",
+          "options": [
+            {
+              "text": "引擎先把数据按 PARTITION BY 分组，组内按窗口 ORDER BY 排序，再在每组内逐行滑动窗口计算编号 / 聚合值",
+              "correct": true,
+              "explain": "正确。窗口函数 = 分区 → 组内排序 → 逐行滑动窗口计算，这就是它比普通查询多出来的代价。"
+            },
+            {
+              "text": "引擎按原始插入顺序逐行编号，不做任何排序",
+              "correct": false,
+              "explain": "错误。窗口内 ORDER BY 是必须的，不排序就无法定义排名和累计范围。"
+            },
+            {
+              "text": "引擎先把全表 GROUP BY 压成一行再计算",
+              "correct": false,
+              "explain": "错误。GROUP BY 会压行，窗口函数恰恰不压行、每行都保留。"
+            },
+            {
+              "text": "窗口函数必须先把整张表复制到内存才能计算",
+              "correct": false,
+              "explain": "错误。大表上排序可以溢写磁盘，并不要求整表进内存。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 三步计算模型：分区（PARTITION BY，把数据按键分组）→ 组内排序（窗口 ORDER BY）→ 逐行滑动窗口计算（窗口从起点到当前行，编号/累计/取前后行都在这一步）。\\n2. 与 GROUP BY 的区别：不压行，每行原样输出，所以能「既要明细、又要聚合」。\\n3. 性能代价：多一次全量排序，大表上可能触发溢写——这就是窗口函数比普通查询慢的根源。\\n4. 面试点：为什么窗口函数不能进 WHERE？因为它在 SELECT 阶段才计算。\\n5. 结论：选 A。",
+          "enterprise_tip": "面试「窗口函数为什么慢」：全量排序 + 可能的溢写。优化思路：先 WHERE 缩小数据再开窗、尽量只对需要的分区开窗——排序规模决定窗口函数的耗时。"
+        },
+        {
+          "task_id": "s02c05t10",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "NTILE 分桶函数",
+          "question": "关于窗口函数 `NTILE(n)`，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "NTILE(4) 把每个分区内的行尽量均匀地分成 4 个桶，返回每行所在的桶号（1~4），常用于按排名切分分位数",
+              "correct": true,
+              "explain": "正确。NTILE 是「分桶」：n 个桶尽量等分，行数不够整除时靠前的桶多分，返回桶号。"
+            },
+            {
+              "text": "NTILE(4) 返回每行从 1 开始递增的行号",
+              "correct": false,
+              "explain": "错误。返回行号（1,2,3... 直到总行数）是 ROW_NUMBER 的职责，NTILE 只返回桶号。"
+            },
+            {
+              "text": "NTILE(4) 返回并列同号的排名",
+              "correct": false,
+              "explain": "错误。并列同号是 RANK / DENSE_RANK 的职责；NTILE 与并列无关，只看行位置分桶。"
+            },
+            {
+              "text": "NTILE 的参数必须小于分区内行数，否则报错",
+              "correct": false,
+              "explain": "错误。桶数 n 可以大于行数（会有一部分空桶），不会报错。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. NTILE(n) 把窗口分区内的行按 ORDER BY 顺序尽量均匀地分成 n 个桶，返回 1~n 的桶号。\n2. 均匀策略：行数不能被 n 整除时，靠前的桶多分 1 行。\n3. 与排名函数区分：ROW_NUMBER 给唯一序号、RANK / DENSE_RANK 给并列排名、NTILE 给分桶号。\n4. 典型用途：用户按消费分四等分、流量按时间分桶抽样、数据按桶号分批处理。\n5. 选 A。",
+          "enterprise_tip": "RFM 分层、客户分位分析（消费前 25% 人群）用 NTILE(4) 一行实现；配合 ORDER BY 金额 DESC 就能把用户切成四档，是运营看板的常客。"
+        },
+        {
+          "task_id": "s02c05t11",
+          "type": "fill",
+          "difficulty": 3,
+          "title": "填空：取窗口第一行的函数",
+          "question": "窗口函数中，取窗口内**第一行**某列值的函数是 `____(列)`（如 `____(order_date) OVER (PARTITION BY user_id ORDER BY order_date)` 取每个用户最早订单日期）；取最后一行用 LAST_VALUE。",
+          "answer": [
+            "FIRST_VALUE",
+            "first_value",
+            "First_Value",
+            "FIRST_VALUE()",
+            "first_value()"
+          ],
+          "hint": "回忆取窗口「第一行」的函数：题目已给 LAST_VALUE，与它成对的是哪个？注意下划线连接。",
+          "analysis": "**标准解题思路**\n1. FIRST_VALUE(列) OVER (...) 返回窗口内第一行的该列值；LAST_VALUE 返回最后一行的值。\n2. 与 LAG / LEAD 区分：LAG 取上一行（相对偏移），FIRST_VALUE 取窗口边界第一行（绝对位置）。\n3. 典型用法：按用户分区、按时间排序，FIRST_VALUE(order_date) 取首单时间、FIRST_VALUE(amount) 取首单金额。\n4. 注意：窗口内带 ORDER BY 后默认窗口范围从起点到当前行，LAST_VALUE 取的是当前行而非分区末行——要取分区末行需显式指定 ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING。\n5. 填 FIRST_VALUE。",
+          "enterprise_tip": "「每个用户的首单金额」「每个品类的首发日期」都用 FIRST_VALUE；企业里做首购分析、留存分析时，它比自连接更简洁高效。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "ROW_NUMBER、RANK、DENSE_RANK 有什么区别？",
+          "a": "都是排名函数：ROW_NUMBER 并列也强行分出先后（1,2,3）；RANK 并列同号但跳号（1,1,3）；DENSE_RANK 并列同号且不跳号（1,1,2）。面试必考三者的区别。"
+        },
+        {
+          "q": "窗口函数和 GROUP BY 有什么区别？",
+          "a": "GROUP BY 把多行压成一行、丢失明细；窗口函数不压行，每一行原样保留，同时在一组窗口内计算排名、累计等值，适合「既要明细又要聚合」的场景。"
+        },
+        {
+          "q": "SUM() OVER 什么时候是累计、什么时候是组内全量？",
+          "a": "窗口内带 ORDER BY 时是从窗口第一行累加到当前行的「累计值」；不带 ORDER BY 时是整个分区的全量求和。累计分析必须带 ORDER BY。"
+        },
+        {
+          "q": "为什么窗口函数不能出现在 WHERE 里？",
+          "a": "窗口函数在 SELECT 阶段才计算，WHERE 执行时它还不存在。想按窗口结果（如 rn <= 3）过滤，必须把开窗查询包成子查询，在外层 WHERE 过滤。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "ROW_NUMBER / RANK / DENSE_RANK",
+          "desc": "三个排名窗口函数，区别在并列时的编号与是否跳号。"
+        },
+        {
+          "term": "OVER",
+          "desc": "窗口函数标志，OVER (...) 定义窗口范围。"
+        },
+        {
+          "term": "PARTITION BY",
+          "desc": "窗口内的分组关键字，相当于窗口内的 GROUP BY。"
+        },
+        {
+          "term": "SUM() OVER",
+          "desc": "窗口聚合函数，带 ORDER BY 时为累计求和。"
+        },
+        {
+          "term": "LAG / LEAD",
+          "desc": "取窗口内上一行 / 下一行的值，环比同比的基础。"
+        },
+        {
+          "term": "分组 TopN",
+          "desc": "每组取前 N 的经典场景：开窗编号 + 外层 WHERE rn <= N。"
+        },
+        {
+          "term": "去重取最新",
+          "desc": "ROW_NUMBER() OVER (PARTITION BY 实体 ORDER BY 时间 DESC) 取 rn=1 获得每组最新记录。"
+        }
+      ],
+      "kps": [
+        "窗口函数与 OVER 语法：既要明细又要聚合",
+        "PARTITION BY 窗口分组与窗口内 ORDER BY",
+        "ROW_NUMBER / RANK / DENSE_RANK 排名三兄弟",
+        "SUM() OVER 窗口聚合与累计求和",
+        "LAG / LEAD 取前后行",
+        "分组 TopN 与去重取最新",
+        "窗口函数 vs GROUP BY，窗口函数不能进 WHERE",
+        "窗口函数的底层：排序后滑动窗口计算"
+      ]
+    },
+    {
+      "chapter_id": "s02c06",
+      "title": "2.6 常用函数与 NULL",
+      "goal": "掌握常用字符串函数、CASE WHEN 条件分支与 NULL 处理（IS NULL、COALESCE）",
+      "plan_days": 1,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "真实数据是脏的：邮箱大小写混乱、手机号缺号、字段是 NULL。**字符串函数**就是清洗工具：`substr` 截取、`instr` 找子串位置、`length` 长度、`replace` 替换、`lower`/`upper` 大小写、`trim` 去首尾空白。\\n**CASE WHEN** 是 SQL 里的 if/else，按条件分列取值：\\n\\n```\nCASE WHEN 条件1 THEN 值1 WHEN 条件2 THEN 值2 ELSE 兜底 END\n```\\n\\n注意它是**从上到下匹配，命中即停**，所以条件顺序有讲究。"
+        },
+        {
+          "type": "text",
+          "content": "**NULL 是 SQL 里最反直觉的东西**：它不是 0，不是空字符串，而是「未知」。三值逻辑：`NULL = NULL` 的结果是**未知（不成立）**，任何 `列 = NULL` 的比较都是错的。\\n正确的姿势：\\n- 判断是否为空 → `列 IS NULL` / `列 IS NOT NULL`；\\n- 取第一个非空值 → `COALESCE(列, 兜底值)`；\\n- 聚合忽略 NULL → `COUNT(列)` 不数 NULL 行，`SUM(列)` 全 NULL 时结果是 NULL。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "CREATE TABLE users (id INTEGER, name TEXT, email TEXT, phone TEXT);\nINSERT INTO users VALUES\n (1,'张三','Zhang.San@Example.COM','13800000001'),\n (2,'李四','LI.SI@Example.com',NULL),\n (3,'王五','wangwu@example.com','13900000003');\n\n-- 1. 大小写归一 + NULL 兜底\nSELECT id, name, LOWER(email) AS email, COALESCE(phone, '未填写') AS phone\nFROM users ORDER BY id;\n\n-- 2. CASE WHEN：按金额分档\nSELECT order_id,\n       CASE WHEN amount >= 200 THEN '高额'\n            WHEN amount >= 100 THEN '中额'\n            ELSE '小额' END AS level\nFROM orders ORDER BY order_id;\n\n-- 3. NULL 判断\nSELECT id, name FROM users WHERE phone IS NULL;",
+          "caption": "字符串清洗 / CASE WHEN / IS NULL"
+        },
+        {
+          "type": "warning",
+          "content": "**NULL 三连坑**：① `phone = NULL` 永远为假，必须写 `phone IS NULL`；② `COUNT(phone)` 不数 NULL，`COUNT(*)` 数——统计口径差异的根源；③ CASE WHEN 里条件顺序错了（比如先写「>=100」再写「>=200」），后面的分支永远执行不到。"
+        },
+        {
+          "type": "tip",
+          "content": "**COALESCE 可以接多个参数**：`COALESCE(a, b, 0)` 依次返回第一个非 NULL 值。配合聚合很常用：`COALESCE(SUM(amount), 0)` 让没有订单的用户金额显示 0 而不是 NULL。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：数据清洗的第一课就是「NULL 和脏字符串」。数仓质量报告中 80% 的问题与 NULL 有关：字段 NULL 率监控、默认值兜底、口径统一。面试必问题：NULL 和空字符串有什么区别？COUNT(*) 和 COUNT(列) 有什么不同？如何把 NULL 转成 0？——都是本章内容，务必答得滴水不漏。"
+        }
+      ],
+      "hands_on": "1. 自建 users 表造脏数据：大小写混乱的邮箱、NULL 手机号、带首尾空格的用户名，用 LOWER/TRIM/COALESCE 清洗并查询。\\n2. 用 CASE WHEN 把订单金额分成 高额/中额/小额 三档，统计每档订单数。\\n3. 用 substr 提取订单号中的日期部分（如 '2024-01-01' 取前 10 个字符）。\\n4. 分别用 `phone = NULL` 和 `phone IS NULL` 查询，对比结果，加深对三值逻辑的理解。",
+      "tasks": [
+        {
+          "task_id": "s02c06t01",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "清洗邮箱并兜底手机号",
+          "question": "查询每个用户的 id、name、邮箱（用 `LOWER()` 转成小写）、手机号（为 NULL 时显示 `'未填写'`，用 `COALESCE()`），按 id **升序**排列。\\n\\n输出列要求：id、name、email、phone（保持此顺序）。\\n\\n本题环境为 SQLite（Hive/Spark SQL 语法基本一致）。",
+          "setup": "CREATE TABLE users (id INTEGER, name TEXT, email TEXT, phone TEXT);\nINSERT INTO users VALUES (1,'张三','Zhang.San@Example.COM','13800000001'),(2,'李四','LI.SI@Example.com',NULL),(3,'王五','wangwu@example.com','13900000003');",
+          "expected_sql": "SELECT id, name, LOWER(email) AS email, COALESCE(phone, '未填写') AS phone FROM users ORDER BY id;",
+          "hint": "分两步：先统一大小写再输出；空值在最终结果里要变成什么？回忆 NULL 处理那节的函数。",
+          "analysis": "**标准解题思路**\\n1. 读题：四列 id、name、email、phone。\\n2. 邮箱统一小写 → LOWER(email)，列名仍叫 email（用 AS 别名）。\\n3. 手机号 NULL 兜底 → COALESCE(phone, '未填写')。\\n4. 排序 → ORDER BY id。\\n5. 验证：张三 zhang.san@example.com / 13800000001；李四 li.si@example.com / 未填写；王五 wangwu@example.com / 13900000003。\\n**易错点**：`'未填写'` 必须加单引号（字符串字面量）；COALESCE 的兜底值要和原列类型兼容。",
+          "enterprise_tip": "「大小写归一 + 空值兜底」是数仓 ETL 清洗的标准动作，保证下游 join 和报表口径统一。企业里邮箱统一转小写后，还能避免同一用户因大小写不同被统计成两个人。"
+        },
+        {
+          "task_id": "s02c06t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "如何判断某列是否为 NULL",
+          "question": "要判断手机号列 phone 是否为 NULL，正确的写法是？",
+          "options": [
+            {
+              "text": "phone = NULL",
+              "correct": false,
+              "explain": "错误。NULL 不等于任何值，`= NULL` 的结果永远是「未知」，一行都匹配不到。"
+            },
+            {
+              "text": "phone IS NULL",
+              "correct": true,
+              "explain": "正确。判断 NULL 必须用 IS NULL / IS NOT NULL。"
+            },
+            {
+              "text": "phone == NULL",
+              "correct": false,
+              "explain": "错误。SQL 里没有 ==，且 NULL 也不能用等号比较。"
+            },
+            {
+              "text": "phone = 'NULL'",
+              "correct": false,
+              "explain": "错误。'NULL' 是字符串「NULL」，和真正的空值 NULL 是两回事。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. NULL 是「未知值」，任何与它做 = 比较的结果都是未知/假。\\n2. 判断空值只能用 IS NULL / IS NOT NULL。\\n3. 'NULL' 是普通字符串，与 NULL 无关。\\n4. 选 B。\\n**延伸**：`COUNT(phone)` 不统计 NULL 行，想数全量用 COUNT(*)。",
+          "enterprise_tip": "面试陷阱题：WHERE phone != '13800000001' 会不会把 NULL 的手机号也查出来？答：不会。NULL 参与比较结果是未知，该行被过滤掉——这是 NULL 三值逻辑的直接应用。"
+        },
+        {
+          "task_id": "s02c06t03",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "COALESCE 兜底与 CASE WHEN 金额分档",
+          "question": "查询每个订单的订单号、金额与金额档位：金额为 NULL 时显示 **0**（用 `COALESCE`），档位规则为 **>= 200 是 '高'、>= 100 是 '中'、其余是 '低'**（用 `CASE WHEN`）。\\n\\n输出列要求：order_id、amount、level（保持此顺序）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (1,101,150.0),(2,101,NULL),(3,102,300.0),(4,102,80.0),(5,103,200.0);",
+          "expected_sql": "SELECT order_id, COALESCE(amount, 0) AS amount,\n       CASE WHEN COALESCE(amount, 0) >= 200 THEN '高'\n            WHEN COALESCE(amount, 0) >= 100 THEN '中'\n            ELSE '低' END AS level\nFROM orders ORDER BY order_id;",
+          "hint": "两件事分开想：① NULL 兜底用什么函数？② CASE WHEN 分支顺序为什么重要？",
+          "analysis": "**标准解题思路**\\n1. 读题：金额列有 NULL，需要两件事——显示兜底 + 分档。\\n2. 兜底：COALESCE(amount, 0)，amount 为 NULL 时取 0。\\n3. 分档：CASE WHEN 表达式，注意分档用的也必须是兜底后的值，且条件从上到下写：>= 200 → '高'，>= 100 → '中'，ELSE → '低'。\\n4. 逐行验证：150.0 → 中；NULL → 0 → 低；300.0 → 高；80.0 → 低；200.0 → 高。\\n5. ORDER BY order_id 保证顺序确定，共 5 行。\\n**易错点**：CASE WHEN 条件顺序写反（先写 >= 100 再写 >= 200）会让高额分支永远执行不到；忘记 COALESCE 时 NULL 金额会落在 ELSE 分支，但显示的是 NULL 而非 0，与题目要求不符。",
+          "enterprise_tip": "「金额分档」就是消费等级、客单分层的雏形，运营报表里到处是这种 CASE WHEN 标签。企业规范：CASE 分支按「大范围在前、小范围在后」书写，并单测边界值（如恰好等于 200 归哪档）。"
+        },
+        {
+          "task_id": "s02c06t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "NULL 参与运算的结果",
+          "question": "在 SQLite 中执行 `SELECT 1 + NULL;`，返回的结果是？",
+          "options": [
+            {
+              "text": "NULL",
+              "correct": true,
+              "explain": "正确。NULL 表示未知，任何值与 NULL 做算术运算结果都是 NULL，因为「未知数加 1」仍是未知。"
+            },
+            {
+              "text": "1",
+              "correct": false,
+              "explain": "错误。NULL 不是 0，不会按 0 参与运算，1 + NULL 的结果不是 1。"
+            },
+            {
+              "text": "0",
+              "correct": false,
+              "explain": "错误。NULL 不是 0，加法的结果也不会变成 0。"
+            },
+            {
+              "text": "报错",
+              "correct": false,
+              "explain": "错误。SQL 允许 NULL 参与运算，不会报错，只是结果恒为 NULL。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. NULL 的本质是「未知值」，不是 0、不是空字符串。\\n2. 三值逻辑：NULL 参与任何算术运算（+ - * /）、任何比较（= > <），结果都是 NULL 或「未知」。\\n3. 1 + NULL = NULL。\\n4. 选 A。\\n**延伸**：这就是为什么 SUM(amount) 遇到全 NULL 的组结果是 NULL，需要 COALESCE 兜底；也是为什么判断空值必须用 IS NULL。",
+          "enterprise_tip": "面试常考：COUNT(amount) 不数 NULL 行、SUM 全 NULL 返回 NULL、NULL = NULL 不成立。答出「NULL 是未知值、比较用 IS NULL、聚合要兜底」三点，NULL 题就全拿下了。"
+        },
+        {
+          "task_id": "s02c06t05",
+          "type": "sql",
+          "difficulty": 3,
+          "title": "substr 按月统计 + CASE 金额分档",
+          "question": "用 `substr(order_date, 1, 7)` 提取**年月**，统计每个月的订单总金额（列名 **month_amount**），并用 `CASE WHEN` 对月总额分档：**>= 300 为 '高'、>= 100 为 '中'、否则为 '低'**（列名 **level**），按月份**升序**排列。\\n\\n输出列要求：month、month_amount、level（保持此顺序；month 为 substr(order_date,1,7) 的结果）。\\n\\n本题在 SQLite 环境作答，与 Hive/Spark SQL 语法一致。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, order_date TEXT, amount REAL);\nINSERT INTO orders VALUES (1,'2024-01-05',150.0),(2,'2024-01-12',80.0),(3,'2024-02-03',300.0),(4,'2024-02-15',120.0),(5,'2024-02-28',50.0);",
+          "expected_sql": "SELECT substr(order_date, 1, 7) AS month, SUM(amount) AS month_amount, CASE WHEN SUM(amount) >= 300 THEN '高' WHEN SUM(amount) >= 100 THEN '中' ELSE '低' END AS level FROM orders GROUP BY substr(order_date, 1, 7) ORDER BY month;",
+          "hint": "先想：从日期里取「年月」用什么函数？分组键要和 SELECT 里的表达式一致；分支顺序为什么不能乱？",
+          "analysis": "**标准解题思路**\\n1. 读题：按月统计 → 提取年月 → substr(order_date, 1, 7)，'2024-01-05' 取前 7 个字符 = '2024-01'。\\n2. 分组聚合：GROUP BY substr(order_date,1,7)，SUM(amount) AS month_amount。\\n3. 分档：CASE WHEN SUM(amount) >= 300 THEN '高' WHEN SUM(amount) >= 100 THEN '中' ELSE '低' END——条件从上到下，命中即停。\\n4. 逐月验证：2024-01 总额 230 → '中'；2024-02 总额 470 → '高'。\\n5. ORDER BY month 升序，结果 2 行。\\n**易错点**：GROUP BY 与 SELECT 里的提取表达式必须一致；CASE 条件顺序写反（先 >= 100 再 >= 300）会让高额月份永远落不到 '高'；金额全 NULL 时 SUM 是 NULL，可再套 COALESCE 兜底。",
+          "enterprise_tip": "「按月/按周下钻」是数仓报表最常用的时间粒度处理。日期存 TEXT 并统一 'YYYY-MM-DD' 格式时，substr 提取和字典序排序都成立——这是企业表设计的常见约定。"
+        },
+        {
+          "task_id": "s02c06t06",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：IS NULL 的正确写法",
+          "question": "在 WHERE 中判断 phone 列**是否为 NULL**，正确的写法是 `phone ____`（两个英文单词，如 `phone IS NULL` 中的后半部分）。",
+          "answer": [
+            "IS NULL",
+            "is null",
+            "Is Null"
+          ],
+          "hint": "NULL 不能和任何值用等号比较，判断空值有专门的关键字组合。",
+          "analysis": "**标准解题思路**\\n1. NULL 是「未知值」，`phone = NULL` 的结果永远是未知，一行都匹配不到。\\n2. 判断空值必须用 IS NULL / IS NOT NULL。\\n3. 填 IS NULL。\\n**延伸**：想查「手机号没填的用户」写 WHERE phone IS NULL；想查「填了的」写 WHERE phone IS NOT NULL。'NULL'（带引号）是普通字符串，与真正的 NULL 是两回事。"
+        },
+        {
+          "task_id": "s02c06t07",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "substr 截取结果",
+          "question": "在 SQLite 中执行 `SELECT substr('2024-01-05', 1, 7);`，返回的结果是？",
+          "options": [
+            {
+              "text": "'2024-01'",
+              "correct": true,
+              "explain": "正确。substr 从第 1 个字符开始截取 7 个字符，得到 2024-01。"
+            },
+            {
+              "text": "'2024-01-0'",
+              "correct": false,
+              "explain": "那是截取了 9 个字符的结果（或对起止位置理解错误），7 个字符只到 '2024-01'。"
+            },
+            {
+              "text": "'2024'",
+              "correct": false,
+              "explain": "那是 substr('2024-01-05', 1, 4) 的结果，只截了 4 个字符。"
+            },
+            {
+              "text": "'01-05'",
+              "correct": false,
+              "explain": "那是从第 6 个字符开始截取的结果，不是从第 1 个字符开始。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. substr(字符串, 起始位置, 长度)：从第 1 个字符开始，截 7 个字符。\\n2. '2024-01-05' 前 7 个字符是 '2024-01'。\\n3. 选 A。\\n**延伸**：substr('2024-01-05', 1, 4) = '2024'（年份）、substr('2024-01-05', 6, 2) = '01'（月份），配合 GROUP BY 可做按年/按月统计。"
+        },
+        {
+          "task_id": "s02c06t08",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：索引能加速哪类查询",
+          "question": "数据库的 B+ 树索引能显著加速 **____ 条件查询**（如 `WHERE user_id = 100`）与**范围条件查询**（如 `WHERE age BETWEEN 20 AND 30`）；但对不带 WHERE 的全表查询没有帮助。",
+          "answer": [
+            "等值",
+            "等值条件",
+            "等值查询",
+            "等值和范围",
+            "等值/范围",
+            "等值与范围",
+            "equality"
+          ],
+          "hint": "先判断：WHERE user_id = 100 属于哪一类条件？这类条件正是 B+ 树索引最擅长的。",
+          "analysis": "**标准解题思路**\\n1. 索引的本质：按索引键有序的 B+ 树。\\n2. 等值查询：沿根到叶定位，只需 O(树高) 次页 IO（如 `WHERE user_id = 100`）。\\n3. 范围查询：定位起点后沿叶子节点链表顺序扫描（如 BETWEEN、>、<）。\\n4. 无 WHERE 的全表查询：没有可定位的起点，只能全表扫描，索引帮不上忙。\\n5. 填「等值」。\\n**延伸**：这也是为什么给「高频查询的 WHERE 列 / 连接列」建索引能显著提速；索引列上做函数运算（如 `WHERE upper(email)='A'`）会让索引失效。"
+        },
+        {
+          "task_id": "s02c06t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "NULLIF 与 COALESCE 的组合",
+          "question": "关于 `NULLIF` 与 `COALESCE`，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "NULLIF(a, b) 在 a 等于 b 时返回 NULL，否则返回 a；COALESCE(a, b, ...) 返回第一个非 NULL 值；两者可组合（如 COALESCE(NULLIF(amount, 0), 1) 把 0 也当成缺失处理）",
+              "correct": true,
+              "explain": "正确。NULLIF 制造 NULL（把特定值变成缺失），COALESCE 消除 NULL（给缺失兜底），组合使用可实现更精细的默认值逻辑。"
+            },
+            {
+              "text": "NULLIF 和 COALESCE 作用完全相同，可以互换",
+              "correct": false,
+              "explain": "错误。NULLIF 是把「相等的值」变成 NULL；COALESCE 是把 NULL 变成「第一个非空值」，方向相反。"
+            },
+            {
+              "text": "NULLIF(a, b) 在 a 不等于 b 时返回 NULL",
+              "correct": false,
+              "explain": "错误。恰恰相反：a 不等于 b 时返回 a（原值），a 等于 b 时才返回 NULL。"
+            },
+            {
+              "text": "COALESCE 最多只能接收两个参数",
+              "correct": false,
+              "explain": "错误。COALESCE 可以接收任意多个参数，从左到右返回第一个非 NULL 的值。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. NULLIF(a, b)：a = b 返回 NULL，否则返回 a——把某个特殊值「伪装成缺失」。经典用法：NULLIF(amount, 0) 避免除零，x / NULLIF(y, 0) 在分母为 0 时结果是 NULL 而非报错。\n2. COALESCE(a, b, c)：从左到右返回第一个非 NULL 值——给缺失值兜底。经典用法：COALESCE(phone, '未填写')、COALESCE(SUM(amount), 0)。\n3. 组合：COALESCE(NULLIF(amount, 0), 1)——amount 为 0 时 NULLIF 先变 NULL，COALESCE 再兜成 1，实现「0 也按缺失处理」。\n4. 选 A。",
+          "enterprise_tip": "报表口径里「0 和 NULL 要不要分开」是高频讨论；NULLIF + COALESCE 组合能把两者都归一成默认值，是数仓清洗的常用套路；面试也常考除零保护写法。"
+        },
+        {
+          "task_id": "s02c06t10",
+          "type": "fill",
+          "difficulty": 3,
+          "title": "填空：strftime 日期格式化",
+          "question": "SQLite 中按指定格式输出日期 / 时间字符串的函数是 `____(格式, 日期)`，例如 `____('%Y-%m', '2024-01-05')` 返回 '2024-01'（填函数名，8 个小写字母）。",
+          "answer": [
+            "strftime",
+            "STRFTIME",
+            "strftime()",
+            "STRFTIME()"
+          ],
+          "hint": "日期时间可以按自定义格式输出，回忆 2.6 节日期处理部分：先判断这类函数属于哪一类（格式化输出），再回忆它的名字。",
+          "analysis": "**标准解题思路**\n1. strftime(格式, 日期字符串) 把日期按格式符重新输出：%Y 四位年、%m 两位月、%d 两位日、%H 时、%M 分。\n2. 示例：strftime('%Y-%m', '2024-01-05') → '2024-01'；strftime('%Y%m%d', '2024-01-05') → '20240105'。\n3. 用途：按年 / 月 / 周分组统计（GROUP BY strftime('%Y-%m', order_date)）、报表日期下钻。\n4. 方言提醒：Hive 用 date_format、MySQL 用 DATE_FORMAT，函数名不同但思路相同。\n5. 填 strftime。",
+          "enterprise_tip": "日报周报按「年月」下钻是最高频需求；企业里日期统一存 'YYYY-MM-DD' 文本时，strftime 提取和字典序排序都能直接用，是表设计的常见约定。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "NULL 和空字符串有什么区别？",
+          "a": "NULL 表示「未知 / 未赋值」，不占内容；空字符串 '' 是有值的空文本。NULL 不能参与 = 比较，判断空值必须用 IS NULL / IS NOT NULL；空字符串可以正常比较。"
+        },
+        {
+          "q": "为什么 phone = NULL 查不出任何数据？",
+          "a": "NULL 与任何值做 = 比较的结果都是「未知（不成立）」，所以等号判断永远匹配不到；判断 NULL 只能用 IS NULL / IS NOT NULL。"
+        },
+        {
+          "q": "COUNT(*) 和 COUNT(列) 有什么不同？",
+          "a": "COUNT(*) 数表中所有行；COUNT(列) 只数该列非 NULL 的行。统计口径差异的根源就在这：某列 NULL 多时两者结果差很多。"
+        },
+        {
+          "q": "COALESCE 有什么作用、怎么用？",
+          "a": "COALESCE 依次返回第一个非 NULL 的参数，如 COALESCE(phone, '未填写')、COALESCE(SUM(amount), 0)，常用于把 NULL 兜底成默认值，避免报表出现空白。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "CASE WHEN",
+          "desc": "条件分支表达式，从上到下匹配、命中即停，相当于 SQL 里的 if/else。"
+        },
+        {
+          "term": "COALESCE",
+          "desc": "取第一个非空值的函数，可接多个参数做层层兜底。"
+        },
+        {
+          "term": "IS NULL / IS NOT NULL",
+          "desc": "判断空值的专用写法，不能用 = 代替。"
+        },
+        {
+          "term": "NULL",
+          "desc": "未知值，不是 0 也不是空字符串，参与运算结果恒为 NULL。"
+        },
+        {
+          "term": "三值逻辑",
+          "desc": "SQL 比较的结果有 TRUE / FALSE / UNKNOWN 三种，NULL 参与比较多为 UNKNOWN。"
+        },
+        {
+          "term": "LOWER / UPPER",
+          "desc": "把字符串转小写 / 大写，数据清洗常用。"
+        },
+        {
+          "term": "TRIM",
+          "desc": "去除字符串首尾空白字符。"
+        },
+        {
+          "term": "substr / instr / replace",
+          "desc": "字符串函数：截取、找子串位置、替换。"
+        }
+      ],
+      "kps": [
+        "字符串函数：substr / instr / length / replace / lower / upper / trim",
+        "CASE WHEN 条件分支（从上到下、命中即停）",
+        "NULL 的本质（不是 0 不是空串）与三值逻辑",
+        "IS NULL / IS NOT NULL 判断空值",
+        "COALESCE 取第一个非空值兜底",
+        "聚合忽略 NULL（COUNT(列) 不数 NULL、SUM 全 NULL 为 NULL）",
+        "日期存 TEXT 与 substr 按月统计",
+        "索引能加速哪类查询（等值 / 范围）"
+      ]
+    },
+    {
+      "chapter_id": "s02c07",
+      "title": "2.7 大数据 SQL 优化思维",
+      "goal": "理解分区裁剪、谓词下推、数据倾斜、小文件与 SELECT * 危害，建立大数据 SQL 优化思维",
+      "plan_days": 1,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "前面几章在单机 SQLite 上练习，但企业里 SQL 跑在**分布式数仓**上：Hive/Spark 会把一条 SQL 翻译成几十上百个分布式任务，扫描的数据量直接决定耗时。在亿行订单表上，一条 SQL 跑几小时很正常。\\n所以大数据 SQL 的核心思维只有一句话：**少扫数据、少算数据、少传数据**。这一章把最常见的优化手段讲透。"
+        },
+        {
+          "type": "text",
+          "content": "六大优化点：\\n- **分区裁剪**：表按日期/城市分区，WHERE 里带分区条件，引擎只扫相关分区（如只扫 2024-01 一个月的数据），不扫全表；\\n- **谓词下推**：JOIN 前先把两边 WHERE 过滤掉，让「小表先变小」，再参与连接；\\n- **数据倾斜**：某个 key 数据量特别大（如头部商家的订单），单任务处理不过来拖垮整个作业——要加盐、分桶或广播小表；\\n- **小文件问题**：海量小文件让任务调度和 IO 开销巨大，用合并（如 Spark 的 coalesce）控制输出文件数；\\n- **SELECT * 的危害**：把不需要的列也读出来，浪费磁盘 IO 和网络带宽，还阻断列裁剪优化；\\n- **执行顺序复习**：FROM → WHERE → GROUP BY → HAVING → SELECT → ORDER BY → LIMIT，每一步都尽量提前缩小数据。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "-- 反例：全表扫描 + 无用列 + 大表先全量 JOIN\nSELECT *\nFROM orders o\nJOIN users u ON o.user_id = u.id;\n\n-- 正例：只取需要的列 + 先过滤再 JOIN（谓词下推）\nSELECT o.order_id, o.amount\nFROM orders o\nJOIN users u ON o.user_id = u.id\nWHERE u.is_vip = 1 AND o.order_date >= '2024-01-01';\n\n-- 分区裁剪：订单表按 dt 分区，只扫一个分区\nSELECT order_id, amount FROM orders\nWHERE dt = '2024-01-05';\n\n-- SQLite 观察执行计划：是否走索引/全表扫描\nEXPLAIN QUERY PLAN SELECT order_id FROM orders WHERE order_id = 100;",
+          "caption": "优化前后对比：列裁剪、谓词下推、分区过滤"
+        },
+        {
+          "type": "warning",
+          "content": "**数据倾斜的症状**：任务进度卡在 99%、最后几个 task 跑不完、某个节点 OOM——通常是 JOIN 或 GROUP BY 的 key 出现热点（比如大促当天头部商品的订单占 80%）。看到「大部分任务秒完、少数任务跑几小时」，第一反应就是倾斜。"
+        },
+        {
+          "type": "tip",
+          "content": "**执行顺序 = 优化地图**：WHERE 能过滤的绝不放 HAVING（减少分组计算量）；SELECT 能后算的表达式绝不提前（减少每行开销）；能 LIMIT 提前的绝不最后才截。每一步都问自己：现在数据量还能不能更小？"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：面试必问「你优化过哪些慢 SQL？」标准回答套路四步：① 定位——EXPLAIN / 日志找瓶颈环节；② 减扫描——分区裁剪、WHERE 提前；③ 减计算——列裁剪、去重、改写 JOIN；④ 减传输——合并小文件、只取需要的列；最后**用结果一致性验证**（优化前后行数一致）。这一章的每个概念都能在真实优化案例里对上号。"
+        }
+      ],
+      "hands_on": "1. 在 SQLite 里用 `EXPLAIN QUERY PLAN` 分别跑「带 WHERE」和「不带 WHERE」的查询，对比执行计划的扫描范围。\\n2. 用循环造一张 10 万行的测试表（可用平台脚本），分别跑 SELECT * 和 SELECT 指定列，感受耗时与返回数据量差异。\\n3. 复盘本阶段写过的每一条 SQL：检查是否都有明确列、WHERE 过滤、ORDER BY——把「少扫数据」变成肌肉记忆。\\n4. 想一想：订单表按天分区后，查「上个月总 GMV」的 SQL 应该怎么写才能只扫 30 个分区？",
+      "tasks": [
+        {
+          "task_id": "s02c07t01",
+          "type": "multi",
+          "difficulty": 3,
+          "title": "提升大表查询性能的正确做法",
+          "question": "在亿级订单表上，下列哪些做法能**有效提升**查询性能？（多选）",
+          "options": [
+            {
+              "text": "只 SELECT 需要的列，避免 SELECT *",
+              "correct": true,
+              "explain": "正确。列裁剪减少磁盘 IO 与网络传输，是最基础的优化。"
+            },
+            {
+              "text": "在分区表上按分区条件过滤，只扫需要的分区",
+              "correct": true,
+              "explain": "正确。分区裁剪让引擎跳过无关分区，扫描量直接除以分区数。"
+            },
+            {
+              "text": "大表 JOIN 前，先用 WHERE 把两边数据过滤小",
+              "correct": true,
+              "explain": "正确。这就是谓词下推：先变小表再连接，连接开销大幅下降。"
+            },
+            {
+              "text": "把全表数据塞进同一个分区，方便一次扫完",
+              "correct": false,
+              "explain": "错误。把所有数据放一个分区等于放弃分区裁剪，反而全表扫描。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 优化总原则：少扫数据、少算数据、少传数据。\\n2. A 列裁剪 → 少传数据，正确。\\n3. B 分区裁剪 → 少扫数据，正确。\\n4. C 谓词下推 → 少算数据，正确。\\n5. D 是反优化：放弃分区等于全表扫描，错误。\\n6. 选 A、B、C。\\n**延伸**：数据倾斜、小文件合并也是优化手段，但针对的是「任务不均衡」和「调度开销」问题。",
+          "enterprise_tip": "面试把这三条讲出来，再补一句「优化前后用行数校验结果一致性」，就是标准且完整的优化回答。"
+        },
+        {
+          "task_id": "s02c07t02",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排列慢查询的优化流程",
+          "question": "接到一条跑了 2 小时的慢 SQL，把优化排查的步骤按正确顺序排列。",
+          "steps": [
+            "用 EXPLAIN / 日志定位慢在哪个环节",
+            "检查 WHERE 是否命中分区裁剪，避免全表扫描",
+            "检查 JOIN 与过滤条件，尽量把过滤提前（谓词下推）",
+            "精简 SQL：去掉 SELECT * 与不必要子查询",
+            "小数据量验证优化前后结果一致后再上线"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "优化的正确姿势是「先定位、再减扫描、再减计算、最后验证」：先搞清楚慢在哪（EXPLAIN/日志），再依次做分区裁剪、谓词下推、SQL 精简，每一步改动都要用结果一致性校验，避免「优化了性能却算错了数」。",
+          "analysis": "**标准解题思路**\\n1. 第一步永远是定位：EXPLAIN QUERY PLAN / 作业日志找出瓶颈（全表扫描？倾斜？）。\\n2. 第二步减扫描：检查分区条件，让引擎只扫需要的分区。\\n3. 第三步减计算：过滤提前（谓词下推）、简化 JOIN 与子查询。\\n4. 第四步减传输：去掉 SELECT *，只取需要的列。\\n5. 最后验证：优化前后行数、结果一致才允许上线。\\n**顺序逻辑**：先看「扫了多少」→ 再看「算了多少」→ 再看「传了多少」→ 最后「确保没算错」。",
+          "enterprise_tip": "企业里任何 SQL 改动都要走「优化-验证-评审」流程：先在小表/采样数据上跑新旧两版 SQL 对比行数，防止优化引入口径偏差——这是数据工程师的职业底线。"
+        },
+        {
+          "task_id": "s02c07t03",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "SELECT * 的危害",
+          "question": "关于 `SELECT *`，下列说法正确的是？",
+          "options": [
+            {
+              "text": "生产环境推荐使用，方便拿到全部字段",
+              "correct": false,
+              "explain": "生产环境恰恰禁止 SELECT *，它让下游拿到不需要的列，埋下依赖隐患。"
+            },
+            {
+              "text": "会把所有列都读出来，浪费 IO 并阻断列裁剪优化",
+              "correct": true,
+              "explain": "正确。多读一列就多一份磁盘 IO 和网络传输，还让引擎无法做列裁剪。"
+            },
+            {
+              "text": "只返回查询中用到的列",
+              "correct": false,
+              "explain": "错误。SELECT * 返回表的所有列，与查询是否用到无关。"
+            },
+            {
+              "text": "比指定列更快，因为省去了列名解析",
+              "correct": false,
+              "explain": "错误。它读的数据更多、传输更慢，列名解析的开销可忽略不计。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. SELECT * 的代价：全列读取 → 更多磁盘 IO、更多网络传输、缓存命中率下降。\\n2. 工程代价：下游代码隐式依赖所有列，表结构一变就挂。\\n3. 选 B。\\n**延伸**：大数据引擎有列存优化（Parquet/ORC），指定列才能利用列裁剪与压缩，SELECT * 会把这些优势全部浪费。",
+          "enterprise_tip": "面试送分题也是送命题：回答只说「浪费资源」不够，补上「阻断列存裁剪、破坏接口稳定性」两点，立刻显得有工程经验。"
+        },
+        {
+          "task_id": "s02c07t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "分区裁剪的执行行为",
+          "question": "订单表 orders 按日期字段 dt 分区，执行 `SELECT * FROM orders WHERE dt='2024-01-05';` 时，大数据引擎会？",
+          "options": [
+            {
+              "text": "只扫描 dt='2024-01-05' 对应的分区",
+              "correct": true,
+              "explain": "正确。WHERE 带分区条件会触发分区裁剪，引擎只读对应分区，扫描量按分区数等比下降。"
+            },
+            {
+              "text": "扫描全表后再逐行过滤",
+              "correct": false,
+              "explain": "错误。分区表上带分区条件会直接跳过无关分区，不会全表扫描。"
+            },
+            {
+              "text": "报错，分区表不允许这样查询",
+              "correct": false,
+              "explain": "错误。分区表查询很正常，带上分区条件反而是最优写法。"
+            },
+            {
+              "text": "随机扫描几个分区碰运气",
+              "correct": false,
+              "explain": "错误。引擎根据条件精确定位分区，不会随机扫描。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 分区表 = 数据按分区键（如日期）物理切分存储。\\n2. WHERE 里带分区字段条件（dt='2024-01-05'）时，优化器做**分区裁剪**：直接跳过无关分区。\\n3. 结果是只扫 1 个分区，而不是全表。\\n4. 选 A。\\n**延伸**：查「上个月总 GMV」时 WHERE 写 dt >= '2024-06-01' AND dt <= '2024-06-30'，就只扫 30 个分区；漏写分区条件则全表扫描，慢几个量级。",
+          "enterprise_tip": "面试问「为什么加了 WHERE 分区条件查询快 100 倍」？答：分区裁剪让扫描量从全表降到单分区。写 SQL 前先确认表的分区键，WHERE 里一定带上——这是大数据 SQL 第一优化习惯。"
+        },
+        {
+          "task_id": "s02c07t05",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排列分区表慢查询的排查流程",
+          "question": "一条订单表查询非常慢，怀疑是**没走分区裁剪**，把下面的排查步骤按正确顺序排列。",
+          "steps": [
+            "确认 orders 表是否按日期分区（看表结构）",
+            "检查 SQL 的 WHERE 是否包含分区字段条件（如 dt）",
+            "用 EXPLAIN 查看执行计划是否发生了全表扫描",
+            "在 WHERE 中补上分区过滤条件",
+            "重新执行，对比耗时与结果行数是否一致"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "排查「分区表查询慢」的黄金顺序：先确认表结构（是不是分区表、分区键是什么）→ 检查查询有没有带分区条件 → 用 EXPLAIN 验证是否全表扫描 → 补上分区过滤 → 重跑对比。先搞清楚事实，再改 SQL，最后用结果一致性兜底。",
+          "analysis": "**标准解题思路**\\n1. 第一步查表结构：确认 orders 是不是分区表、分区键是不是 dt——方向错了后面全白做。\\n2. 第二步查 SQL：WHERE 里有没有 dt 条件；没写就是最大的嫌疑。\\n3. 第三步用 EXPLAIN QUERY PLAN / 作业日志确认是否全表扫描，把「怀疑」变成「实锤」。\\n4. 第四步在 WHERE 补上分区过滤，如 dt='2024-01-05' 或日期区间。\\n5. 第五步重新执行：对比耗时变化，并核对结果行数一致（防止优化改出口径偏差）。\\n**易错点**：跳过 EXPLAIN 直接改 SQL，可能改错方向；优化后不验证结果一致性，可能出现「快了但算错了」的事故。",
+          "enterprise_tip": "企业里任何慢 SQL 优化都走「定位 → 减扫描 → 减计算 → 验证」闭环。优化前后行数一致是对数据负责的底线，面试时讲出这个流程就是标准答案。"
+        },
+        {
+          "task_id": "s02c07t06",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "谓词下推与小文件问题",
+          "question": "关于大数据 SQL 优化中的**谓词下推**与**小文件问题**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "谓词下推指把 WHERE 过滤条件下推到表扫描阶段执行，让进入 JOIN / 聚合的数据更少",
+              "correct": true,
+              "explain": "正确。过滤越早，后续每个环节处理的数据量越小。"
+            },
+            {
+              "text": "谓词下推是指把 SELECT * 改写成指定列",
+              "correct": false,
+              "explain": "错误。那是列裁剪（Column Pruning），与谓词下推是两回事。"
+            },
+            {
+              "text": "小文件越多并行度越高，所以越多越好",
+              "correct": false,
+              "explain": "错误。海量小文件让任务调度和元数据 IO 开销巨大，反而拖慢作业。"
+            },
+            {
+              "text": "小文件问题只影响存储空间，不影响查询性能",
+              "correct": false,
+              "explain": "错误。小文件会导致每个文件都要单独扫描和调度，查询性能同样被拖垮。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 谓词下推：把 WHERE 条件尽量下推到读表阶段，JOIN 前两边数据先变小 → A 正确。\\n2. 列裁剪：只取需要的列，与谓词下推不同 → B 错误。\\n3. 小文件：文件数量爆炸会放大调度与 IO 开销，不是越多越好 → C 错误。\\n4. 小文件既伤存储也伤查询 → D 错误。\\n5. 选 A。\\n**延伸**：小文件对策——输出时合并（Spark 的 coalesce / repartition）、分区粒度合理、定期 compaction。",
+          "enterprise_tip": "面试问「小文件怎么产生的、怎么解决」？答：产生——插入式任务太多、分区过细、上游源数据就是碎的；解决——控制并发写、输出合并、定期 compaction。谓词下推则是 Hive/Spark 优化器的常见自动优化，但写 SQL 时手动先过滤仍是好习惯。"
+        },
+        {
+          "task_id": "s02c07t07",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排列避免全表扫描的写 SQL 流程",
+          "question": "在亿级大表上写一条新查询，要**避免全表扫描**，把下面的步骤按正确顺序排列。",
+          "steps": [
+            "确认表的分区键与查询范围，想清楚只需要哪部分数据",
+            "WHERE 中带上分区/时间等过滤条件，让引擎只扫需要的分区",
+            "只 SELECT 需要的列，避免 SELECT * 全列读取",
+            "JOIN 前先用 WHERE 过滤两侧数据（谓词下推），缩小参与连接的数据量",
+            "用 EXPLAIN 核对扫描范围，并对比优化前后耗时与结果行数"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "写大表查询的正确姿势：先想清楚要哪部分数据（确认分区键与范围）→ 把范围写进 WHERE（分区裁剪）→ 只取需要的列（列裁剪）→ JOIN 前先过滤（谓词下推）→ 最后用 EXPLAIN 验证扫描范围并核对结果。每一步都在「少扫、少算、少传」上做减法。",
+          "analysis": "**标准解题思路**\\n1. 第一步先想清楚范围：确认表的分区键（如 dt），明确只要哪几天/哪类数据——方向定了后面才有意义。\\n2. 第二步写进 WHERE：分区条件 + 时间范围，引擎据此做分区裁剪，跳过无关分区。\\n3. 第三步列裁剪：只 SELECT 需要的列，避免 SELECT * 浪费 IO 和带宽。\\n4. 第四步谓词下推：JOIN 两边的表都先用 WHERE 过滤小，连接开销大幅下降。\\n5. 第五步验证：EXPLAIN 看是否还出现全表扫描，优化前后行数一致才放心。\\n**易错点**：跳过 EXPLAIN 直接上线，可能优化了个寂寞；不核对结果行数，可能出现「快了但算错了」。",
+          "enterprise_tip": "企业 code review 的 SQL 检查单就是这五步：分区条件有没有？SELECT * 有没有？JOIN 前过滤了没有？执行计划看过没有？——每一条都能在评审中救你一次。"
+        },
+        {
+          "task_id": "s02c07t08",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "数据倾斜的典型症状",
+          "question": "大表 GROUP BY / JOIN 出现**数据倾斜**时，最典型的症状是？",
+          "options": [
+            {
+              "text": "大部分任务很快完成，少数任务长时间卡在 99% 甚至 OOM",
+              "correct": true,
+              "explain": "正确。热点 key 的数据全压在少数任务上，形成长尾，这是倾斜的标志性症状。"
+            },
+            {
+              "text": "所有任务均匀地变慢",
+              "correct": false,
+              "explain": "那是整体资源不足或全表扫描的表现，不是倾斜——倾斜的特点是「不均衡」。"
+            },
+            {
+              "text": "SQL 直接报语法错误",
+              "correct": false,
+              "explain": "倾斜不会报语法错误，作业能跑，只是跑不完或极慢。"
+            },
+            {
+              "text": "查询结果行数变成 0",
+              "correct": false,
+              "explain": "结果为空通常是过滤条件或数据问题，与倾斜无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 数据倾斜 = 某个 key（如大促爆款商品、头部商家）数据量特别大，压到单个任务导致长尾。\\n2. 典型症状：进度卡 99%、最后几个 task 跑几小时、单节点 OOM。\\n3. 常见诱因：JOIN 的大 key、GROUP BY 的极热维度、DISTINCT 集中在少数值。\\n4. 选 A。\\n**延伸**：对策——热点 key 加盐打散（两阶段聚合）、小表广播、分桶、倾斜 key 单独处理。",
+          "enterprise_tip": "面试必问「任务卡在 99% 怎么排查」：先看是不是倾斜（任务耗时严重不均），再看是不是数据分布问题，然后对症下药（加盐/广播/分桶）。答出「先判断、再定位、后对症」就是完整回答。"
+        },
+        {
+          "task_id": "s02c07t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "SELECT * 的底层代价：IO 与列式存储",
+          "question": "数仓表底层常用 Parquet / ORC 等**列式存储**。在这种存储上执行 `SELECT *`，从**底层原理**看，主要问题是？",
+          "options": [
+            {
+              "text": "列式存储按列连续存放并压缩，SELECT * 必须读取所有列的数据块，使列裁剪（只读所需列）失效，磁盘 IO 与网络传输成倍增加",
+              "correct": true,
+              "explain": "正确。列存查询只读涉及的列，SELECT * 强制读全部列，把列裁剪优化直接废掉。"
+            },
+            {
+              "text": "SELECT * 会触发数据库把整张表锁死，其他查询全部阻塞",
+              "correct": false,
+              "explain": "错误。锁与 SELECT * 无关，读操作不会锁死整表。"
+            },
+            {
+              "text": "SELECT * 无法利用任何索引，只能全表扫描",
+              "correct": false,
+              "explain": "错误。即使指定列也可能全表扫描，SELECT * 的核心问题是读了所有列，而不是没有索引。"
+            },
+            {
+              "text": "SELECT * 的结果太大，数据库必须先做一次全量排序才能返回",
+              "correct": false,
+              "explain": "错误。没有 ORDER BY 不会排序，慢在读取与传输的数据量。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 列式存储原理：同一列的数据连续存放、类型一致、压缩率高，查询时只读需要的列——这叫列裁剪（Column Pruning）。\\n2. SELECT * 的底层代价：强制读取所有列的数据块，磁盘 IO 与网络传输 = 全表全列。\\n3. 行存（如 MySQL）同理：读每一行的所有字段。\\n4. 工程代价：下游代码隐式依赖所有字段，表结构一变就挂。\\n5. 结论：选 A。\\n**延伸**：指定列 + WHERE 过滤 + 只取需要的分区，才是「少扫、少算、少传」的完整姿势。",
+          "enterprise_tip": "面试「SELECT * 为什么不好」标准三层答案：① IO 与列裁剪；② 接口稳定性；③ 生产规范禁止。补一句「列式存储下 SELECT * 直接废掉列裁剪优化」，立刻显得懂底层。"
+        },
+        {
+          "task_id": "s02c07t10",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "函数包裹列导致索引失效",
+          "question": "orders 表的 user_id 列上建有索引。下列哪个查询**无法利用该索引**（索引失效、退化为全表扫描）？",
+          "options": [
+            {
+              "text": "WHERE user_id = 100",
+              "correct": false,
+              "explain": "等值条件可以直接用 B+ 树定位，是索引最擅长的场景，不会失效。"
+            },
+            {
+              "text": "WHERE user_id BETWEEN 100 AND 200",
+              "correct": false,
+              "explain": "范围条件可以沿索引叶子链表扫描，同样能用索引。"
+            },
+            {
+              "text": "WHERE user_id + 1 = 100",
+              "correct": true,
+              "explain": "正确。对索引列做了运算（user_id + 1），索引存的是原始列值，无法按表达式结果定位，优化器只能全表扫描；应改写为 WHERE user_id = 99。"
+            },
+            {
+              "text": "WHERE user_id IN (100, 200)",
+              "correct": false,
+              "explain": "IN 列表相当于多个等值条件（等价 user_id = 100 OR user_id = 200），可以用索引。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 索引失效的核心原因：B+ 树按「列的原始值」排序存储，查询条件必须能直接作用在原始值上才能定位。\n2. 对列做函数或运算（upper(name)、user_id + 1、substr(phone, 1, 3)）后，索引里的原始值无法与计算结果直接比较，优化器只能放弃索引。\n3. 改写原则：把运算挪到等号另一边——user_id + 1 = 100 改写为 user_id = 99；upper(name) = 'ZHANG' 改写为 name = 'zhang'（并保证存储统一小写）。\n4. 排查手段：EXPLAIN 看执行计划里是 SEARCH ... USING INDEX 还是 SCAN（全表扫描）。\n5. 选 C。",
+          "enterprise_tip": "生产大表上「WHERE 对索引列做运算」是慢查询高发根因，且不报错、悄悄变慢；面试常考「哪些写法会让索引失效」——函数包裹列、隐式类型转换、前导通配符 LIKE '%xx' 是三大经典场景。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "什么是分区裁剪？",
+          "a": "表按分区键（如日期 dt）物理切分存储，查询 WHERE 带分区条件时引擎只扫描相关分区、跳过无关分区，扫描量按分区数等比下降。它是大数据 SQL 最重要的优化手段之一。"
+        },
+        {
+          "q": "什么是谓词下推？",
+          "a": "把 WHERE 过滤条件下推到表扫描阶段执行，让进入 JOIN / 聚合的数据更少。Hive/Spark 会自动做部分下推，但写 SQL 时也应手动先过滤（如 JOIN 前先用 WHERE 缩小两边）。"
+        },
+        {
+          "q": "数据倾斜有什么症状、怎么解决？",
+          "a": "症状：大部分任务秒完、少数任务卡在 99% 或 OOM，通常是 JOIN/GROUP BY 的 key 出现热点。解法：热点 key 加盐打散、分桶、小表广播、两阶段聚合（先局部聚合再全局聚合）。"
+        },
+        {
+          "q": "SELECT * 为什么不好？",
+          "a": "① 多读列浪费磁盘 IO 与网络传输，阻断列存引擎的列裁剪优化；② 下游代码隐式依赖所有字段，表结构一变就挂；③ 生产规范禁止，必须显式列出需要的列。"
+        },
+        {
+          "q": "优化一条慢 SQL 的标准流程是什么？",
+          "a": "① 定位：EXPLAIN / 日志找瓶颈环节；② 减扫描：分区裁剪、WHERE 提前；③ 减计算：列裁剪、简化 JOIN 与子查询；④ 减传输：合并小文件、只取需要的列；⑤ 验证：优化前后结果行数一致再上线。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "分区裁剪",
+          "desc": "按分区条件跳过无关分区，只扫描需要的数据。"
+        },
+        {
+          "term": "谓词下推",
+          "desc": "把过滤条件尽量下推到表扫描阶段，减少后续计算量。"
+        },
+        {
+          "term": "数据倾斜",
+          "desc": "某个 key 数据量特别大导致单任务过载、作业长尾。"
+        },
+        {
+          "term": "小文件问题",
+          "desc": "海量小文件导致任务调度与 IO 开销巨大，需合并控制输出文件数。"
+        },
+        {
+          "term": "SELECT *",
+          "desc": "全列查询，浪费 IO 并阻断列裁剪，生产环境禁止。"
+        },
+        {
+          "term": "EXPLAIN",
+          "desc": "查看 SQL 执行计划的命令，优化定位的第一步。"
+        },
+        {
+          "term": "加盐",
+          "desc": "给热点 key 加随机前缀打散数据，缓解数据倾斜。"
+        }
+      ],
+      "kps": [
+        "大数据 SQL 优化总原则：少扫数据、少算数据、少传数据",
+        "分区裁剪：分区表 + WHERE 分区条件",
+        "谓词下推：先过滤再 JOIN",
+        "数据倾斜：症状与对策",
+        "小文件问题与合并",
+        "SELECT * 的危害与列裁剪",
+        "EXPLAIN 定位与执行顺序优化地图",
+        "SELECT * 的底层代价：IO 与列式存储"
+      ]
+    },
+    {
+      "chapter_id": "s02c08",
+      "title": "2.8 SQL 底层原理：执行计划与索引",
+      "goal": "理解 SQL 从解析到执行的完整流程、B+ 树索引与聚簇/二级索引、三种 JOIN 实现、谓词下推与分区裁剪原理、事务 ACID 与隔离级别",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "前面 7 章我们都在「写 SQL」，这一章回答「SQL 是怎么被执行的」。一条 SQL 从提交到返回结果，底层要经历五个阶段：\\n1. **解析（Parse）**：词法/语法分析，把 SQL 文本转成语法树（AST），语法错误在这一步报出；\\n2. **绑定（Bind）**：把表名、列名解析到数据库元数据（表结构、列类型、权限）；\\n3. **优化（Optimize）**：优化器基于统计信息（行数、分区数、索引情况）选择执行策略——走索引还是全表扫描、JOIN 的顺序、过滤下推的位置；\\n4. **生成执行计划（Execution Plan）**：把优化结果转成一棵由 Scan / Filter / Join / Aggregate 等算子组成的执行计划树；\\n5. **执行（Execute）**：执行引擎逐算子读取数据，把结果返回给客户端。\\n\\nHive / Spark SQL 也是同一套模型：`EXPLAIN`（或 `EXPLAIN EXTENDED`）看到的就是第 4 步的执行计划。面试常问「怎么看一条 SQL 慢在哪」——第一步永远是看执行计划。"
+        },
+        {
+          "type": "text",
+          "content": "**为什么 B+ 树索引快？** 磁盘 IO 是数据库最大的瓶颈，一次磁盘读的最小单位是**页（Page）**，B+ 树就是为「少读几页」设计的：\\n- **矮胖、扇出大**：一个内部节点能存成百上千个键和指针（扇出），树高只有 3~4 层就能覆盖千万级记录；\\n- **查询路径短**：等值/范围查询只需沿根到叶走树高次页 IO，比如 3 层树 = 3 次页读；\\n- **叶子有序**：叶子节点之间用链表相连，范围查询（BETWEEN、>）定位起点后沿链表顺序读，天然支持范围扫描。\\n\\n对比**全表扫描**：要把表的所有数据页从头到尾读一遍，IO 量 = 整张表的大小。这就是「有索引 vs 没索引」差距几个数量级的原因。"
+        },
+        {
+          "type": "text",
+          "content": "**聚簇索引 vs 二级索引。** InnoDB 等数据库里：\\n- **聚簇索引（Clustered Index）**：表数据的物理存储顺序按索引键排列，**叶子节点直接就是数据行**；一张表只能有一个（InnoDB 的主键默认就是聚簇索引）；\\n- **二级索引（Secondary Index）**：叶子节点存的是「索引键 + 主键引用」，而不是完整数据行；通过二级索引查到主键后，还要再到聚簇索引里按主键查一次才能拿到完整行——这一步叫**回表（Table Lookup）**。\\n\\n回表等于额外一次索引查找（多几次页 IO）。如果查询要的列都包含在二级索引里（覆盖索引），就可以不回表直接返回，这是常见的优化手段。"
+        },
+        {
+          "type": "text",
+          "content": "**JOIN 的三种底层实现：**\\n- **Nested Loop Join（嵌套循环）**：外层表每行去内层表找匹配，类似双重循环；适合小表 JOIN 小表，或内层有索引、外层很小的情况；\\n- **Hash Join（哈希连接）**：把较小的表建成哈希表（Build 阶段），再遍历大表每一行去哈希表里探测匹配（Probe 阶段）；单遍扫描、不要求两边有序，最适合**等值连接**；\\n- **Sort-Merge Join（排序归并）**：两边先按关联键排序，再像归并排序一样线性合并匹配；适合关联键本就有序，或**非等值连接**（如 `ON a.amount > b.amount`）。\\n\\n**为什么大数据引擎（Spark / Hive）多用 Hash Join？** 等值连接是大数据场景的绝对主流；Hash Join 不要求数据有序、天然适配分布式（每节点并行建表/探测），还能在内存不足时溢写磁盘。面试常考三者的区别与选型。"
+        },
+        {
+          "type": "text",
+          "content": "**谓词下推与分区裁剪的原理。** 两者都是「少扫数据」原则在优化器层面的落地：\\n- **谓词下推（Predicate Pushdown）**：把 WHERE 过滤条件**下推到表扫描阶段**执行——先过滤、再 JOIN / 聚合，让每个环节处理的数据都更少。比如 `orders JOIN users` 前先把两边各自的 WHERE 条件先执行掉；\\n- **分区裁剪（Partition Pruning）**：分区表按分区键（如日期 dt）把数据物理切分存储，WHERE 带分区条件时，优化器直接**跳过无关分区**，扫描量按分区数等比下降。\\n\\n两个机制在 Hive / Spark 中都有自动版本，但写 SQL 时手动「先过滤、带分区条件」仍然是工程师的基本功——优化器不总是比人更聪明。"
+        },
+        {
+          "type": "code",
+          "lang": "sql",
+          "content": "-- 用 SQLite 观察执行计划：未建索引 vs 建索引\nCREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nINSERT INTO orders VALUES (1,101,150.0),(2,102,300.0),(3,102,120.0),(4,103,80.0),(5,102,200.0);\n\n-- 未建索引：全表扫描\nEXPLAIN QUERY PLAN SELECT order_id FROM orders WHERE user_id = 102;\n-- 输出包含 SCAN orders（全表扫描）\n\n-- 建索引后再看：走索引扫描\nCREATE INDEX idx_user_id ON orders(user_id);\nEXPLAIN QUERY PLAN SELECT order_id FROM orders WHERE user_id = 102;\n-- 输出包含 SEARCH orders USING INDEX idx_user_id (user_id=?)\n\n-- 关键认知：索引只改变速度，绝不改变结果集\nSELECT order_id, user_id, amount FROM orders WHERE user_id = 102 ORDER BY order_id;\n\n-- Hive / Spark 中查看执行计划\n-- EXPLAIN SELECT order_id, amount FROM orders WHERE dt = '2024-01-05';",
+          "caption": "EXPLAIN QUERY PLAN 对比全表扫描与索引扫描"
+        },
+        {
+          "type": "warning",
+          "content": "**两个易错点**：① `EXPLAIN QUERY PLAN` 返回的是执行计划行，不是数据行——判题只比结果集，写 EXPLAIN 前缀的查询拿不到业务数据；② 索引不是越多越好：每个索引都占用存储、拖慢写入（插入/更新要同步维护 B+ 树），只为高频查询的 WHERE 列与连接列建索引。"
+        },
+        {
+          "type": "text",
+          "content": "**事务 ACID 与隔离级别（面试常考）。** 事务是一组要么全做、要么全不做的操作，四大特性：\\n- **原子性（Atomicity）**：事务内操作要么全部成功、要么全部回滚；\\n- **一致性（Consistency）**：事务前后数据都满足约束（如余额不为负）；\\n- **隔离性（Isolation）**：并发事务互不干扰，一个事务未提交的中间状态对其他事务不可见；\\n- **持久性（Durability）**：事务提交后，数据即使宕机也不丢失。\\n\\n隔离性靠**隔离级别**落地，从松到严：读未提交 → 读已提交 → 可重复读 → 串行化，分别解决**脏读、不可重复读、幻读**。注意：OLTP 数据库（MySQL）才有完整事务；Hive / Spark SQL 这类 OLAP 引擎默认不强保证 ACID（Hive 的 ACID 表是特例），这也是两种引擎设计定位的差异。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：这一章的内容几乎全是面试题：①「一条 SQL 的执行流程」——答解析→绑定→优化器→执行计划→执行；②「B+ 树为什么快」——页、扇出、树高；③「聚簇索引与二级索引、什么是回表」；④「三种 JOIN 实现，为什么大数据引擎多用 Hash Join」；⑤「ACID 与隔离级别」。面试官问「你怎么优化慢 SQL」，底层视角的回答是：先 EXPLAIN 看执行计划，是没走索引、全表扫描、还是 JOIN 实现选错——把本章概念和上一章的优化思维连起来，就是完整的大数据 SQL 能力闭环。"
+        }
+      ],
+      "hands_on": "1. 在 SQLite 里建一张 10 万行的 orders 表，分别对 user_id 建索引前后执行 `EXPLAIN QUERY PLAN SELECT * FROM orders WHERE user_id=100;`，对比 SCAN 与 SEARCH USING INDEX 的输出差异。\\n2. 对一条慢查询跑 EXPLAIN，把 WHERE 条件从「无」改成「有」，再跑一次，观察执行计划的扫描范围变化，体会全表扫描与索引扫描。\\n3. 用 sqlite3 命令行练习 `BEGIN; ... COMMIT;` 与 `BEGIN; ... ROLLBACK;`，体会事务的原子性；再思考 Hive/Spark 为什么默认不强保证 ACID。\\n4. 写一段话向同学讲清楚「为什么 Spark 的 JOIN 默认用 Hash Join」，能讲明白才算真懂。",
+      "tasks": [
+        {
+          "task_id": "s02c08t01",
+          "type": "sql",
+          "difficulty": 2,
+          "title": "验证：建索引后查询结果一致",
+          "question": "orders 表上已经建立索引 `idx_user_id`（在 user_id 列上）。请查询 **user_id = 102** 的订单的订单号、用户、金额，按 order_id **升序**排列，验证「建索引前后查询结果完全一致」——索引只改变查询速度，绝不改变结果集。\\n\\n输出列要求：order_id、user_id、amount（保持此顺序）。\\n\\n本题环境为 SQLite（Hive/Spark SQL 语法基本一致），setup 中已含 CREATE INDEX，直接写普通 SELECT 即可，不要加 EXPLAIN 前缀。",
+          "setup": "CREATE TABLE orders (order_id INTEGER, user_id INTEGER, amount REAL);\nCREATE INDEX idx_user_id ON orders(user_id);\nINSERT INTO orders VALUES (1,101,150.0),(2,102,300.0),(3,102,120.0),(4,103,80.0),(5,102,200.0);",
+          "expected_sql": "SELECT order_id, user_id, amount FROM orders WHERE user_id=102 ORDER BY order_id;",
+          "hint": "先想：索引改变查询速度还是结果集？题目要验证「结果一致」，按普通查询写即可。",
+          "analysis": "**标准解题思路**\\n1. 读题：查 user_id = 102 的订单 → WHERE user_id = 102。\\n2. 选列：order_id、user_id、amount。\\n3. 排序：ORDER BY order_id，保证结果顺序确定（这是结果比对通过的关键）。\\n4. 验证数据：102 号用户有 3 单（order_id 为 2、3、5），升序输出 3 行。\\n5. 原理：B+ 树索引只加速「定位」，不改变行集合——建索引前后结果必须完全一致，这正是「优化不改口径」的体现。\\n6. 验证方式：在 SQLite 里对同一条查询跑 `EXPLAIN QUERY PLAN`，建索引后输出 SEARCH orders USING INDEX idx_user_id (user_id=?)，未建索引时是 SCAN orders（全表扫描），两条结果集完全相同。\\n**易错点**：判题只比结果集，写 EXPLAIN 前缀会返回执行计划行而不是数据行；不要写 Hive 特有语法，保持 SQLite 兼容。",
+          "enterprise_tip": "企业里任何 SQL 优化都要做「结果一致性校验」：优化前后行数、明细完全一致才允许上线。这道题就是那个校验的最小版本——先学会验证，再去谈优化。"
+        },
+        {
+          "task_id": "s02c08t02",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "B+ 树索引为什么快",
+          "question": "数据库索引底层常用 B+ 树。关于它**为什么查询快**，下列说法正确的是？",
+          "options": [
+            {
+              "text": "B+ 树矮胖、扇出大：一个节点能存成百上千个键，几千万行数据的树高也只有 3~4 层，一次查询只需沿根到叶做几次磁盘页 IO",
+              "correct": true,
+              "explain": "正确。页 IO 次数 = 树高，扇出大 → 树矮 → 定位次数极少，这就是 B+ 树快的根源。"
+            },
+            {
+              "text": "B+ 树把全部数据复制到内存中，所以查询不碰磁盘",
+              "correct": false,
+              "explain": "错误。索引存在磁盘上，只是把定位路径压短，并不是全部放内存（缓存命中是另一回事）。"
+            },
+            {
+              "text": "B+ 树快是因为它预先缓存了所有查询的结果",
+              "correct": false,
+              "explain": "错误。索引不是结果缓存，是加速定位的数据结构。"
+            },
+            {
+              "text": "B+ 树把数据按插入顺序堆在磁盘尾部，新数据总能最快找到",
+              "correct": false,
+              "explain": "错误。B+ 树按键有序组织，不是按插入顺序；无序存储恰恰是全表扫描慢的原因。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 磁盘 IO 是数据库性能瓶颈，读一次磁盘 = 读一页（Page），页是 IO 最小单位。\\n2. B+ 树的设计目标：把「定位」的 IO 次数压到最低——树高就是 IO 次数。\\n3. 扇出大：一个节点存上千个键 → 三层树就能覆盖百万到千万行 → 查询只需 3~4 次页 IO。\\n4. 对比全表扫描：要读所有数据页，IO 量 = 表大小，差几个数量级。\\n5. 结论：选 A。\\n**延伸**：为什么不用二叉树/哈希索引？二叉树太高（IO 多）、哈希索引不支持范围查询——B+ 树两者兼得，这是面试追问。",
+          "enterprise_tip": "面试连环问「为什么选 B+ 树而不是哈希/二叉树」：哈希不支持范围扫描、二叉树树高随数据量线性增长导致页 IO 太多，B+ 树矮胖 + 叶子有序链表 = 等值/范围都高效。"
+        },
+        {
+          "task_id": "s02c08t03",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "Hash Join 的适用场景",
+          "question": "大数据引擎（Spark / Hive）中，**Hash Join** 最适合的场景是？",
+          "options": [
+            {
+              "text": "大表之间的**等值连接**（ON a.id = b.id），数据量大、不要求两边有序——把较小的一边建成哈希表，大表逐行探测",
+              "correct": true,
+              "explain": "正确。Hash Join 单遍扫描、无需排序，是等值连接的天然选择，也是大数据引擎的默认实现。"
+            },
+            {
+              "text": "非等值连接（如 ON a.amount > b.amount），需要逐对比较",
+              "correct": false,
+              "explain": "错误。非等值连接无法用哈希表探测，通常用 Nested Loop 或 Sort-Merge Join。"
+            },
+            {
+              "text": "两边数据都已严格按关联键排序的场景",
+              "correct": false,
+              "explain": "错误。两边已排序是 Sort-Merge Join 的主场，Hash Join 不需要预先排序。"
+            },
+            {
+              "text": "只有内存完全装不下任何一张表时才使用",
+              "correct": false,
+              "explain": "错误。Hash Join 正是大表连接的常规选择，内存不足时可以溢写磁盘（Grace Hash Join）。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 三种 JOIN 实现回顾：Nested Loop（小表+索引）、Hash Join（等值大连接）、Sort-Merge（有序/非等值）。\\n2. Hash Join 两步：Build——把较小表按关联键建哈希表；Probe——遍历大表每行去哈希表探测匹配。\\n3. 优势：单遍扫描、不要求有序、天然适配分布式并行、可溢写。\\n4. 大数据引擎（Spark/Hive）选它的原因：等值连接占 90% 以上场景，Hash Join 在这些场景下综合最优。\\n5. 结论：选 A。\\n**易错点**：把「已排序」误认为 Hash Join 的前提——恰恰相反，排序归并才是吃排序的场景。",
+          "enterprise_tip": "面试「为什么 Spark 的 JOIN 快」：分布式 Hash Join（小表广播或分桶建哈希）+ 并行探测。追问「大表 JOIN 大表怎么办」：分桶（Bucket）后每个桶内做 Hash Join，再合并。"
+        },
+        {
+          "task_id": "s02c08t04",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "回表（Table Lookup）的含义",
+          "question": "在 InnoDB 这类数据库中，通过**二级索引**查到记录后还要「回表」。回表指的是？",
+          "options": [
+            {
+              "text": "二级索引的叶子节点只存「索引键 + 主键」，拿到主键后再到聚簇索引（主键索引）里查一次，取出完整数据行",
+              "correct": true,
+              "explain": "正确。二级索引不含完整数据行，必须按主键回聚簇索引取行，这就是回表。"
+            },
+            {
+              "text": "查询失败后把 SQL 重新提交给优化器再执行一遍",
+              "correct": false,
+              "explain": "错误。回表与查询重试无关，是索引结构决定的取数步骤。"
+            },
+            {
+              "text": "把查询结果集写回磁盘上的原表",
+              "correct": false,
+              "explain": "错误。回表是读路径上的动作，不是写回。"
+            },
+            {
+              "text": "事务回滚时把索引恢复到修改前的状态",
+              "correct": false,
+              "explain": "错误。那是事务回滚，不是回表。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 聚簇索引：叶子节点直接就是数据行（InnoDB 主键索引）。\\n2. 二级索引：叶子节点只存「索引键 + 主键引用」，不存完整行。\\n3. 回表：二级索引查到主键后，再到聚簇索引按主键查一次，取出完整数据行——多一次索引查找、多几次页 IO。\\n4. 优化：覆盖索引——查询要的列全部包含在二级索引里，就不用回表。\\n5. 结论：选 A。\\n**易错点**：把「回表」理解成结果写回或重试——它是读路径上「二级索引 → 聚簇索引」的第二次查找。",
+          "enterprise_tip": "面试「怎么避免回表」：建覆盖索引（把 SELECT 的列都放进索引）。日常选索引列时问自己：这个查询能不能只靠索引就返回？能就不回表。"
+        },
+        {
+          "task_id": "s02c08t05",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：查看执行计划的命令",
+          "question": "在 Hive / Spark SQL / SQLite 中，把关键字 ____ 写在 SQL 前面，就能查看这条 SQL 的**执行计划**（如是否全表扫描、是否走索引）。",
+          "answer": [
+            "EXPLAIN",
+            "explain",
+            "Explain",
+            "EXPLAIN QUERY PLAN",
+            "explain query plan",
+            "EXPLAIN QUERY PLAN "
+          ],
+          "hint": "回忆查看执行计划的命令：把哪个关键字放在 SQL 前？它在 SQLite 里的完整写法是什么？",
+          "analysis": "**标准解题思路**\\n1. 优化器会为每条 SQL 生成执行计划，把计划打印出来就能看到引擎「打算怎么执行」。\\n2. 命令：Hive / Spark SQL 直接 `EXPLAIN SELECT ...`；SQLite 用 `EXPLAIN QUERY PLAN SELECT ...`。\\n3. 读计划重点：SCAN（全表扫描）vs SEARCH USING INDEX（索引扫描）、扫描行数估计、JOIN 实现。\\n4. 面试/优化第一步：EXPLAIN 定位瓶颈，再对症下药。\\n5. 填 `EXPLAIN`。\\n**延伸**：EXPLAIN 只展示计划不执行（或只做计划），是零风险排查手段——生产环境看慢 SQL 先 EXPLAIN，不要直接改 SQL 瞎试。"
+        },
+        {
+          "task_id": "s02c08t06",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：聚簇索引",
+          "question": "表数据的**物理存储顺序**按索引键排列、索引的**叶子节点直接就是数据行**的索引叫 ____ 索引（InnoDB 中主键默认就是它，一张表只能有一个）。",
+          "answer": [
+            "聚簇",
+            "聚簇索引",
+            "clustered",
+            "Clustered",
+            "Clustered Index",
+            "cluster index",
+            "聚类"
+          ],
+          "hint": "先判断：叶子直接存数据行，说明「数据」和「索引」聚在一起——这类索引中文叫什么？",
+          "analysis": "**标准解题思路**\\n1. 聚簇索引（Clustered Index）：数据行按键的物理顺序排列，叶子节点直接就是完整数据行。\\n2. 一张表只能有一个聚簇索引——因为数据只能按一种物理顺序存放。\\n3. InnoDB 的主键默认就是聚簇索引；没有主键时引擎会隐式建一个。\\n4. 与之相对：二级索引叶子只存「键 + 主键」，查完整行要回表。\\n5. 填「聚簇」。\\n**延伸**：面试问「为什么一张表只有一个聚簇索引」——物理顺序唯一，答案一句话。",
+          "enterprise_tip": "面试追问「聚簇索引对插入性能的影响」：按聚簇键顺序插入最快（页顺序写），随机插入可能触发页分裂——大表设计主键时尽量选自增/单调递增的键。"
+        },
+        {
+          "task_id": "s02c08t07",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排列一条 SQL 从提交到返回的流程",
+          "question": "把一条 SQL 从**提交到返回结果**的底层执行流程按正确顺序排列。",
+          "steps": [
+            "解析（Parse）：词法/语法分析，把 SQL 文本转成语法树",
+            "绑定（Bind）：把表名、列名解析到数据库元数据（表结构、列类型）",
+            "优化（Optimize）：优化器基于统计信息选择执行策略（走索引还是全表扫描、JOIN 顺序）",
+            "生成执行计划：把优化结果转成由 Scan / Filter / Join / Aggregate 等算子组成的执行计划",
+            "执行（Execute）：执行引擎逐算子读取数据，把结果返回给客户端"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "SQL 先被解析成语法树（Parse），再绑定到真实元数据（Bind），优化器基于统计信息挑选执行策略（Optimize），产出算子树形式的执行计划，最后由执行引擎逐算子执行并返回结果。EXPLAIN 看到的就是第 4 步的执行计划。",
+          "analysis": "**标准解题思路**\\n1. 解析：语法检查在第一步，写错关键字/少分号在这里报错。\\n2. 绑定：表不存在、列名错误在这里暴露。\\n3. 优化：核心步骤，基于统计信息（行数、索引、分区）决定怎么执行——这一步决定了查询快慢。\\n4. 生成执行计划：把决策固化成算子树（Scan → Filter → Join → Aggregate → Sort）。\\n5. 执行：逐算子跑，流式返回结果。\\n**易错点**：把「优化」和「生成执行计划」当成一步——优化是决策、执行计划是决策的结果，两者有先后；EXPLAIN 展示的是执行计划而不是解析结果。"
+        },
+        {
+          "task_id": "s02c08t08",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "ACID 中保证并发隔离的特性",
+          "question": "事务 ACID 中，「并发执行的事务互不干扰，一个事务未提交的中间状态对其他事务不可见」由哪个特性保证？",
+          "options": [
+            {
+              "text": "隔离性（Isolation）：通过锁 / MVCC 等手段隔离并发事务的中间状态",
+              "correct": true,
+              "explain": "正确。隔离性就是并发控制，靠锁或 MVCC（多版本并发控制）实现。"
+            },
+            {
+              "text": "原子性（Atomicity）：事务要么全部执行、要么全部回滚",
+              "correct": false,
+              "explain": "错误。原子性管的是「全做或全不做」，不管并发。"
+            },
+            {
+              "text": "一致性（Consistency）：事务前后数据满足完整性约束",
+              "correct": false,
+              "explain": "错误。一致性管的是数据约束，不是并发可见性。"
+            },
+            {
+              "text": "持久性（Durability）：事务提交后数据不丢失",
+              "correct": false,
+              "explain": "错误。持久性管的是宕机恢复，与并发无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. ACID 四特性逐一对照题干：题干描述的是「并发互不干扰 + 中间状态不可见」→ 隔离性（Isolation）。\\n2. 隔离性落地：靠锁（悲观）或 MVCC 多版本快照（乐观），隔离级别从松到严为 读未提交 → 读已提交 → 可重复读 → 串行化。\\n3. 对应问题：脏读（读到未提交数据）、不可重复读（同一条数据两次读不一样）、幻读（同一范围两次查询行数不一样）。\\n4. 大数据视角：OLTP（MySQL）才有完整 ACID；Hive / Spark SQL 默认不强保证，这是 OLAP 引擎的定位取舍。\\n5. 结论：选 A。\\n**延伸**：面试追问「可重复读能防幻读吗」——InnoDB 默认可重复读 + 间隙锁可以防大部分幻读；这是 MySQL 八股题的经典深度。",
+          "enterprise_tip": "面试问「ACID 哪个最重要」没有标准答案，但「隔离性怎么实现（锁 vs MVCC）」是必考。答出「读已提交解决脏读、可重复读解决不可重复读、串行化解决全部」就是完整回答。"
+        },
+        {
+          "task_id": "s02c08t09",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "事务控制：BEGIN / COMMIT / ROLLBACK",
+          "question": "关于 SQL 事务控制语句，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "BEGIN 开启事务，COMMIT 提交让修改永久生效，ROLLBACK 回滚撤销事务内所有修改，三者配合实现「要么全做、要么全不做」的原子性",
+              "correct": true,
+              "explain": "正确。事务三步曲：开启 → 操作 → 提交或回滚，是原子性的落地方式。"
+            },
+            {
+              "text": "COMMIT 的作用是撤销事务内已做的所有修改",
+              "correct": false,
+              "explain": "错误。撤销修改是 ROLLBACK 的职责；COMMIT 是确认并永久保存修改。"
+            },
+            {
+              "text": "ROLLBACK 之后，事务内已做的修改依然生效",
+              "correct": false,
+              "explain": "错误。ROLLBACK 正是把事务内所有未提交的修改全部撤销，恢复事务开始前的状态。"
+            },
+            {
+              "text": "BEGIN 之后即使不 COMMIT，数据也会自动保存",
+              "correct": false,
+              "explain": "错误。未提交的事务对他人不可见，且回滚或断连后修改全部丢失；必须 COMMIT 才持久化。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 事务三步：BEGIN（开启）→ 执行若干 SQL（增删改）→ COMMIT（提交生效）或 ROLLBACK（回滚撤销）。\n2. 原子性：事务内所有操作要么全部成功（COMMIT），要么全部不生效（ROLLBACK），不允许只生效一半。\n3. 经典场景：扣库存 + 记账必须放同一事务；第二步失败就 ROLLBACK，两个都撤销，保证账实一致。\n4. 隔离性补充：未 COMMIT 的修改其他会话不可见（具体取决于隔离级别）。\n5. 选 A。",
+          "enterprise_tip": "企业写批量数据脚本（对账、迁移）都会包事务：成功 COMMIT、任何一步异常 ROLLBACK 并记日志；生产事故「改了半张表」大多是没有用事务或提交时机错误。"
+        },
+        {
+          "task_id": "s02c08t10",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "SQL 注入与参数化查询",
+          "question": "关于 **SQL 注入**与**参数化查询**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "把用户输入直接拼进 SQL 字符串会引发 SQL 注入；改用参数化查询（占位符 ? 或 :name）让引擎把输入当「数据」而非「代码」，可从根本防止注入",
+              "correct": true,
+              "explain": "正确。参数化把输入与 SQL 结构分离，输入永远只是字面值，无法改变语句结构。"
+            },
+            {
+              "text": "只要给用户输入加上单引号就一定安全，不需要参数化",
+              "correct": false,
+              "explain": "错误。输入里可以含单引号闭合并注入新语句（如 ' OR '1'='1），手工拼引号挡不住注入。"
+            },
+            {
+              "text": "SQL 注入最多让查询结果出错，不会造成数据泄露",
+              "correct": false,
+              "explain": "错误。注入可以拖库、删表、提权，历史上大量数据泄露事件都是 SQL 注入导致。"
+            },
+            {
+              "text": "参数化查询比字符串拼接慢很多，生产环境不推荐",
+              "correct": false,
+              "explain": "错误。参数化性能与拼接相当甚至更快（语句可编译缓存复用），且更安全，生产必选。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 注入原理：把用户输入直接拼进 SQL，输入中的引号和关键字会成为 SQL 的一部分，改变语句结构。经典 payload：' OR '1'='1 让 WHERE 恒真。\n2. 危害：绕过登录、拖取全表数据、DELETE 删表、甚至执行写操作。\n3. 参数化查询：用占位符 ?（Python sqlite3、Java JDBC）或 :name 绑定变量，引擎把参数当纯数据传给执行计划，输入再特殊也无法改变结构。\n4. 正确姿势：SQL 结构固定，所有外部输入一律走参数绑定；配合最小权限账号、输入校验、数据脱敏。\n5. 选 A。",
+          "enterprise_tip": "SQL 注入常年位居 OWASP 漏洞榜首；企业里自研取数平台、报表工具的「查询框」如果不做参数化，等于把数仓大门敞开。面试必问「怎么防注入」——参数化 + 白名单校验 + 最小权限。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "一条 SQL 从提交到返回结果，底层经历了哪些阶段？",
+          "a": "解析（Parse，SQL 文本转语法树）→ 绑定（Bind，表名列名解析到元数据）→ 优化（Optimize，优化器基于统计信息选执行策略）→ 生成执行计划（Scan/Filter/Join/Aggregate 算子树）→ 执行（Execute，逐算子读数据返回）。EXPLAIN 看到的就是执行计划。"
+        },
+        {
+          "q": "B+ 树为什么查询快？",
+          "a": "磁盘 IO 是瓶颈，而 B+ 树矮胖、扇出大：一个节点可存上千个键，千万级数据的树高只有 3~4 层，等值/范围查询只需沿根到叶做几次页 IO；全表扫描则要读所有数据页，差距几个数量级。"
+        },
+        {
+          "q": "聚簇索引和二级索引有什么区别？",
+          "a": "聚簇索引的叶子节点直接就是数据行、表数据按键物理有序，一张表只能有一个（InnoDB 主键）；二级索引的叶子节点存「索引键 + 主键」，查到主键后还要回表到聚簇索引取完整行。覆盖索引可避免回表。"
+        },
+        {
+          "q": "为什么大数据引擎的 JOIN 多用 Hash Join？",
+          "a": "Hash Join 把较小表建成哈希表、大表逐行探测，单遍扫描、不要求两边有序，适合等值连接与分布式并行；Sort-Merge Join 需要先排序（适合非等值/已有序），Nested Loop 适合小表。"
+        },
+        {
+          "q": "事务 ACID 分别是什么？隔离级别有哪些？",
+          "a": "原子性（全做或全不做）、一致性（约束不被破坏）、隔离性（并发互不干扰）、持久性（提交后不丢）。隔离级别从松到严：读未提交、读已提交、可重复读、串行化，分别解决脏读、不可重复读、幻读。OLTP 才有完整 ACID，Hive/Spark SQL 默认不强保证。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "EXPLAIN",
+          "desc": "查看 SQL 执行计划的命令，Hive/Spark 直接 EXPLAIN，SQLite 用 EXPLAIN QUERY PLAN。"
+        },
+        {
+          "term": "执行计划",
+          "desc": "优化器输出的算子树（Scan/Filter/Join/Aggregate），决定怎么读数据。"
+        },
+        {
+          "term": "B+ 树",
+          "desc": "索引底层数据结构：矮胖、扇出大、叶子节点存数据且有序相连。"
+        },
+        {
+          "term": "页 Page",
+          "desc": "磁盘读写的最小单位，一次 IO 读一页，索引定位次数 = 树高。"
+        },
+        {
+          "term": "聚簇索引 / 二级索引",
+          "desc": "叶子即数据行的索引 / 叶子存「键+主键」的索引，二级索引需回表。"
+        },
+        {
+          "term": "回表",
+          "desc": "二级索引查到主键后回聚簇索引取完整行的过程，覆盖索引可避免。"
+        },
+        {
+          "term": "Hash Join / Nested Loop Join / Sort-Merge Join",
+          "desc": "JOIN 的三种底层实现，大数据等值连接多用 Hash Join。"
+        },
+        {
+          "term": "谓词下推 / 分区裁剪",
+          "desc": "过滤下推到扫描阶段执行 / 按分区条件跳过无关分区，都是「少扫数据」。"
+        },
+        {
+          "term": "ACID / 隔离级别",
+          "desc": "事务四特性（原子/一致/隔离/持久）与四种隔离级别（读未提交→串行化）。"
+        }
+      ],
+      "kps": [
+        "SQL 执行流程：解析 → 绑定 → 优化器 → 执行计划 → 执行",
+        "EXPLAIN 查看执行计划（Hive/Spark explain、SQLite EXPLAIN QUERY PLAN）",
+        "B+ 树索引：页、扇出、树高与磁盘 IO",
+        "聚簇索引 vs 二级索引",
+        "全表扫描 vs 索引扫描与回表（覆盖索引）",
+        "JOIN 三种实现：Nested Loop / Hash Join / Sort-Merge Join",
+        "谓词下推与分区裁剪的原理",
+        "事务 ACID 与隔离级别"
+      ]
+    }
+  ]
+}

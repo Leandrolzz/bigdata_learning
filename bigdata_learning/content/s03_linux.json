@@ -1,0 +1,2469 @@
+{
+  "stage_id": "s03_linux",
+  "title": "阶段 3：Linux 与 Shell 基础",
+  "subtitle": "大数据工程师的战场：所有集群都跑在 Linux 上",
+  "emoji": "🐧",
+  "estimated_days": 10,
+  "learning_goal": "掌握 Linux 文件系统与常用命令、权限与用户管理、文本处理三剑客与管道、Shell 脚本与 crontab 定时任务，具备操作大数据集群服务器的基本能力。",
+  "chapters": [
+    {
+      "chapter_id": "s03c01",
+      "title": "3.1 文件系统与基础命令",
+      "goal": "掌握 pwd/ls/cd/mkdir/touch/cp/mv/rm/cat/less/head/tail 与相对/绝对路径",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "为什么大数据工程师必须学 Linux？因为 Hadoop、Spark、Flink、Hive 这些大数据组件**全部跑在 Linux 上**。企业里的工作常态是：SSH 连上服务器 → 找日志 → 看数据 → 跑脚本 → 配定时任务。可以说，Linux 就是你操作大数据集群的「战场」。\\nLinux 的核心设计哲学是**一切皆文件**：目录、日志、配置文件、设备都是文件，操作集群 = 操作文件。"
+        },
+        {
+          "type": "text",
+          "content": "先分清两种路径：**绝对路径**以 `/` 开头（如 `/data/logs/app.log`，从根目录算起）；**相对路径**从当前位置算起（如 `logs/app.log`，`.` 表示当前目录，`..` 表示上一级）。\\n基础命令一览：`pwd` 看当前目录；`ls` 列文件（`-l` 详细信息、`-a` 含隐藏文件）；`cd` 切换目录；`mkdir` 建目录；`touch` 建空文件；`cp` 复制；`mv` 移动/重命名；`rm` 删除；`cat`/`less` 查看文件内容（less 可翻页）；`head`/`tail` 看头尾若干行。"
+        },
+        {
+          "type": "code",
+          "lang": "bash",
+          "content": "# 查看当前目录\npwd\n\n# 列出文件：-l 详细信息，-a 包含隐藏文件\nls -l /data\nls -la /data\n\n# 创建目录并进入\nmkdir /data/logs\ncd /data/logs\n\n# 新建空文件、复制、移动（重命名）\ntouch app.log\ncp app.log app.log.bak\nmv app.log.bak archive.log\n\n# 查看文件：cat 全部 / less 翻页 / head 前 5 行 / tail 后 20 行\nhead -n 5 app.log\ntail -n 20 app.log",
+          "caption": "文件系统基础命令速查"
+        },
+        {
+          "type": "warning",
+          "content": "**`rm -rf` 是事故高发区**：`rm -rf /data` 会把目录连内容一起删掉且不可恢复。企业里误删生产数据是大事故，删除前一定先 `ls` 确认，重要数据先备份。"
+        },
+        {
+          "type": "tip",
+          "content": "**三个省时间习惯**：Tab 键自动补全路径；上下箭头翻历史命令；`cd ~` 回到用户主目录、`cd -` 在最近两个目录间往返。熟练用 Tab，打字量少一半。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：大数据集群动辄几百台机器，日志分散在各节点。排查问题的第一手段就是 SSH 上去 `tail -f` 实时跟踪日志、`grep` 关键字过滤。Linux 命令熟练度是数据岗位面试的基础门槛——面试官可能直接让你在白板上写出「查看某个文件最后 100 行」的命令。"
+        }
+      ],
+      "hands_on": "1. 用 pwd 确认当前位置，mkdir 创建 /data/logs，touch 生成 app.log。\\n2. 用 echo 往 app.log 写入几行内容，分别用 cat、less、head -n 2、tail -n 2 查看。\\n3. 把 app.log 复制成备份文件，再 mv 到 backup 目录。\\n4. 在 /data 下创建一个软链接目录（ln -s），体会相对路径与绝对路径的区别。\\n5. 练习 Tab 补全与 cd - 往返切换。",
+      "tasks": [
+        {
+          "task_id": "s03c01t01",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "哪个是绝对路径",
+          "question": "下列哪个是**绝对路径**？",
+          "options": [
+            {
+              "text": "logs/app.log",
+              "correct": false,
+              "explain": "不以 / 开头，是相对路径，表示当前目录下的 logs 子目录。"
+            },
+            {
+              "text": "/data/logs/app.log",
+              "correct": true,
+              "explain": "正确。以 / 开头、从根目录一路写到底，就是绝对路径。"
+            },
+            {
+              "text": "../logs/app.log",
+              "correct": false,
+              "explain": "以 .. 开头是相对路径，表示从上一级目录出发。"
+            },
+            {
+              "text": "app.log",
+              "correct": false,
+              "explain": "只有文件名，明显是相对路径，指当前目录下的文件。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 绝对路径的判断标准：是否以 `/` 开头。\\n2. `../`、`./`、纯文件名都属于相对路径。\\n3. 选 B。\\n**延伸**：`cd /data/logs` 和 `cd logs` 的区别就是绝对与相对路径的实战体现。",
+          "enterprise_tip": "在脚本里尽量写绝对路径：定时任务（crontab）的执行环境可能不在你预期的工作目录，相对路径会导致「脚本手动跑没问题、定时跑就报错」的经典事故。"
+        },
+        {
+          "task_id": "s03c01t02",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：显示当前目录的命令",
+          "question": "Linux 中显示当前工作目录完整路径的命令是 ____（3 个字母）。",
+          "answer": [
+            "pwd",
+            "pwd 命令",
+            "PWD"
+          ],
+          "hint": "回忆 3.1 节目录操作：显示当前目录用哪个命令？想想它的英文全称。",
+          "analysis": "**标准解题思路**\\n1. 当前工作目录 → working directory。\\n2. print working directory → pwd。\\n3. 填 `pwd`。\\n**延伸**：迷路时先 pwd 再 ls，是排查文件路径问题（如「脚本找不到文件」）的第一步。"
+        },
+        {
+          "task_id": "s03c01t03",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排列在 /data 下新建日志目录的流程",
+          "question": "你需要在 `/data` 目录下新建一个日志目录 `logs`，把下面步骤按正确顺序排列。",
+          "steps": [
+            "用 pwd 确认当前所在目录",
+            "用 mkdir /data 创建数据目录",
+            "用 cd /data 进入数据目录",
+            "用 mkdir logs 创建日志目录",
+            "用 ls -l 验证日志目录创建成功"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "标准的目录创建流程：先确认自己在哪（pwd），再逐级创建（mkdir），创建后进入（cd），在目标位置创建子目录（mkdir logs），最后验证（ls -l）。先确认、再创建、最后验证，是操作文件系统的安全习惯。",
+          "analysis": "**标准解题思路**\\n1. pwd 确认当前位置，避免在错误目录下操作。\\n2. mkdir /data 创建数据目录（若已存在可加 -p 不报错）。\\n3. cd /data 进入目录。\\n4. mkdir logs 创建日志子目录。\\n5. ls -l 验证 logs 确实创建成功。\\n**进阶**：`mkdir -p /data/logs` 一条命令即可递归创建，但分步写法更利于理解目录层级。",
+          "enterprise_tip": "企业规范里，创建目录后立刻 ls 验证是「操作闭环」习惯；而 `mkdir -p` 在脚本里更常用，因为它不存在也不会报错中断脚本。"
+        },
+        {
+          "task_id": "s03c01t04",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "实时跟踪日志文件的命令",
+          "question": "生产环境排查问题，需要**实时滚动查看日志文件末尾新增的内容**（比如正在写入的报错），应该用哪个命令？",
+          "options": [
+            {
+              "text": "tail -f app.log",
+              "correct": true,
+              "explain": "正确。-f（follow）持续跟踪文件末尾新增内容，Ctrl+C 退出，是排查线上问题的标配。"
+            },
+            {
+              "text": "head -n 5 app.log",
+              "correct": false,
+              "explain": "错误。head 查看的是文件开头，且不会持续跟踪新增。"
+            },
+            {
+              "text": "cat app.log",
+              "correct": false,
+              "explain": "错误。cat 一次性输出全部内容，之后不再更新。"
+            },
+            {
+              "text": "less app.log",
+              "correct": false,
+              "explain": "错误。less 是翻页查看历史内容，不会自动跟踪新增行。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 关键字拆解：要「实时」「末尾」「新增内容」。\\n2. 末尾 → tail（默认显示最后 10 行）。\\n3. 实时跟踪 → -f（follow）选项，文件有新内容时自动滚动输出。\\n4. 组合 → tail -f app.log，Ctrl+C 退出。\\n5. 选 A。\\n**延伸**：`tail -f -n 100 app.log` 先看最后 100 行再持续跟踪；集群排障时常用 `tail -f` + `grep` 管道过滤关键字。",
+          "enterprise_tip": "任务失败排查第一步就是 SSH 上节点 `tail -f` 实时盯日志。面试常问「怎么实时看日志」，答 tail -f 并补一句「配合 grep 过滤关键字」就是完整答案。"
+        },
+        {
+          "task_id": "s03c01t05",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：查看文件末尾 10 行",
+          "question": "查看文件 `app.log` **末尾 10 行**内容的命令是 ____。",
+          "answer": [
+            "tail -n 10 app.log",
+            "tail -10 app.log",
+            "tail -n 10"
+          ],
+          "hint": "先想：看文件开头用什么命令？那看「末尾」呢？指定行数用哪个选项？",
+          "analysis": "**标准解题思路**\\n1. 查看文件末尾 → tail。\\n2. 指定行数 → -n 10（也可以简写为 -10）。\\n3. 完整命令 → tail -n 10 app.log。\\n4. 填 `tail -n 10 app.log`。\\n**延伸**：head -n 10 看开头；tail 默认不带 -n 时显示最后 10 行，即 tail app.log 与 tail -n 10 app.log 等价。",
+          "enterprise_tip": "日志文件动辄几百 MB，cat 会把终端刷爆，看末尾用 tail 是基本功。企业里「看任务最后输出」的命令就是 tail -n 50 日志文件。"
+        },
+        {
+          "task_id": "s03c01t06",
+          "type": "multi",
+          "difficulty": 1,
+          "title": "ls 命令的常用参数",
+          "question": "关于 `ls` 命令的常用参数，下列说法**正确**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "`ls -a` 显示包括隐藏文件（以 . 开头）在内的所有文件",
+              "correct": true,
+              "explain": "正确。-a（all）包含 . 开头的隐藏文件，如 .bashrc。"
+            },
+            {
+              "text": "`ls -l` 显示详细列表：权限、属主、属组、大小、修改时间",
+              "correct": true,
+              "explain": "正确。-l（long）输出长格式，第一列就是权限串。"
+            },
+            {
+              "text": "`ls -lh` 在 -l 基础上用 K/M/G 等人类可读方式显示文件大小",
+              "correct": true,
+              "explain": "正确。-h（human-readable）让大文件大小一目了然。"
+            },
+            {
+              "text": "`ls -a` 会递归列出所有子目录的内容",
+              "correct": false,
+              "explain": "错误。递归列出子目录是 -R，-a 只是显示隐藏文件。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. ls 三个高频参数：-a 隐藏文件、-l 长格式详情、-h 人类可读大小。\\n2. 组合用法：ls -la 或 ls -lh，选项可以叠加。\\n3. 递归是 -R，与 -a 无关。\\n4. 选 A、B、C。\\n**延伸**：企业里看日志目录最常用 `ls -lh`（大小可读）和 `ls -la`（确认隐藏文件如 .git、.ssh 是否存在）。",
+          "enterprise_tip": "面试手写题常考「查看某个目录下所有文件及其大小」：ls -lh 目录。注意 -a 和 -l 可以合并成 -la，顺序无所谓。"
+        },
+        {
+          "task_id": "s03c01t07",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：创建空文件的命令",
+          "question": "创建一个名为 `app.log` 的**空文件**，命令是 ____。",
+          "answer": [
+            "touch app.log",
+            "touch",
+            "touch app.log "
+          ],
+          "hint": "回忆 3.1 节文件操作：创建一个空文件用什么命令？它的英文原意是什么？",
+          "analysis": "**标准解题思路**\\n1. 创建空文件 → touch。\\n2. 指定文件名 → touch app.log。\\n3. 填 touch app.log。\\n**延伸**：touch 的核心用途是更新文件的修改时间戳（让脚本/工具认为文件是新生成的）；文件不存在时才创建空文件。"
+        },
+        {
+          "task_id": "s03c01t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "复制整个目录",
+          "question": "要把整个目录 `/data/logs`（含里面的所有文件）**复制**到 `/data/backup` 下，正确的命令是？",
+          "options": [
+            {
+              "text": "cp -r /data/logs /data/backup",
+              "correct": true,
+              "explain": "正确。-r（recursive）递归复制目录及其全部内容。"
+            },
+            {
+              "text": "cp /data/logs /data/backup",
+              "correct": false,
+              "explain": "错误。不带 -r 复制目录会报错（omitting directory）。"
+            },
+            {
+              "text": "mv /data/logs /data/backup",
+              "correct": false,
+              "explain": "错误。mv 是移动，执行后源目录 /data/logs 会消失。"
+            },
+            {
+              "text": "rm -r /data/logs",
+              "correct": false,
+              "explain": "错误。这是递归删除目录，不是复制。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 复制目录必须加 -r（递归）：cp -r 源目录 目标位置。\\n2. cp 不加 -r 只能复制普通文件，复制目录直接报错。\\n3. mv 是移动/重命名，不是复制。\\n4. 选 A。\\n**延伸**：cp -r 备份目录是运维常态；企业备份脚本常写成 cp -r /data/logs /data/backup_$(date +%Y%m%d)。",
+          "enterprise_tip": "面试问「cp 和 mv 的区别」：cp 复制后源文件还在，mv 移动后源文件消失。日志归档脚本里「复制到备份再清原文件」和「直接 mv」是两种常见模式，mv 更快（同文件系统只是改指针）。"
+        },
+        {
+          "task_id": "s03c01t09",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：重命名文件的命令",
+          "question": "把 `app.log` **重命名**为 `app.log.bak`，命令是 ____（两个参数：原文件名 + 新文件名）。",
+          "answer": [
+            "mv app.log app.log.bak",
+            "mv app.log app.log.bak ",
+            "mv app.log app.log.bak 命令"
+          ],
+          "hint": "先想：Linux 里「重命名」和「移动」是不是同一个命令？参数顺序谁在前？",
+          "analysis": "**标准解题思路**\\n1. Linux 中重命名用 mv：mv 旧名 新名。\\n2. mv app.log app.log.bak 把 app.log 改名为 app.log.bak。\\n3. 填 mv app.log app.log.bak。\\n**延伸**：mv 两个参数在同目录下是重命名，跨目录（如 mv app.log /data/bak/）就是移动；目标已存在时默认直接覆盖，可加 -i 先询问。",
+          "enterprise_tip": "「归档昨天的日志」脚本里最常见的动作就是 mv：mv app.log app.2024-01-05.log。注意 mv 覆盖同名文件不提示，脚本里建议先检查目标是否存在。"
+        },
+        {
+          "task_id": "s03c01t10",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "rm -rf 为什么危险",
+          "question": "关于 `rm -rf`，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "`rm -rf 目录` 会递归强制删除目录及其全部内容，删除后不可恢复，务必慎用",
+              "correct": true,
+              "explain": "正确。-r 递归、-f 强制不提示，Linux 命令行没有回收站，删了就没了。"
+            },
+            {
+              "text": "`rm -rf` 删除的文件会进入回收站，可以随时恢复",
+              "correct": false,
+              "explain": "错误。Linux 命令行删除没有回收站概念，rm 删除即不可恢复。"
+            },
+            {
+              "text": "`-f` 表示把文件移动到别处",
+              "correct": false,
+              "explain": "错误。-f（force）是强制删除不询问，移动是 mv。"
+            },
+            {
+              "text": "`rm -rf` 只能删除空目录",
+              "correct": false,
+              "explain": "错误。恰恰相反，-r 就是专门递归删除非空目录及其内容。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. rm -rf 拆解：-r（recursive）递归、-f（force）强制不提示。\\n2. 危险点：非空目录连内容一起删、不询问、无回收站不可恢复。\\n3. 安全习惯：删除前先 ls 确认路径；重要数据先备份；脚本里慎用 rm -rf，必要时先判断路径非空。\\n4. 选 A。\\n**延伸**：企业事故高发句是 `rm -rf /data` 少写一个字符或变量为空导致删错目录——脚本里先检查变量是否为空再执行 rm -rf 是保命习惯。",
+          "enterprise_tip": "面试题「误删了生产文件怎么办」：如果没备份，基本无法恢复。所以规范是：删除三步走——ls 确认、备份、再 rm；脚本里给 rm -rf 加路径非空保护。"
+        },
+        {
+          "task_id": "s03c01t11",
+          "type": "multi",
+          "difficulty": 1,
+          "title": "cat / less / head 查看文件内容",
+          "question": "关于查看文件内容的命令，下列说法**正确**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "`cat app.log` 一次性输出文件全部内容，适合小文件",
+              "correct": true,
+              "explain": "正确。cat 全量输出，大文件会刷爆终端。"
+            },
+            {
+              "text": "`less app.log` 支持翻页浏览大文件，按 q 退出",
+              "correct": true,
+              "explain": "正确。less 分页查看，空格翻页、q 退出，适合大日志。"
+            },
+            {
+              "text": "`head -n 20 app.log` 查看文件前 20 行",
+              "correct": true,
+              "explain": "正确。head 看开头，-n 指定行数。"
+            },
+            {
+              "text": "`head` 和 `cat` 一样必须一次性读完整个文件",
+              "correct": false,
+              "explain": "错误。head 只读取开头部分，大文件也瞬间完成。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 查看内容四件套分工：cat 全量（小文件）、less 翻页（大文件）、head 开头 N 行、tail 末尾 N 行。\\n2. head 是「懒惰读取」，只取需要的前 N 行，不会读完整文件。\\n3. 选 A、B、C。\\n**延伸**：排查日志的黄金组合：tail -f 实时跟踪 + grep 过滤关键字；先 head 看格式、再 tail 看最新。",
+          "enterprise_tip": "几百 MB 的日志千万不要 cat——终端直接卡死。正确姿势：head -n 5 看格式、tail -n 50 看最新、less 翻页看中间、grep 过滤关键字。"
+        },
+        {
+          "task_id": "s03c01t12",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "rm 删除文件后数据还能恢复吗",
+          "question": "在 Linux 上执行 `rm app.log` 删除一个普通文件。从**底层原理**（inode 与链接计数）看，下列说法正确的是？",
+          "options": [
+            {
+              "text": "rm 只删除该文件对应的目录项、把 inode 的链接计数减 1；只有链接计数归 0 且没有进程再打开它时，数据块才被标记释放——所以刚删完、磁盘未被覆盖时数据仍残留在磁盘上，可尝试用专业工具抢救",
+              "correct": true,
+              "explain": "正确。删除本质是解除目录项与 inode 的关联，数据块不会立即清零，只是被标记为可复用。"
+            },
+            {
+              "text": "rm 会立即把文件内容所在的数据块全部清零，数据 100% 消失",
+              "correct": false,
+              "explain": "错误。rm 不清零数据，只是释放 inode 与数据块，内容仍残留在磁盘上等待被覆盖。"
+            },
+            {
+              "text": "rm 会把文件移动到回收站，随时可以恢复",
+              "correct": false,
+              "explain": "错误。Linux 命令行没有回收站概念，rm 删除即从目录树中移除。"
+            },
+            {
+              "text": "rm 删除后数据一定可以完整恢复，没有任何风险",
+              "correct": false,
+              "explain": "错误。一旦数据块被新数据覆盖，就无法恢复；生产上必须按「不可恢复」对待。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 文件的三层结构：目录项（文件名 → inode 编号）+ inode（元数据、链接计数、数据块指针）+ 数据块（内容）。\\n2. rm 的底层动作：删除目录项、inode 链接计数减 1。\\n3. 释放条件：链接计数归 0 且没有进程持有该文件（文件描述符打开）时，inode 与数据块被标记为空闲。\\n4. 恢复真相：数据块不会立即清零，只是标记可复用——未被新数据覆盖前理论上能靠专业工具抢救；但被覆盖后永久丢失。\\n5. 结论：选 A。\\n**延伸**：进程还在写一个「已删除」的文件时，数据其实还占着磁盘——这正是日志服务常见的「删除后磁盘没变小」现象。",
+          "enterprise_tip": "面试题「误删生产文件怎么办」：立即停止一切写入、用 debugfs/extundelete 等工具抢救、最重要是平时做好备份。规范永远是：删除三步走——ls 确认、备份、再 rm。"
+        },
+        {
+          "task_id": "s03c01t13",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "tar 打包与压缩",
+          "question": "要把目录 `/data/logs` **打包并压缩**成 `logs.tar.gz`（gzip 格式），正确的命令是？",
+          "options": [
+            {
+              "text": "tar -czvf logs.tar.gz /data/logs",
+              "correct": true,
+              "explain": "正确。-c 创建归档、-z 调用 gzip 压缩、-v 显示处理过程、-f 指定归档文件名，四参数组合是「打包+压缩」的标准写法。"
+            },
+            {
+              "text": "tar -xzvf logs.tar.gz",
+              "correct": false,
+              "explain": "错误。-x 是解压（extract），方向反了；本题要打包压缩，不是解压。"
+            },
+            {
+              "text": "gzip -c /data/logs > logs.tar.gz",
+              "correct": false,
+              "explain": "错误。gzip 只能压缩单个文件，不能把整个目录打包进去；打包目录必须先用 tar。"
+            },
+            {
+              "text": "zip -r logs.tar.gz /data/logs",
+              "correct": false,
+              "explain": "错误。zip 命令生成的是 .zip 格式归档，文件名写成 .tar.gz 与实际格式不符。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 拆解需求：把**目录**打包 + **gzip 压缩** → 工具选 tar。\n2. 回忆 tar 常用参数：-c（create 创建归档）、-x（extract 解压）、-z（gzip 压缩/解压）、-v（verbose 显示过程）、-f（file 指定归档文件名，且 -f 后必须紧跟文件名）。\n3. 打包+压缩 → 组合 -czvf，命令：tar -czvf logs.tar.gz /data/logs。\n4. 排除干扰项：-xzvf 是解压；gzip 不能打包目录；zip 生成 .zip 格式。\n5. 选 A。\n**延伸**：.tar 只打包不压缩；.tar.gz 打包+压缩；解压用 tar -xzvf logs.tar.gz；解压到指定目录加 -C。\n**记忆**：c 创建、x 解压、z gzip、v 过程、f 文件名——五个参数是 tar 的常客。",
+          "enterprise_tip": "日志归档、数据备份、发行包发布全靠 tar；面试常问「打包和压缩的区别」：tar 打包（把一堆文件合成一个）、gzip 压缩（把单个文件变小），-z 一步到位。"
+        },
+        {
+          "task_id": "s03c01t14",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：find 按文件名查找",
+          "question": "在 `/data` 目录下**递归查找所有以 `.log` 结尾**的文件，命令是 `find /data ____`（填 -name 参数与匹配模式）。",
+          "answer": [
+            "-name '*.log'",
+            "-name \"*.log\"",
+            "-name *.log",
+            "-name '*.log' -type f"
+          ],
+          "hint": "先想：find 按文件名查找用哪个参数？「以 .log 结尾」用什么通配符？为何有时要加引号？",
+          "analysis": "**标准解题思路**\n1. 需求：在 /data 下递归查找文件 → 工具选 find。\n2. 按文件名匹配 → -name 参数，配合通配符：-name '*.log'。\n3. 注意引号：*.log 必须加引号，否则 shell 会先在当前目录展开通配符，find 收到的就不是模式了。\n4. 完整命令：find /data -name '*.log'。\n5. 填 -name '*.log'。\n**延伸**：-type d 只看目录、-type f 只看文件；-mtime -2 最近 2 天修改过；-size +100M 大于 100MB；配合 -exec 可对结果执行命令（如 find /data -name '*.tmp' -delete）。",
+          "enterprise_tip": "找配置文件、查大文件、清临时文件的标配：find /data -name '*.log'；配合 -mtime、-size 能在几十 TB 的数据盘上快速定位「谁占了大头」。"
+        },
+        {
+          "task_id": "s03c01t15",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "df 与 du 的区别",
+          "question": "你想先确认**某块磁盘分区是不是快满了**，再进一步找到**哪个目录占用最大**，正确的命令组合是？",
+          "options": [
+            {
+              "text": "`df -h` 看各文件系统（分区）使用率，`du -sh /data/*` 逐目录看占用",
+              "correct": true,
+              "explain": "正确。df（disk free）看文件系统/分区，du（disk usage）看目录/文件占用，-h 都是人类可读大小。"
+            },
+            {
+              "text": "`du -h` 看分区使用率，`df -sh` 看目录大小",
+              "correct": false,
+              "explain": "错误。职责和参数都反了：看分区是 df，看目录是 du。"
+            },
+            {
+              "text": "`df` 只能看内存，`du` 只能看 CPU",
+              "correct": false,
+              "explain": "错误。看内存是 free，df/du 都是磁盘相关的命令。"
+            },
+            {
+              "text": "两者完全等价，只是名字不同",
+              "correct": false,
+              "explain": "错误。df 面向文件系统（分区），du 面向目录树，口径不同。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 职责分工：**df（disk free）** 看**文件系统/分区**的使用情况；**du（disk usage）** 看**目录/文件**占用。\n2. 第一步定位「哪个分区满了」→ df -h（-h 人类可读，G/M 显示）。\n3. 第二步找「哪个目录占了大头」→ du -sh 目录（-s 汇总、-h 可读）。\n4. 组合使用：df -h 发现问题分区 → du -sh /data/* 逐目录找大头 → 清理或扩容。\n5. 选 A。\n**延伸**：du 在超大目录上很慢，可加 --max-depth=1 限制深度；被进程占用但已删除的文件：du 不显示、df 仍显示占用——这是「删除后磁盘没变小」的另一层原因。",
+          "enterprise_tip": "磁盘满排障标准套路：df -h 定位满的分区 → du -sh 逐层找大头 → 清理/扩容；生产监控磁盘水位（使用率 > 80% 告警）是运维铁律。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "绝对路径和相对路径有什么区别？",
+          "a": "绝对路径以 / 开头、从根目录一路写到底，如 /data/logs/app.log，任何位置执行都有效；相对路径从当前目录算起，如 logs/app.log，依赖当前位置。脚本和定时任务里推荐写绝对路径，避免环境不对找不到文件。"
+        },
+        {
+          "q": "cd 有哪些常用用法？",
+          "a": "cd 目录 切换目录；cd ~ 回到用户主目录；cd .. 回上一级；cd - 在最近两个目录间往返；直接 cd 不带参数也回到主目录。"
+        },
+        {
+          "q": "查看文件内容有哪些命令、有什么区别？",
+          "a": "cat 一次性输出全部内容，适合小文件；less 支持翻页浏览大文件；head 看开头 N 行、tail 看末尾 N 行；tail -f 实时跟踪末尾新增，是排查线上问题的标配。"
+        },
+        {
+          "q": "为什么说 rm -rf 危险？",
+          "a": "-r 递归删除目录及内容、-f 强制不提示，删除后不可恢复。误删生产数据是大事故，删除前先 ls 确认路径，重要数据先备份，脚本里慎用 rm -rf。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "pwd",
+          "desc": "显示当前工作目录的完整路径，迷路时第一命令。"
+        },
+        {
+          "term": "ls",
+          "desc": "列出目录内容，-l 详细信息、-a 包含隐藏文件。"
+        },
+        {
+          "term": "cd",
+          "desc": "切换目录，~ 主目录、.. 上一级、- 往返。"
+        },
+        {
+          "term": "mkdir / touch",
+          "desc": "创建目录 / 创建空文件。"
+        },
+        {
+          "term": "cp / mv / rm",
+          "desc": "复制 / 移动重命名 / 删除文件。"
+        },
+        {
+          "term": "cat / less / head / tail",
+          "desc": "查看文件内容：全量 / 翻页 / 开头 N 行 / 末尾 N 行。"
+        },
+        {
+          "term": "tail -f",
+          "desc": "实时跟踪文件末尾新增内容，线上排障标配。"
+        },
+        {
+          "term": "Tab 补全",
+          "desc": "自动补全路径与命令，减少打字与拼写错误。"
+        }
+      ],
+      "kps": [
+        "一切皆文件：Linux 文件系统与绝对/相对路径",
+        "pwd 与 cd：查看当前位置与切换目录（~、..、-）",
+        "ls 列目录与参数（-a 隐藏文件、-l 详情、-lh 可读大小）",
+        "mkdir -p 递归创建目录",
+        "touch 创建空文件/更新时间戳",
+        "cp -r 复制目录与 mv 移动/重命名",
+        "rm 删除与 rm -rf 的危险（无回收站）",
+        "cat / less 查看文件内容",
+        "head / tail -n 与 tail -f 实时跟踪",
+        "Tab 补全、历史命令与目录操作闭环（先确认再创建最后验证）",
+        "rm 删除的底层：inode 链接计数与数据块释放（删除后能否恢复）",
+        "tar 打包与压缩（-c 创建 / -x 解压 / -z gzip / -f 文件）",
+        "find 按名称/时间/大小查找文件（-name、-mtime、-size）",
+        "df -h 分区占用与 du -sh 目录占用（磁盘满排查）"
+      ]
+    },
+    {
+      "chapter_id": "s03c02",
+      "title": "3.2 权限与用户",
+      "goal": "掌握 rwx 权限位、chmod 数字法（755）、chown、useradd、sudo",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "集群是多用户共享的，必须有权限保护数据：你的订单数据不能让实习生随便改，生产库更不能让任何人删。Linux 权限模型 = **三组 × 三位**：\\n- 三组：**属主 owner**、**属组 group**、**其他人 other**；\\n- 三位：**r 读(4)**、**w 写(2)**、**x 执行(1)**。\\n\\n`ls -l` 的第一列如 `-rw-r--r--`：第 1 位是类型（- 普通文件 / d 目录），后 9 位每 3 个一组，分别是 owner、group、other 的权限。"
+        },
+        {
+          "type": "text",
+          "content": "常用命令：\\n- `chmod 755 文件`：**数字法**，7=4+2+1（rwx）、5=4+1（r-x），所以 755 = owner 可读写执行、group 可读执行、other 可读执行；\\n- `chown 属主:属组 文件`：修改文件归属；\\n- `useradd -m 用户名`：新建用户；\\n- `sudo 命令`：临时以管理员权限执行。\\n\\n注意目录的 x 权限表示「能否进入该目录」，没有 x 权限即使有 r 权限也进不去。"
+        },
+        {
+          "type": "code",
+          "lang": "bash",
+          "content": "# 查看权限：第一列 -rw-r--r-- 表示普通文件，owner 可读写、其他人只读\nls -l app.log\n\n# 数字法：owner rwx(7)、group r-x(5)、other r-x(5)\nchmod 755 app.log\n\n# 字母法：效果相同，适合小改动\nchmod u+rwx,g+rx,o+rx app.log\n\n# 修改属主和属组\nchown hadoop:hadoop app.log\n\n# 新建用户并设置密码\nsudo useradd -m zhang\nsudo passwd zhang\n\n# 用 sudo 以管理员权限执行命令\nsudo tail -n 5 /var/log/syslog",
+          "caption": "权限查看、chmod 数字法、chown、useradd、sudo"
+        },
+        {
+          "type": "warning",
+          "content": "**`chmod 777` 意味着所有用户可读可写可执行**——生产环境等于裸奔，任何用户都能改你的数据。企业规范里生产文件权限通常 644 或 755 起步，敏感文件 600。"
+        },
+        {
+          "type": "tip",
+          "content": "**数字法速记**：r=4、w=2、x=1，三个数相加就是权限值。7=rwx、6=rw、5=rx、4=r、0=无权限。看到 755 就能立刻翻译成 rwxr-xr-x，这是面试手写题的基本功。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：数据安全合规（等保、GDPR）要求**权限最小化**——每个人只有完成工作所需的最小权限。大数据平台的权限体系和 Linux 一脉相承：HDFS 文件权限、Hive 库表权限（r/w 授权）、Kerberos 认证。面试常问：为什么大数据平台要鉴权？答：数据是资产，权限失控等于资产泄露。"
+        }
+      ],
+      "hands_on": "1. 创建 test.txt，用 ls -l 观察默认权限（通常是 644）。\\n2. 依次执行 chmod 755、700、644，每次用 ls -l 观察第一列变化，并翻译成 rwx 形式。\\n3. 用 sudo useradd -m 创建一个新用户 testuser，把 test.txt 用 chown 改属主给它。\\n4. 写一个脚本 test.sh，分别用「不带 x 权限」和「chmod +x 后」执行，观察 Permission denied 报错。\\n5. 思考：为什么目录至少要 x 权限才能进入？",
+      "tasks": [
+        {
+          "task_id": "s03c02t01",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "chmod 755 的含义",
+          "question": "执行 `chmod 755 app.log` 后，app.log 的权限是？",
+          "options": [
+            {
+              "text": "属主 rwx，属组 r-x，其他人 r-x",
+              "correct": true,
+              "explain": "正确。7=rwx，5=r-x，所以 755 = rwxr-xr-x。"
+            },
+            {
+              "text": "所有用户都可读可写",
+              "correct": false,
+              "explain": "所有用户可读写是 666，不是 755。"
+            },
+            {
+              "text": "属主只读，其他人可执行",
+              "correct": false,
+              "explain": "755 的属主是 rwx（可读写执行），不只是只读。"
+            },
+            {
+              "text": "只有 root 可以访问",
+              "correct": false,
+              "explain": "755 中其他人也有 r-x 权限，并非只有 root 可访问。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 拆数字：7 = 4+2+1 = rwx；5 = 4+1 = r-x；5 = r-x。\\n2. 三个数字依次对应 owner、group、other。\\n3. 755 = rwxr-xr-x，即属主可读写执行、属组可读执行、其他人可读执行。\\n4. 选 A。\\n**延伸**：脚本文件常见权限是 755（属主可改、大家可执行），配置文件常是 644（大家可读、仅属主可写）。",
+          "enterprise_tip": "面试问「为什么脚本是 755 而不是 777」？答：755 足够执行且只有属主能改，777 让任何人都能改脚本——被植入恶意命令是供应链安全大忌。"
+        },
+        {
+          "task_id": "s03c02t02",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：修改文件属主的命令",
+          "question": "Linux 中修改文件属主（owner）的命令是 ____（5 个字母）。",
+          "answer": [
+            "chown",
+            "chown 命令",
+            "chown file"
+          ],
+          "hint": "回忆 3.2 节权限管理：修改文件属主用什么命令？想想它的英文全称。",
+          "analysis": "**标准解题思路**\\n1. 修改属主 → change owner。\\n2. 缩写 → chown。\\n3. 填 `chown`。\\n**延伸**：`chown hadoop:hadoop file` 同时修改属主和属组；`chgrp` 单独改属组。"
+        },
+        {
+          "task_id": "s03c02t03",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "关于 Linux 权限的正确说法",
+          "question": "关于 Linux 文件权限，下列说法**正确**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "r 表示可读，w 表示可写，x 表示可执行",
+              "correct": true,
+              "explain": "正确。rwx 是权限的三种基本位。"
+            },
+            {
+              "text": "数字权限中 7 = rwx = 4 + 2 + 1",
+              "correct": true,
+              "explain": "正确。4 读、2 写、1 执行，相加得 7。"
+            },
+            {
+              "text": "chmod 777 表示所有用户对该文件都可读可写可执行",
+              "correct": true,
+              "explain": "正确。三个 7 分别是 owner、group、other 的 rwx，非常不安全。"
+            },
+            {
+              "text": "普通用户可以用 chmod 修改任意文件的权限",
+              "correct": false,
+              "explain": "错误。chmod 只能修改自己有权限（通常是属主）的文件，不能改别人的文件。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. A 是 rwx 的定义，正确。\\n2. B 是数字法的换算，7=4+2+1=rwx，正确。\\n3. C 777 表示三组都是 rwx，即所有用户可读可写可执行，正确（但不安全）。\\n4. D 普通用户只能改自己拥有的文件，改别人的文件会 Permission denied，错误。\\n5. 选 A、B、C。\\n**延伸**：目录的 x 权限 = 能否进入目录；目录的 w 权限 = 能否在目录里新建/删除文件。",
+          "enterprise_tip": "面试题：chmod 和 chown 有什么区别？答：chmod 改权限位（怎么访问），chown 改归属（谁拥有）——一个是「门锁」，一个是「房本」。"
+        },
+        {
+          "task_id": "s03c02t04",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "chmod 755 中数字的位置含义",
+          "question": "执行 `chmod 755 script.sh` 后，关于三个数字与权限组的对应关系，下列说法正确的是？",
+          "options": [
+            {
+              "text": "第一个数字 7 对应文件属主（owner），权限为 rwx（可读可写可执行）",
+              "correct": true,
+              "explain": "正确。数字顺序固定为 属主-属组-其他人，7 = 4+2+1 = rwx，属主拥有全部权限。"
+            },
+            {
+              "text": "第一个数字 7 对应其他人（other）的权限",
+              "correct": false,
+              "explain": "错误。第一个数字对应属主，第三个数字才对应其他人。"
+            },
+            {
+              "text": "第二个数字 5 表示属组权限为 rw-（可读可写）",
+              "correct": false,
+              "explain": "错误。5 = 4+1 = r-x，属组可读可执行但不可写。"
+            },
+            {
+              "text": "第三个数字 5 表示其他人权限为 rwx",
+              "correct": false,
+              "explain": "错误。5 是 r-x，rwx 对应数字 7。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. chmod 数字法三位分别对应：属主（owner）、属组（group）、其他人（other）。\\n2. 数字换算：r=4、w=2、x=1。\\n3. 第一位 7 = 4+2+1 = rwx（属主全权限）。\\n4. 第二位 5 = 4+1 = r-x（属组可读可执行）。\\n5. 第三位 5 = r-x（其他人可读可执行）。\\n6. 选 A。\\n**延伸**：755 = rwxr-xr-x，是脚本和目录的常见权限；记不清时用 `ls -l` 看第一列核对。",
+          "enterprise_tip": "权限位翻译成 rwx 是面试手写题基本功。企业里脚本 755、配置文件 644、密钥等敏感文件 600——权限最小化原则从第一份文件就要养成。"
+        },
+        {
+          "task_id": "s03c02t05",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：ls -l 第一列的文件类型字符",
+          "question": "`ls -l` 输出第一列共 10 个字符（如 `drwxr-xr-x`），其中第 1 个字符表示文件类型：显示 `d` 表示这是一个 ____，显示 `-` 表示普通文件。",
+          "answer": [
+            "目录",
+            "文件夹",
+            "directory",
+            "目录（directory）"
+          ],
+          "hint": "先回忆 ls -l 第一列各字符的含义：d、-、l 分别代表什么文件类型？",
+          "analysis": "**标准解题思路**\\n1. ls -l 第一列第 1 个字符是文件类型位。\\n2. d = directory（目录），- = 普通文件，l = 软链接（symbolic link）。\\n3. 填 `目录`。\\n**延伸**：后 9 个字符每 3 个一组分别是属主、属组、其他人的 rwx 权限，如 drwxr-xr-x 表示目录、属主 rwx、属组 r-x、其他人 r-x。",
+          "enterprise_tip": "看到目录第一列是 d、脚本是 -rwxr-xr-x、软链接是 l，一眼就能判断文件性质。面试题「怎么判断一个路径是文件还是目录」的答案就是看 ls -l 第一列首字符或加 -F 看结尾斜杠。"
+        },
+        {
+          "task_id": "s03c02t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "chmod 符号法：给属主加执行权限",
+          "question": "用**符号法**给 `app.log` 的**属主（owner）添加执行权限**、其他权限保持不变，正确的命令是？",
+          "options": [
+            {
+              "text": "chmod u+x app.log",
+              "correct": true,
+              "explain": "正确。u 表示属主，+x 表示添加执行权限，其他位不受影响。"
+            },
+            {
+              "text": "chmod a+x app.log",
+              "correct": false,
+              "explain": "错误。a 表示所有用户（属主+属组+其他人）都加执行权限，不是仅属主。"
+            },
+            {
+              "text": "chmod 755 app.log",
+              "correct": false,
+              "explain": "错误。755 是数字法，会把权限整体重置为 rwxr-xr-x，不是只改属主一位。"
+            },
+            {
+              "text": "chmod u-x app.log",
+              "correct": false,
+              "explain": "错误。u-x 是移除属主的执行权限，方向反了。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 符号法格式：chmod 谁+操作 文件，谁（u/g/o/a）+ 操作（+ 添加 / - 移除 / = 设定）。\\n2. u=属主、g=属组、o=其他人、a=所有人；x 是执行权限。\\n3. chmod u+x app.log 只影响属主的执行位，其余权限不变。\\n4. 选 A。\\n**延伸**：符号法适合小改动（chmod g-w、chmod o+r），数字法适合整体设定（755/644）。",
+          "enterprise_tip": "给脚本加执行权限最常用的就是 chmod +x（等价于 a+x）或 chmod u+x。企业里脚本权限一般 755（属主可改、大家可执行），不给 777。"
+        },
+        {
+          "task_id": "s03c02t07",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：修改文件所属组的命令",
+          "question": "单独修改文件**所属组（group）**的命令是 ____（5 个英文字母）。",
+          "answer": [
+            "chgrp",
+            "chgrp 命令",
+            "chgrp file"
+          ],
+          "hint": "回忆 3.2 节权限管理：单独修改文件所属组用什么命令？它与 chown 只差一个字母。",
+          "analysis": "**标准解题思路**\\n1. 改属组 → change group → chgrp。\\n2. 用法：chgrp hadoop app.log 把 app.log 的属组改为 hadoop。\\n3. 填 chgrp。\\n**延伸**：chown 属主:属组 可以同时改两者；单独改属组用 chgrp，单独改属主用 chown 属主 文件。"
+        },
+        {
+          "task_id": "s03c02t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "新建用户并创建家目录",
+          "question": "新建系统用户 `zhang`，并**同时创建他的家目录**（/home/zhang），正确的命令是？",
+          "options": [
+            {
+              "text": "sudo useradd -m zhang",
+              "correct": true,
+              "explain": "正确。-m（make home）自动创建家目录并复制骨架文件。"
+            },
+            {
+              "text": "sudo useradd zhang",
+              "correct": false,
+              "explain": "错误。不带 -m 时多数发行版不创建家目录，用户登录后没有家目录可用。"
+            },
+            {
+              "text": "sudo usermod zhang",
+              "correct": false,
+              "explain": "错误。usermod 是修改已有用户（改组、改家目录等），不是新建用户。"
+            },
+            {
+              "text": "sudo passwd zhang",
+              "correct": false,
+              "explain": "错误。passwd 是设置密码，前提是用户已经存在；新建用户应先 useradd。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 新建用户 → useradd；普通用户执行需要 sudo 提权。\\n2. 建家目录 → 加 -m：useradd -m zhang。\\n3. 选 A。\\n**延伸**：usermod 用来改已有用户（如 usermod -aG 组 用户 加入附属组）；passwd 设置/修改密码；useradd 建完用户通常还要 passwd 设置密码才能登录。",
+          "enterprise_tip": "企业建账号流程：useradd -m 用户名 → passwd 用户名 → 按需 usermod -aG 加入用户组 → 权限最小化授权。大数据平台（HDFS/Hive）的用户授权逻辑与此一脉相承。"
+        },
+        {
+          "task_id": "s03c02t09",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：为用户设置密码",
+          "question": "为新用户 `zhang` **设置登录密码**，命令是 ____（命令 + 用户名，可加 sudo 前缀）。",
+          "answer": [
+            "sudo passwd zhang",
+            "passwd zhang",
+            "passwd"
+          ],
+          "hint": "回忆 3.2 节用户管理：为新用户设置登录密码用什么命令？命令后面跟什么？",
+          "analysis": "**标准解题思路**\\n1. 设置密码 → passwd。\\n2. 指定用户 → passwd zhang；普通用户给别的用户设密码需要 sudo。\\n3. 填 passwd zhang（或 sudo passwd zhang）。\\n**延伸**：useradd 只创建账号不设密码，未设密码的用户无法登录；root 执行 passwd 用户名 可以直接改他人密码。"
+        },
+        {
+          "task_id": "s03c02t10",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "sudo 与 umask 概念",
+          "question": "关于 `sudo` 与 `umask`，下列说法**正确**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "sudo 让被授权的用户以管理员（root）身份临时执行某一条命令",
+              "correct": true,
+              "explain": "正确。sudo 只对当前命令生效，不改变用户身份。"
+            },
+            {
+              "text": "umask 决定新建文件/目录的默认权限（如 022 会屏蔽属组和其他人的写权限）",
+              "correct": true,
+              "explain": "正确。umask 是「默认权限掩码」：文件默认 666 减去掩码、目录默认 777 减去掩码。"
+            },
+            {
+              "text": "sudo 会永久把普通用户提升为管理员",
+              "correct": false,
+              "explain": "错误。sudo 只对单条命令临时提权，下一条命令若无 sudo 仍是普通权限。"
+            },
+            {
+              "text": "umask 是用来删除文件的命令",
+              "correct": false,
+              "explain": "错误。删除是 rm；umask 是 shell 内置的权限掩码设置。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. sudo：临时以管理员身份执行单条命令，如 sudo tail /var/log/syslog、sudo useradd。\\n2. umask：新建文件的默认权限掩码。文件默认 666 - umask、目录默认 777 - umask；umask 022 → 文件 644、目录 755。\\n3. A、B 正确；C（永久提权）错误；D（删除文件）错误。\\n4. 选 A、B。\\n**延伸**：查看当前掩码直接执行 umask；企业里敏感目录收紧掩码（如 027），配合权限最小化原则。",
+          "enterprise_tip": "面试问「为什么新建的文件权限不是 777 而是 644？」答：shell 的 umask 默认 022，屏蔽了属组和其他人的写权限。安全基线里调整 umask 是常规加固动作。"
+        },
+        {
+          "task_id": "s03c02t11",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "Linux 权限判断的底层流程",
+          "question": "用户 zhang 访问文件 /data/app.log 时，内核按什么顺序判断权限？",
+          "options": [
+            {
+              "text": "先比对进程的 uid/gid 与文件的属主/属组：uid 等于属主 → 用属主权限位；否则看是否属于属组 → 用属组权限位；否则 → 用其他人权限位，再按对应位的 rwx 决定能否读/写/执行",
+              "correct": true,
+              "explain": "正确。权限匹配按 owner → group → other 的顺序命中即停，然后检查命中组的 rwx 位。"
+            },
+            {
+              "text": "先随机抽取一个权限位测试，通过了就放行",
+              "correct": false,
+              "explain": "错误。权限判断是确定性的三段匹配，不是随机测试。"
+            },
+            {
+              "text": "只要不是 root，任何用户都能读所有文件",
+              "correct": false,
+              "explain": "错误。权限由 rwx 位决定，其他人无 r 权限就读不了。"
+            },
+            {
+              "text": "权限判断只看文件大小，不看 rwx 位",
+              "correct": false,
+              "explain": "错误。文件大小与权限无关，rwx 位才是判断依据。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 内核先取进程的真实 uid/gid（以及附加组），再取文件的属主 uid、属组 gid。\\n2. 匹配顺序：uid 等于文件属主 → 只检查 owner 组三位；否则检查进程 gid 是否属于文件属组 → 检查 group 组三位；否则 → 检查 other 组三位。\\n3. 命中之后，按操作类型逐位检查：读看 r、写看 w、执行看 x。\\n4. 目录还有特殊规则：x 才能进入、w 才能新建/删除文件。\\n5. 结论：选 A。\\n**延伸**：这就是「为什么把用户加进属组就能访问」的底层答案——gid 匹配命中了 group 权限位。",
+          "enterprise_tip": "面试题「为什么我改了文件属组还是进不去」：要么用户没真正加入该组（需要重新登录生效），要么组权限位本身没有 r/x。答出「uid/gid 匹配 → 权限位检查」两步就是完整答案。"
+        },
+        {
+          "task_id": "s03c02t12",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "SUID 特殊权限",
+          "question": "普通用户执行 `passwd` 修改自己密码时，为什么能写入权限为 600、属主是 root 的 `/etc/shadow` 文件？",
+          "options": [
+            {
+              "text": "`/usr/bin/passwd` 设置了 SUID 位（权限串 rws 中的 s）：普通用户运行该程序时，进程以文件属主 root 的身份执行，从而获得写 shadow 的权限",
+              "correct": true,
+              "explain": "正确。SUID 让程序以文件属主（root）身份运行，passwd 因此能写 shadow，但用户并没有获得 root shell。"
+            },
+            {
+              "text": "所有用户对 /etc/shadow 本来就有写权限",
+              "correct": false,
+              "explain": "错误。shadow 权限通常是 000 或 600，普通用户对它没有任何权限。"
+            },
+            {
+              "text": "passwd 会把新密码写到用户自己家目录的文件里",
+              "correct": false,
+              "explain": "错误。密码哈希必须写入 /etc/shadow 才能生效，写自己家目录没有意义。"
+            },
+            {
+              "text": "SUID 表示任何人都能修改该程序的内容",
+              "correct": false,
+              "explain": "错误。SUID 影响的是「以谁的身份执行」，不是「谁能修改文件」。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 前提事实：/etc/shadow 权限是 000 或 600、属主 root，普通用户对它「无权限」——但普通用户确实能改自己密码，矛盾在哪？\n2. 关键机制：**SUID（Set User ID）特殊权限**。ls -l 看到 `-rwsr-xr-x` 中的 s 就是 SUID。\n3. 作用：普通用户**运行**带 SUID 的可执行文件时，进程的**有效用户 ID（euid）**临时变成文件属主（root）——即「以 root 的身份执行这个程序」。\n4. 所以 passwd 进程能写 shadow（euid 是 root），但该权限只在这个程序内生效，用户没有得到 root shell。\n5. 选 A。\n**延伸**：设置 SUID 用 chmod 4755（4 开头）；sudo 命令自身也带 SUID；安全排查 find / -perm -4000 找出所有 SUID 程序，防止恶意提权后门。",
+          "enterprise_tip": "面试考 SUID 必提 passwd 与 sudo；生产安全巡检会定期 find / -perm -4000 检查 SUID 文件，出现陌生的 SUID 程序要警惕提权后门。"
+        },
+        {
+          "task_id": "s03c02t13",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "SSH 密钥登录与公钥分发",
+          "question": "配置 SSH 免密登录（主节点 → 从节点）时，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "`ssh-keygen` 生成一对密钥：私钥 `id_rsa` 留在本机妥善保管，公钥 `id_rsa.pub` 用 `ssh-copy-id` 追加到目标机器的 `~/.ssh/authorized_keys`",
+              "correct": true,
+              "explain": "正确。私钥留本机、公钥分发，登录时用私钥签名、服务器用公钥验签，验证通过即免密。"
+            },
+            {
+              "text": "把私钥发给目标机器，公钥留在本机",
+              "correct": false,
+              "explain": "错误。私钥绝不能离开本机，分发到目标机器的是公钥。"
+            },
+            {
+              "text": "免密登录不需要密钥，只要把密码设为空就行",
+              "correct": false,
+              "explain": "错误。免密登录靠密钥对签名验证，与密码是否为空无关。"
+            },
+            {
+              "text": "authorized_keys 里存放的是目标机器的私钥",
+              "correct": false,
+              "explain": "错误。authorized_keys 里存放的是各客户端分发的公钥，私钥永远只在客户端本机。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 密钥对：ssh-keygen 生成**一对**密钥——私钥 id_rsa（留本机、保密、权限 600）与公钥 id_rsa.pub（可分发）。\n2. 分发：ssh-copy-id 用户@目标机 把公钥追加到目标机的 ~/.ssh/authorized_keys。\n3. 登录原理：客户端用私钥签名，服务器用 authorized_keys 里的公钥验签，验证通过即免密登录。\n4. 排除干扰项：私钥绝不能离开本机；密码为空不叫免密；authorized_keys 存的是公钥。\n5. 选 A。\n**延伸**：大数据集群部署第一件事就是「主节点免密登录所有从节点」；生产规范：私钥权限必须 600，公钥可以公开。",
+          "enterprise_tip": "大数据集群部署第一步就是 SSH 免密（主节点 → 所有从节点）；私钥泄漏等于把集群钥匙交出去，私钥文件权限必须 chmod 600。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "chmod 755 表示什么权限？",
+          "a": "数字 755 = rwxr-xr-x：属主可读可写可执行（7），属组可读可执行（5），其他人可读可执行（5）。脚本和目录常用 755，配置文件常用 644。"
+        },
+        {
+          "q": "数字权限怎么换算？",
+          "a": "r=4、w=2、x=1，三个数字相加：7=rwx、6=rw-、5=r-x、4=r--、0=无权限。三个数字依次是属主、属组、其他人。"
+        },
+        {
+          "q": "目录的 x 权限代表什么？",
+          "a": "目录的 x 权限表示能否进入该目录（cd 进去）；w 权限表示能否在该目录内新建/删除文件；r 权限表示能否列出目录内容。没有 x 权限，即使有 r 也进不去。"
+        },
+        {
+          "q": "chmod 和 chown 有什么区别？",
+          "a": "chmod 修改权限位（谁能怎么访问），chown 修改文件归属（谁拥有，如 chown hadoop:hadoop file）。一个是门锁，一个是房本。"
+        },
+        {
+          "q": "为什么 chmod 777 很危险？",
+          "a": "777 表示所有用户（属主、属组、其他人）都可读可写可执行，任何用户都能改你的数据，等于裸奔。生产文件一般 644/755，敏感文件 600。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "rwx",
+          "desc": "读 / 写 / 执行三种权限位，对应数字 4 / 2 / 1。"
+        },
+        {
+          "term": "chmod",
+          "desc": "修改文件权限的命令，支持数字法（755）与字母法（u+rwx）。"
+        },
+        {
+          "term": "chown",
+          "desc": "修改文件属主与属组的命令。"
+        },
+        {
+          "term": "755 / 644 / 600",
+          "desc": "常用权限组合：脚本 755、普通配置 644、敏感文件 600。"
+        },
+        {
+          "term": "sudo",
+          "desc": "以管理员权限临时执行命令。"
+        },
+        {
+          "term": "useradd",
+          "desc": "新建系统用户的命令。"
+        },
+        {
+          "term": "权限最小化",
+          "desc": "每个人只拥有完成工作所需的最小权限，数据安全合规的基础原则。"
+        }
+      ],
+      "kps": [
+        "权限模型：三组（owner/group/other）× 三位（rwx）",
+        "ls -l 权限串解读（文件类型 + 9 位权限）",
+        "chmod 数字法（755 / 644 / 600）",
+        "chmod 符号法（u+x / g-w / o+r）",
+        "chown / chgrp 修改归属",
+        "useradd / usermod / passwd 用户管理",
+        "sudo 临时提权",
+        "umask 默认权限与权限最小化",
+        "权限判断流程：uid/gid → rwx 位检查",
+        "SUID 特殊权限（rws、chmod 4755、passwd 提权原理）",
+        "SSH 密钥登录与免密（ssh-keygen、公钥分发 authorized_keys）"
+      ]
+    },
+    {
+      "chapter_id": "s03c03",
+      "title": "3.3 文本处理三剑客",
+      "goal": "掌握 grep/sed/awk、sort/uniq/wc、管道 | 与重定向 > 和 >>",
+      "plan_days": 1,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "大数据的日常有一半是在**和日志搏斗**：程序报错、任务失败、数据对不上，都要从日志里找线索。文本处理三剑客是排查利器：\\n- `grep`：**按行匹配**，输出符合条件的行（`grep ERROR app.log`）；\\n- `sed`：**流式编辑**，替换/删除/插入（`sed 's/旧/新/' 文件`）；\\n- `awk`：**按列处理**，默认按空白分列（`awk '{print $1}' 文件`，`$NF` 是最后一列）。\\n\\n**管道 `|`** 把上一个命令的输出直接交给下一个命令，是组合拳的核心：`grep ERROR app.log | wc -l`。"
+        },
+        {
+          "type": "text",
+          "content": "配套工具：`sort` 排序、`uniq -c` 去重并计数、`wc -l` 统计行数。\\n**重定向**：`>` 把输出写入文件（**覆盖**原内容），`>>` 追加到文件末尾。\\n经典组合拳——统计日志里每种错误出现次数 Top10：\\n\\n```\ngrep 'ERROR' app.log | awk '{print $NF}' | sort | uniq -c | sort -rn | head -n 10\n```\\n\\n从左到右读：过滤错误行 → 提取最后一列（错误码）→ 排序 → 去重计数 → 按次数降序 → 取前 10 条。"
+        },
+        {
+          "type": "code",
+          "lang": "bash",
+          "content": "# grep 过滤错误行，-c 直接计数\ncat app.log\ngrep 'ERROR' app.log\ngrep -c 'ERROR' app.log\n\n# 管道组合：统计每种错误码出现次数 Top3\ngrep 'ERROR' app.log | awk '{print $NF}' | sort | uniq -c | sort -rn | head -n 3\n\n# sed 替换：把 IP 脱敏\nsed 's/192\\.168\\.1\\.1/***/' app.log\n\n# wc 统计行数\nwc -l app.log\n\n# 重定向：> 覆盖写，>> 追加写\ngrep 'ERROR' app.log > error.log\ngrep 'WARN' app.log >> error.log",
+          "caption": "grep / awk / sed / wc 与重定向"
+        },
+        {
+          "type": "warning",
+          "content": "**`>` 会覆盖文件**！`grep 'ERROR' app.log > app.log` 这类「输出覆盖输入」的写法会直接把原文件清空——先用 `>` 写到新文件确认无误，再 mv 覆盖。企业日志被 `>` 误清空的事故屡见不鲜。"
+        },
+        {
+          "type": "tip",
+          "content": "**排查问题标准姿势**：`tail -f` 实时盯日志 → `grep 关键字` 过滤 → `awk` 提取字段 → `sort | uniq -c` 统计 → `head` 看 TopN。熟练这套流水线，10 秒就能回答「今天哪个错误最多」。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：数仓里的日志解析组件（Logstash、Flink SQL 解析）本质上是 grep + awk 的**分布式放大版**——同一套「过滤-提取-统计」思想。而线上问题排查时，能徒手用管道从几 GB 日志里快速定位错误，是大数据工程师的基本功，也是面试加分项。"
+        }
+      ],
+      "hands_on": "1. 用 for 循环生成一个模拟日志文件（约 50 行，混入 ERROR/WARN/INFO 及不同错误码）。\\n2. 用 grep 'ERROR' 过滤错误行，再用 grep -c 统计数量。\\n3. 用 awk '{print $2}' 提取每行的时间字段，配合 sort | uniq -c 统计每个小时段出现的错误数。\\n4. 用 sed 把日志里的 IP 替换成 ***，输出到新文件。\\n5. 分别用 > 和 >> 写两次结果到同一文件，观察覆盖与追加的区别。",
+      "tasks": [
+        {
+          "task_id": "s03c03t01",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "grep 的作用",
+          "question": "在文本处理三剑客中，`grep` 的主要作用是？",
+          "options": [
+            {
+              "text": "按行匹配文本，输出符合条件的行",
+              "correct": true,
+              "explain": "正确。grep 是行级过滤器，如 grep 'ERROR' app.log 输出所有含 ERROR 的行。"
+            },
+            {
+              "text": "流式编辑文本，如替换和删除",
+              "correct": false,
+              "explain": "这是 sed 的职责，sed 是流编辑器。"
+            },
+            {
+              "text": "按列处理文本，提取字段",
+              "correct": false,
+              "explain": "这是 awk 的职责，awk 默认按空白分列处理。"
+            },
+            {
+              "text": "列出目录内容",
+              "correct": false,
+              "explain": "列出目录内容是 ls 的职责。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 三剑客分工：grep 管「行」、sed 管「改」、awk 管「列」。\\n2. grep 从输入中按模式匹配行并输出。\\n3. 选 A。\\n**延伸**：`grep -c` 计数、`grep -i` 忽略大小写、`grep -v` 反向过滤（输出不匹配的行）。",
+          "enterprise_tip": "面试问「日志里有 ERROR 和 ERROR_2024 两种关键字，怎么只精确匹配第一种」？答：用 `grep -w`（整词匹配）或 `grep 'ERROR '` 带边界，避免误匹配。"
+        },
+        {
+          "task_id": "s03c03t02",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：统计文件行数的命令",
+          "question": "统计文件行数的命令组合是 ____（命令 + 选项）。",
+          "answer": [
+            "wc -l",
+            "wc -l 文件名",
+            "wc -l file"
+          ],
+          "hint": "先想：统计文件行数属于「数数」类操作，对应哪个命令？数行数用哪个选项？",
+          "analysis": "**标准解题思路**\\n1. 统计行数 → wc（word count）。\\n2. -l 选项表示只统计行数（line）。\\n3. 填 `wc -l`。\\n**延伸**：`wc -l app.log` 输出行数+文件名；在管道末尾写 `| wc -l` 则只输出数字。"
+        },
+        {
+          "task_id": "s03c03t03",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排列用管道排查日志的流程",
+          "question": "要从 app.log 中统计「出现次数最多的 Top10 错误码」，把下面的管道步骤按正确顺序排列。",
+          "steps": [
+            "用 grep 'ERROR' 过滤出错误行",
+            "用 awk 提取最后一列（错误码）",
+            "用 sort 对错误码排序",
+            "用 uniq -c 去重并计数",
+            "用 sort -rn 按次数降序",
+            "用 head -n 10 取出 Top10"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "order_explain": "管道组合拳的黄金顺序：过滤（grep）→ 提取（awk）→ 排序（sort）→ 去重计数（uniq -c）→ 按次数降序（sort -rn）→ 截取前 N（head）。注意 uniq 只能合并相邻的重复行，所以去重前必须先 sort。",
+          "analysis": "**标准解题思路**\\n1. 先过滤：grep 'ERROR' 只保留错误行。\\n2. 再提取：awk '{print $NF}' 取每行最后一个字段（错误码）。\\n3. 必须 sort：uniq 只合并相邻重复行，不排序会漏计。\\n4. 去重计数：uniq -c 输出「次数 错误码」。\\n5. 按次数降序：sort -rn（-r 逆序，-n 按数字）。\\n6. 截取 Top10：head -n 10。\\n**完整命令**：`grep 'ERROR' app.log | awk '{print $NF}' | sort | uniq -c | sort -rn | head -n 10`\\n**易错点**：忘记 sort 直接 uniq，统计结果会出错——这是最常见的管道错误。",
+          "enterprise_tip": "这条管道是线上排障的万能钥匙：任务失败先跑一遍，立刻知道是哪种错误最多。企业版升级：日志在分布式文件系统上，用 Spark/Flink 做同样的事，思想完全一致。"
+        },
+        {
+          "task_id": "s03c03t04",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "grep -c 统计匹配行数",
+          "question": "执行 `grep -c 'ERROR' app.log`，输出的是什么？",
+          "options": [
+            {
+              "text": "app.log 中包含 'ERROR' 的行数",
+              "correct": true,
+              "explain": "正确。-c（count）只输出匹配行数，不输出匹配行内容。"
+            },
+            {
+              "text": "所有包含 'ERROR' 的行的内容",
+              "correct": false,
+              "explain": "错误。不带 -c 的 grep 才输出匹配行内容。"
+            },
+            {
+              "text": "app.log 的总行数",
+              "correct": false,
+              "explain": "错误。统计文件总行数用 wc -l。"
+            },
+            {
+              "text": "app.log 的文件大小",
+              "correct": false,
+              "explain": "错误。文件大小用 ls -l 或 du 查看。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. grep 按行匹配模式，默认输出匹配的行内容。\\n2. -c（count）选项改为只输出匹配行数。\\n3. 所以 `grep -c 'ERROR' app.log` 输出「包含 ERROR 的行数」。\\n4. 选 A。\\n**延伸**：`grep -c` 与管道 `grep 'ERROR' app.log | wc -l` 效果相同；`grep -v -c` 是统计不匹配的行数。",
+          "enterprise_tip": "「今天报了几次错」这种问题一条 grep -c 就答了。企业里监控脚本常写 `if [ $(grep -c 'FATAL' log) -gt 0 ]; then 告警; fi` 来判断异常。"
+        },
+        {
+          "task_id": "s03c03t05",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排列管道统计词频的流程",
+          "question": "用管道统计 words.txt 中**每个单词出现的次数**，并按次数**降序取出前 5 个**，把下面的步骤按正确顺序排列。",
+          "steps": [
+            "用 cat words.txt 读取文件内容",
+            "用 tr -s ' ' '\\n' 把空格替换成换行，实现分词",
+            "用 sort 对单词排序",
+            "用 uniq -c 去重并统计每个单词出现次数",
+            "用 sort -rn 按次数降序排列",
+            "用 head -n 5 取出次数最多的前 5 个"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "order_explain": "词频统计黄金流水线：读取（cat）→ 分词（tr）→ 排序（sort）→ 去重计数（uniq -c）→ 按次数降序（sort -rn）→ 取前 N（head -n 5）。核心坑点：uniq 只合并相邻的重复行，所以去重前必须先 sort，否则相同单词分散各处会漏计。",
+          "analysis": "**标准解题思路**\\n1. 第一步读取：cat words.txt 把内容交给管道。\\n2. 第二步分词：tr -s ' ' '\\n' 把空格压缩成单个并替换为换行，让每个单词独占一行。\\n3. 第三步排序：sort 让相同单词相邻——这是 uniq 正确工作的前提。\\n4. 第四步去重计数：uniq -c 输出「次数 单词」。\\n5. 第五步按次数降序：sort -rn（-r 逆序、-n 按数字而不是字典序）。\\n6. 第六步取前 5：head -n 5。\\n**完整命令**：cat words.txt | tr -s ' ' '\\n' | sort | uniq -c | sort -rn | head -n 5\\n**易错点**：跳过 sort 直接 uniq 会漏计；sort 忘加 -n 时 10 会排在 9 前面（字典序）。",
+          "enterprise_tip": "这条流水线就是「TopN 词频」的通用模板：把单词换成错误码、IP、用户 ID，就是线上日志的 TopN 分析。企业里同样的思想放大成 Spark/Flink 的分布式词频统计，原理完全一致。"
+        },
+        {
+          "task_id": "s03c03t06",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：sed 替换表达式",
+          "question": "把 `app.log` 中匹配到的 `ERROR` 替换成 `WARN` 并输出，命令是 `sed '____' app.log`（填完整的替换表达式，形如 s/旧/新/，可加 g 表示全部替换）。",
+          "answer": [
+            "s/ERROR/WARN/",
+            "s/ERROR/WARN/g",
+            "s/ERROR/WARN/ ",
+            "s/ERROR/WARN/g "
+          ],
+          "hint": "先回忆 sed 替换的整体结构：s 开头，旧、新内容之间用什么分隔？加 g 又是什么意思？",
+          "analysis": "**标准解题思路**\\n1. sed 替换语法：s/旧/新/，s 是 substitute（替换）。\\n2. 本题旧=ERROR、新=WARN → s/ERROR/WARN/。\\n3. 默认只替换每行第一个匹配；加 g（global）替换全部。\\n4. 填 s/ERROR/WARN/（或 s/ERROR/WARN/g）。\\n**延伸**：sed 默认不直接改原文件，只是输出到终端；想原地修改加 -i（sed -i 's/.../.../' 文件），企业里用 -i 前先备份。",
+          "enterprise_tip": "「把日志里的 IP 脱敏」「统一错误码命名」都是 sed 的活。面试常考 sed -i 与不带 -i 的区别：不带只输出到屏幕，-i 才写回文件。"
+        },
+        {
+          "task_id": "s03c03t07",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：awk 指定分隔符",
+          "question": "用**冒号 `:`** 作为分隔符，提取 `/etc/passwd` 每行的**第 1 列**（用户名），命令是 `awk ____ '{print $1}' /etc/passwd`（填指定分隔符的 -F 参数，如 -F ':'）。",
+          "answer": [
+            "-F ':'",
+            "-F:",
+            "-F :"
+          ],
+          "hint": "先想：awk 默认按什么切分列？改成按冒号切分，需要哪个选项？",
+          "analysis": "**标准解题思路**\\n1. awk 默认按空白分列，$1 是第一列。\\n2. /etc/passwd 用冒号分隔 → 需要 -F ':'。\\n3. 完整命令：awk -F ':' '{print $1}' /etc/passwd。\\n4. 填 -F ':'。\\n**延伸**：$NF 是最后一列、$0 是整行；awk -F ',' 按逗号处理 CSV；awk -F '|' 按竖线处理管道日志。",
+          "enterprise_tip": "日志字段常用空格/逗号/竖线分隔，awk -F 是提取字段的万能工具。企业里「从日志提取 IP、耗时、错误码」就是 awk -F 的一行活。"
+        },
+        {
+          "task_id": "s03c03t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "grep 选项：忽略大小写",
+          "question": "要在日志中**忽略大小写**地匹配 `error`（能同时匹配 ERROR、Error、error），正确的命令是？",
+          "options": [
+            {
+              "text": "grep -i error app.log",
+              "correct": true,
+              "explain": "正确。-i（ignore-case）忽略大小写匹配。"
+            },
+            {
+              "text": "grep -v error app.log",
+              "correct": false,
+              "explain": "错误。-v 是反向匹配，输出不含 error 的行。"
+            },
+            {
+              "text": "grep -E error app.log",
+              "correct": false,
+              "explain": "错误。-E 是扩展正则（如 | 或 +），不解决大小写问题。"
+            },
+            {
+              "text": "grep -c error app.log",
+              "correct": false,
+              "explain": "错误。-c 只是输出匹配行数，且默认仍区分大小写。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. grep 高频选项：-i 忽略大小写、-v 反向匹配、-c 计数、-E 扩展正则、-n 显示行号。\\n2. 本题要求忽略大小写 → -i。\\n3. 选 A。\\n**延伸**：grep -c 'ERROR' 只输出数字；grep -v 'INFO' 排除干扰行；grep -E 'ERROR|FATAL' 匹配多个关键字。",
+          "enterprise_tip": "排查日志最常用组合：grep -i -n 'error' 日志 | tail，忽略大小写还能看到行号。企业监控脚本里 grep -c 结果配合 if 判断就能做告警。"
+        },
+        {
+          "task_id": "s03c03t09",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "sort -rn 的含义",
+          "question": "管道 `... | sort | uniq -c | sort -rn | head` 中，最后的 `sort -rn` 表示？",
+          "options": [
+            {
+              "text": "按数值大小降序排列（-n 按数字、-r 逆序）",
+              "correct": true,
+              "explain": "正确。-n 按数值而不是字典序，-r 逆序，正好把次数最多的排最前。"
+            },
+            {
+              "text": "按字母顺序升序排列",
+              "correct": false,
+              "explain": "那是默认的 sort（字典序升序），-rn 是数值降序。"
+            },
+            {
+              "text": "随机打乱顺序",
+              "correct": false,
+              "explain": "随机打乱是 shuf 或 sort -R，不是 -rn。"
+            },
+            {
+              "text": "去掉重复行",
+              "correct": false,
+              "explain": "去重是 uniq 的职责，sort 只负责排序。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. sort 选项：-n 按数值排序（否则 10 会排在 2 前面）、-r 逆序、-k 指定排序列。\\n2. uniq -c 输出「次数 内容」，次数是数字 → 按次数降序必须 sort -rn。\\n3. 选 A。\\n**延伸**：sort -k 2 -n 按第 2 列数值排；整个 TopN 组合拳是 sort | uniq -c | sort -rn | head。",
+          "enterprise_tip": "「今天哪种错误最多」= grep | awk | sort | uniq -c | sort -rn | head，是线上排障的万能流水线。忘了 -n 会得到字典序（10 排在 2 前），是常见翻车点。"
+        },
+        {
+          "task_id": "s03c03t10",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：把错误信息也写入日志",
+          "question": "定时任务里要把标准**错误**也**追加**写入日志文件，命令是 `脚本 >> cron.log ____`（填把标准错误重定向到标准输出的写法）。",
+          "answer": [
+            "2>&1",
+            "2>&1 ",
+            "2 >&1"
+          ],
+          "hint": "三个标准流各有编号，先回忆它们的顺序，再想想「报错信息」走的是哪一个流。",
+          "analysis": "**标准解题思路**\\n1. 重定向：> 覆盖写入、>> 追加写入。\\n2. 标准输出是 1（可省略，>> 默认就是它），标准错误是 2。\\n3. 2>&1 把标准错误重定向到标准输出所在的位置 → 错误信息也追加进日志。\\n4. 填 2>&1。\\n**延伸**：`脚本 >> log 2>&1` 是定时任务的标配；只写 >> log 时脚本报错信息不会进日志，排查时看不到原因。",
+          "enterprise_tip": "面试问「定时任务失败了为什么日志是空的」？答：没写 2>&1，错误进了 stderr 没进日志文件。企业调度脚本的日志重定向基本都是 `>> log 2>&1`。"
+        },
+        {
+          "task_id": "s03c03t11",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "awk 的逐行处理原理",
+          "question": "`awk '{print $1, $NF}' app.log` 在**底层**是怎么处理文件的？",
+          "options": [
+            {
+              "text": "awk 从输入流**逐行读取**：每读一行就按分隔符切分成字段（$1、$2……），执行花括号里的动作，处理完一行再读下一行，直到文件结束",
+              "correct": true,
+              "explain": "正确。awk 是流式逐行处理器，一次只驻留一行，内存占用极小。"
+            },
+            {
+              "text": "awk 先把整个文件一次性读进内存，再整体切分",
+              "correct": false,
+              "explain": "错误。awk 逐行流式处理，不会把整个大文件读进内存。"
+            },
+            {
+              "text": "awk 只处理文件的前 10 行就停止",
+              "correct": false,
+              "explain": "错误。awk 默认处理全部行，10 行限制是 head 之类的工具才有的行为。"
+            },
+            {
+              "text": "awk 会直接修改原文件内容",
+              "correct": false,
+              "explain": "错误。awk 默认只输出到标准输出，不修改原文件（改写需要重定向或 -i）。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. awk 的工作循环：读一行 → 按 FS（默认空白）切字段 → 判断 pattern（无 pattern 则每行都执行）→ 执行 action → 读下一行。\\n2. 流式特性：一次只驻留一行数据，几 GB 的日志也能处理而不爆内存。\\n3. 字段语义：$0 整行、$1 第一列、$NF 最后一列，每行重新计算。\\n4. 为什么快：顺序读 + 单遍处理，不建索引不做随机访问。\\n5. 结论：选 A。\\n**延伸**：sed 也是逐行流式（读一行改一行输出），grep 同样逐行匹配——三剑客都是流式工具，这是它们能处理大日志的共同原因。",
+          "enterprise_tip": "面试「awk 处理几十 GB 日志会不会内存爆」：不会，awk 逐行流式处理，内存占用与文件大小无关。答出「读一行处理一行」就是底层原理级别的回答。"
+        },
+        {
+          "task_id": "s03c03t12",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：cut 按分隔符截取列",
+          "question": "`/etc/passwd` 每行用冒号分隔，要提取每行的**第 1 列**（用户名），命令是 `cut ____ /etc/passwd`（填 -d 与 -f 完整参数）。",
+          "answer": [
+            "-d ':' -f 1",
+            "-d: -f1",
+            "-d ':' -f1",
+            "-d: -f 1"
+          ],
+          "hint": "先想：cut 按分隔符切列需要哪两个参数？分别指定「分隔符」和「第几列」。",
+          "analysis": "**标准解题思路**\n1. cut 是轻量列截取工具：-d 指定分隔符（delimiter），-f 指定取第几列（field）。\n2. /etc/passwd 用冒号分隔 → -d ':'；取第 1 列 → -f 1。\n3. 完整命令：cut -d ':' -f 1 /etc/passwd（等价于 awk -F ':' '{print $1}' /etc/passwd）。\n4. 填 -d ':' -f 1。\n**延伸**：cut 适合固定分隔符的简单截取；需要条件判断、重排字段时用 awk；注意 cut -d 只认单个字符分隔符。",
+          "enterprise_tip": "日志字段按 | 或 , 分隔时，cut -d'|' -f2 一行搞定；三剑客里 awk 更强大，但简单截取用 cut 更快更不容易错。"
+        },
+        {
+          "task_id": "s03c03t13",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "diff 文件对比",
+          "question": "执行 `diff a.txt b.txt`，输出中包含 `< hello` 和 `> world` 两行。下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "`<` 开头的行是 a.txt 独有的内容，`>` 开头的行是 b.txt 独有的内容",
+              "correct": true,
+              "explain": "正确。< 表示第一个文件（a.txt）的行，> 表示第二个文件（b.txt）的行。"
+            },
+            {
+              "text": "`<` 开头的行是 b.txt 独有的内容",
+              "correct": false,
+              "explain": "错误。< 固定表示第一个参数文件（a.txt）的内容，> 才是 b.txt 的。"
+            },
+            {
+              "text": "diff 会直接修改 a.txt，使它和 b.txt 一致",
+              "correct": false,
+              "explain": "错误。diff 只输出差异、不修改任何文件；要应用差异得用 patch 或手动修改。"
+            },
+            {
+              "text": "diff 用于比较两个进程的 CPU 占用",
+              "correct": false,
+              "explain": "错误。比较 CPU/内存占用是 top、ps 的职责。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. diff 逐行比较两个文件，输出差异块。\n2. 差异行前缀含义：`<` 表示**第一个文件**（a.txt）的内容，`>` 表示**第二个文件**（b.txt）的内容。\n3. 所以 `< hello` = a.txt 独有 hello；`> world` = b.txt 独有 world。\n4. 选 A。\n**延伸**：diff 只输出差异、不改文件；-u（unified）输出带上下文的统一格式更易读；diff -q 只报告「是否相同」；cmp 比较二进制文件。生产里「备份 → 修改 → diff 验证」是改配置的标准闭环。",
+          "enterprise_tip": "对比改前/改后配置、两份报表结果、两个版本代码都用 diff；改生产配置前先备份，改完 diff 确认改动点只有预期的那几处。"
+        },
+        {
+          "task_id": "s03c03t14",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：iconv 编码转换",
+          "question": "把 GBK 编码的 `old.log` 转换为 UTF-8 并写入 `new.log`，命令是 `iconv ____ old.log > new.log`（填 -f 与 -t 参数）。",
+          "answer": [
+            "-f gbk -t utf-8",
+            "-f GBK -t UTF-8",
+            "-f gbk -t utf8",
+            "-f GBK -t UTF8"
+          ],
+          "hint": "从 GBK 转 UTF-8，谁是来源谁是目标？-f 和 -t 分别对应哪个？",
+          "analysis": "**标准解题思路**\n1. iconv 是编码转换命令：-f（from）原编码、-t（to）目标编码。\n2. GBK → UTF-8：-f gbk -t utf-8。\n3. 输出重定向写新文件：iconv -f gbk -t utf-8 old.log > new.log。\n4. 填 -f gbk -t utf-8。\n**延伸**：编码不一致的常见表现是乱码；用 file 命令可查看文件编码；iconv -l 列出支持的编码。",
+          "enterprise_tip": "老系统导出的 GBK 数据进数仓前必须先统一成 UTF-8，iconv 是清洗数据的第一刀；看到乱码先想「内容是什么编码、终端按什么编码显示」。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "三剑客 grep / sed / awk 各自负责什么？",
+          "a": "grep 按行匹配过滤，输出符合条件的行；sed 流式编辑，做替换、删除、插入；awk 按列处理，默认按空白分列提取字段（如 $1、$NF）。分工是「行、改、列」。"
+        },
+        {
+          "q": "uniq 为什么必须配合 sort 使用？",
+          "a": "uniq 只合并**相邻**的重复行，不先 sort 的话相同行分散在文件各处，无法合并，统计结果会漏计。所以管道里 uniq 前面一定要有 sort。"
+        },
+        {
+          "q": "> 和 >> 有什么区别？",
+          "a": "> 把输出覆盖写入文件（会清空原内容），>> 把输出追加到文件末尾。把命令输出重定向到它自己的输入文件（如 grep x f > f）会清空原文件，是经典事故。"
+        },
+        {
+          "q": "统计日志里每种错误出现次数 Top10 怎么写？",
+          "a": "grep 'ERROR' 日志文件 | awk '{print $NF}' | sort | uniq -c | sort -rn | head -n 10。先过滤错误行，再提取错误码字段，排序去重计数后按次数降序取前十。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "grep",
+          "desc": "按行匹配文本并输出符合条件的行，-c 计数、-v 反向、-i 忽略大小写。"
+        },
+        {
+          "term": "sed",
+          "desc": "流式编辑器，用于替换、删除、插入文本。"
+        },
+        {
+          "term": "awk",
+          "desc": "按列处理文本，默认按空白分列，$NF 是最后一列。"
+        },
+        {
+          "term": "sort / uniq -c",
+          "desc": "排序 / 去重并计数，先 sort 后 uniq 是铁律。"
+        },
+        {
+          "term": "wc -l",
+          "desc": "统计文件行数。"
+        },
+        {
+          "term": "管道 |",
+          "desc": "把前一个命令的标准输出作为后一个命令的输入。"
+        },
+        {
+          "term": "重定向 > / >>",
+          "desc": "输出写入文件：> 覆盖、>> 追加。"
+        },
+        {
+          "term": "tr",
+          "desc": "字符替换/删除工具，词频统计中用于把空格转成换行实现分词。"
+        }
+      ],
+      "kps": [
+        "三剑客分工：grep 管行、sed 管改、awk 管列",
+        "grep 匹配与选项（-c 计数 / -i 忽略大小写 / -v 反向 / -E 扩展正则）",
+        "sed 流式替换 s///",
+        "awk 按列处理与 -F 分隔符",
+        "管道 | 组合",
+        "sort / uniq -c（先 sort 后 uniq）",
+        "wc -l 行数统计",
+        "重定向 > / >> 与 2>&1",
+        "awk 逐行处理原理（读一行处理一行）",
+        "cut 按分隔符截取列（-d / -f）",
+        "diff 文件对比（< 与 > 的含义）",
+        "iconv 字符编码转换（-f / -t）"
+      ]
+    },
+    {
+      "chapter_id": "s03c04",
+      "title": "3.4 Shell 脚本与 crontab",
+      "goal": "掌握 Shell 变量、if/for 流程控制、脚本执行方式与 crontab 表达式（分 时 日 月 周）",
+      "plan_days": 1,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "每天手动敲同样的命令太蠢了，**Shell 脚本**就是把命令串成可复用的程序。要点：\\n- 第一行 `#!/bin/bash`（shebang）声明解释器；\\n- 变量：`name=value`（**等号两边不能有空格**），引用用 `$name` 或 `${name}`；\\n- 流程控制：`if [ 条件 ]; then ... fi`、`for i in 列表; do ... done`；\\n- 执行方式：`bash script.sh`（无需执行权限）或 `./script.sh`（需要 x 权限）。"
+        },
+        {
+          "type": "text",
+          "content": "**crontab** 是 Linux 的定时任务：`crontab -e` 编辑、`crontab -l` 查看。每行一个任务，前 5 段是时间表达式：\\n\\n```\n分  时  日  月  周   命令\n0   2   *   *   *   /home/user/archive.sh\n```\\n\\n`*` 表示任意值。经典写法：每天凌晨 2 点 `0 2 * * *`；每周一 9 点 `0 9 * * 1`（周日是 0）；每 5 分钟 `*/5 * * * *`。\\n大数据离线任务（日报、周报、数据同步）绝大多数就是靠定时调度触发的。"
+        },
+        {
+          "type": "code",
+          "lang": "bash",
+          "content": "#!/bin/bash\n# 每天凌晨 2 点归档昨天的日志\nexport PATH=/usr/local/bin:/usr/bin:/bin\nLOG_DIR=/data/logs\nYESTERDAY=$(date -d 'yesterday' +%Y-%m-%d)\n\nif [ -f \"$LOG_DIR/app.log\" ]; then\n  mv \"$LOG_DIR/app.log\" \"$LOG_DIR/app.$YESTERDAY.log\"\n  echo \"归档完成: $YESTERDAY\"\nelse\n  echo \"日志文件不存在\"\nfi\n\n# 循环处理多个文件\nfor f in /data/logs/*.log; do\n  echo \"处理 $f\"\ndone\n\n# crontab -e 中加入以下行，每天凌晨 2 点执行\n# 0 2 * * * /home/user/archive.sh >> /home/user/cron.log 2>&1",
+          "caption": "Shell 脚本：变量、if、for、crontab 五段式"
+        },
+        {
+          "type": "warning",
+          "content": "**crontab 的环境是「精简环境」**：PATH、JAVA_HOME 等环境变量不会自动继承。脚本里用到的命令最好写绝对路径或在脚本开头 export PATH——否则手动跑正常、定时跑却报「command not found」。"
+        },
+        {
+          "type": "tip",
+          "content": "**脚本三要**：① 新脚本先手动跑一遍再挂定时；② 输出重定向到日志（`>> cron.log 2>&1`，`2>&1` 把错误也写进去）；③ 定时任务里写绝对路径，防止工作目录不对。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：离线数仓的调度平台（Azkaban、Airflow、DS）本质上是**更强大的 crontab**——定时触发、任务依赖、失败重试、告警。先把 crontab 理解透，再看调度平台就是降维打击。面试常问：你的报表数据几点跑完？跑挂了怎么办？——答案都在这章的「日志 + 重试 + 告警」里。"
+        }
+      ],
+      "hands_on": "1. 写一个 backup.sh：把 /data/logs 下的 .log 文件打包成 backup_日期.tar.gz 放到 /data/backup。\\n2. 手动执行 ./backup.sh 验证成功，再挂 crontab 每天凌晨 3 点执行（crontab -e 加入 `0 3 * * * /绝对路径/backup.sh >> /绝对路径/backup.log 2>&1`）。\\n3. 用 crontab -l 确认任务已写入。\\n4. 故意把脚本里的命令写错，让定时任务跑失败，然后去 backup.log 里查看报错，体验「日志排查」闭环。\\n5. 写一个 for 循环脚本，批量把 /data/logs 下 3 个文件都加 .bak 后缀。",
+      "tasks": [
+        {
+          "task_id": "s03c04t01",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：每天凌晨 2 点的 cron 表达式",
+          "question": "crontab 中「**每天凌晨 2 点**执行」的时间表达式是 ____（分 时 日 月 周，用空格分隔）。",
+          "answer": [
+            "0 2 * * *",
+            "0 2 * * * ",
+            "0 2 * * * 命令"
+          ],
+          "hint": "cron 五段各代表什么？「每天」意味着日/月/周段怎么表达？小时段填多少？",
+          "analysis": "**标准解题思路**\\n1. crontab 五段式：分 时 日 月 周。\\n2. 凌晨 2 点：分=0，时=2，日/月/周=*。\\n3. 得到 `0 2 * * *`。\\n4. 填 `0 2 * * *`。\\n**延伸**：每周一 9 点 = `0 9 * * 1`；每 5 分钟 = `*/5 * * * *`。",
+          "enterprise_tip": "面试常考：`0 2 * * *` 和 `0 2 * * 1-5` 的区别？答：前者每天跑，后者只在周一到周五跑——日报天天有，周报才用周字段。"
+        },
+        {
+          "task_id": "s03c04t02",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "cron 表达式 * * * * * 的含义",
+          "question": "crontab 表达式 `* * * * *` 表示任务多久执行一次？",
+          "options": [
+            {
+              "text": "每分钟执行一次",
+              "correct": true,
+              "explain": "正确。五个 * 表示任意分、任意时、任意日、任意月、任意周——即每分钟。"
+            },
+            {
+              "text": "每小时执行一次",
+              "correct": false,
+              "explain": "每小时一次应为 `0 * * * *`（分固定为 0）。"
+            },
+            {
+              "text": "每天执行一次",
+              "correct": false,
+              "explain": "每天一次应为 `0 0 * * *`（0 点 0 分）。"
+            },
+            {
+              "text": "每周执行一次",
+              "correct": false,
+              "explain": "每周一次需要在周字段指定，如 `0 0 * * 1`。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 五段全是 *，表示每个时间单位都命中。\\n2. 分字段 * → 每分钟都触发一次。\\n3. 选 A。\\n**延伸**：`*/5 * * * *` 才是每 5 分钟；生产环境慎用每分钟任务，避免频繁调度压垮系统。",
+          "enterprise_tip": "面试升级：`0 */2 * * *` 表示什么？答：分固定 0，时字段每 2 小时——即每 2 小时整点执行一次。"
+        },
+        {
+          "task_id": "s03c04t03",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排列编写并部署定时脚本的流程",
+          "question": "你要写一个每天凌晨跑的归档脚本并挂上 crontab，把下面的步骤按正确顺序排列。",
+          "steps": [
+            "用 vim 编写脚本 deploy.sh 并保存",
+            "用 chmod +x deploy.sh 赋予执行权限",
+            "手动执行 ./deploy.sh 验证脚本正确",
+            "用 crontab -e 打开定时任务编辑",
+            "写入 0 2 * * * /绝对路径/deploy.sh >> cron.log 2>&1",
+            "用 crontab -l 确认任务已生效"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "order_explain": "标准部署流程：编写脚本 → 给执行权限 → **手动验证**（关键一步，杜绝带着 bug 上定时）→ 编辑 crontab → 写入表达式与绝对路径 → 用 crontab -l 确认。先本地验证、再挂定时、最后确认，是运维的基本闭环。",
+          "analysis": "**标准解题思路**\\n1. 第一步编写脚本：vim deploy.sh。\\n2. 第二步给权限：chmod +x deploy.sh（./ 方式执行需要 x）。\\n3. 第三步手动验证：./deploy.sh 跑一遍，确认逻辑和路径都没问题。\\n4. 第四步编辑定时：crontab -e。\\n5. 第五步写入任务：`0 2 * * * /绝对路径/deploy.sh >> cron.log 2>&1`（绝对路径 + 日志重定向）。\\n6. 第六步确认：crontab -l 查看任务是否写入。\\n**易错点**：跳过手动验证直接挂定时，错误会延迟到凌晨才发现；漏写 2>&1 导致错误信息丢失。",
+          "enterprise_tip": "企业调度平台的发布流程就是这六步的工程化：测试环境验证 → 上线 → 监控确认。记住「先验证再上线」，是数据工程师避免生产事故的护身符。"
+        },
+        {
+          "task_id": "s03c04t04",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：每 5 分钟执行的 cron 表达式",
+          "question": "crontab 中「**每 5 分钟执行一次**」的时间表达式是 ____（分 时 日 月 周 五段，用空格分隔）。",
+          "answer": [
+            "*/5 * * * *",
+            "*/5 * * * * 命令",
+            "*/5 * * * * 任意命令"
+          ],
+          "hint": "五段里哪一段表示「分钟」？「每隔 5 分钟」怎么表达？其余段表示「每天」怎么填？",
+          "analysis": "**标准解题思路**\\n1. crontab 五段式：分 时 日 月 周。\\n2. 每 5 分钟：分钟字段写 */5（步长 5，即 0、5、10...55 分都触发）。\\n3. 其余四段表示「任意」→ 全部写 *。\\n4. 得到 `*/5 * * * *`。\\n5. 填 `*/5 * * * *`。\\n**延伸**：每 2 小时整点 = `0 */2 * * *`；每分钟 = `* * * * *`；`*/5` 的步长写法同样适用于时/日字段。",
+          "enterprise_tip": "高频调度会压垮系统：每 5 分钟全量同步比每小时跑 12 次贵得多。企业里分钟级任务一般只给监控、心跳这类轻量脚本，重任务（报表、同步）至少小时级起步。"
+        },
+        {
+          "task_id": "s03c04t05",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "crontab -e 的作用",
+          "question": "执行 `crontab -e` 后会发生什么？",
+          "options": [
+            {
+              "text": "打开当前用户的定时任务列表进行编辑，保存后即生效",
+              "correct": true,
+              "explain": "正确。-e（edit）用默认编辑器打开当前用户的 crontab，保存后任务即刻生效。"
+            },
+            {
+              "text": "查看系统所有用户的定时任务",
+              "correct": false,
+              "explain": "错误。查看当前用户任务用 crontab -l；系统级任务在 /etc/crontab。"
+            },
+            {
+              "text": "立即执行一次所有定时任务",
+              "correct": false,
+              "explain": "错误。crontab 只负责配置调度，不会立即执行任务。"
+            },
+            {
+              "text": "删除当前用户的所有定时任务",
+              "correct": false,
+              "explain": "错误。删除全部定时任务用 crontab -r。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. crontab 是定时任务管理器，常用子命令：-e 编辑、-l 查看、-r 删除。\\n2. crontab -e 打开当前用户的定时任务配置文件，编辑保存后立即生效。\\n3. 选 A。\\n**延伸**：编辑时每行一个任务，格式为「分 时 日 月 周 命令」；系统级任务表在 /etc/crontab（多一个用户字段）。",
+          "enterprise_tip": "企业调度平台（Azkaban、Airflow）本质是 crontab 的工程化升级版。面试问「怎么配定时任务」答 crontab -e + 五段式 + crontab -l 确认，就是完整闭环。"
+        },
+        {
+          "task_id": "s03c04t06",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：引用 Shell 变量",
+          "question": "Shell 脚本中执行 `count=10` 完成变量**赋值**后，**引用**该变量的写法是 ____（形如 $ 开头）。",
+          "answer": [
+            "$count",
+            "${count}",
+            "$count ",
+            "${count} "
+          ],
+          "hint": "先回忆：Shell 里变量「赋值」和「引用」的写法有什么不同？引用时前面加什么？",
+          "analysis": "**标准解题思路**\\n1. 赋值：count=10，注意等号两边不能有空格。\\n2. 引用：$count 或 ${count}。\\n3. 填 $count（或 ${count}）。\\n**延伸**：${count} 适合变量名后紧跟字符的场景（如 ${count}file）；赋值语句 `count = 10` 带空格会报错，这是新手高频错。",
+          "enterprise_tip": "脚本里自定义变量常用大写（LOG_DIR、YESTERDAY）与系统变量区分。企业规范：引用变量务必加引号（\"$LOG_DIR\"），防止路径含空格时出错。"
+        },
+        {
+          "task_id": "s03c04t07",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：位置参数 $1",
+          "question": "执行 `bash deploy.sh app.log prod` 后，脚本内 `$1` 的值是 ____（填文件名）。",
+          "answer": [
+            "app.log",
+            "'app.log'",
+            "app.log "
+          ],
+          "hint": "先回忆位置参数规则：脚本名后第 1 个参数对应 $几？对照命令看 app.log 排第几。",
+          "analysis": "**标准解题思路**\\n1. 位置参数：执行脚本时脚本名后面的参数依次是 $1、$2、$3……。\\n2. bash deploy.sh app.log prod → $1=app.log、$2=prod、$0=deploy.sh。\\n3. 填 app.log。\\n**延伸**：$# 是参数个数，$@ 是所有参数列表（常配合 for 循环遍历）。脚本通用化靠位置参数：把目录、日期都作为参数传入。",
+          "enterprise_tip": "「脚本参数化」是运维的基本功：同一个备份脚本传不同目录/日期运行，就是靠 $1、$2。企业调度平台给任务传参，本质就是位置参数。"
+        },
+        {
+          "task_id": "s03c04t08",
+          "type": "multi",
+          "difficulty": 2,
+          "title": "if 与 for 的语法结构",
+          "question": "关于 Shell 的 `if` 与 `for` 语法，下列说法**正确**的有哪些？（多选）",
+          "options": [
+            {
+              "text": "`if [ -f file ]; then ... fi` 是 if 的正确结构，条件判断 `[ ]` 内侧要有空格",
+              "correct": true,
+              "explain": "正确。if 以 fi 结束，[ 条件 ] 两边必须有空格。"
+            },
+            {
+              "text": "`for i in 1 2 3; do echo $i; done` 是 for 循环遍历列表的正确结构",
+              "correct": true,
+              "explain": "正确。for 以 done 结束，in 后面跟遍历列表。"
+            },
+            {
+              "text": "if 语句以 `endif` 结束",
+              "correct": false,
+              "explain": "错误。Shell 的 if 以 fi 结束（fi 是 if 倒过来）。"
+            },
+            {
+              "text": "for 循环以 `endfor` 结束",
+              "correct": false,
+              "explain": "错误。Shell 的 for 以 done 结束。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. if 结构：if [ 条件 ]; then 命令; else 命令; fi——注意 [ 条件 ] 空格不能省，结尾是 fi。\\n2. for 结构：for 变量 in 列表; do 命令; done——结尾是 done。\\n3. A、B 正确，C、D 错误（endif / endfor 不是 Shell 关键字）。\\n4. 选 A、B。\\n**延伸**：循环遍历文件常用 for f in /data/logs/*.log; do ...; done；条件测试常用 -f 文件存在、-d 目录存在、-z 字符串为空。",
+          "enterprise_tip": "面试手写题常考「写一个 if 判断文件是否存在并给出提示」：if [ -f file ]; then echo 存在; else echo 不存在; fi。fi/done 结尾是 Shell 与其他语言最大的语法差异点。"
+        },
+        {
+          "task_id": "s03c04t09",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：每周一执行的 cron 表达式",
+          "question": "crontab 中「**每周一**早上 9 点执行」的表达式是 `0 9 * * 1`，其中最后一段 `1` 表示 ____（中文；提示：周日是 0，周六是 6）。",
+          "answer": [
+            "周一",
+            "星期一",
+            "周一（星期一是 1）",
+            "周一(星期一是 1)"
+          ],
+          "hint": "先回忆 cron 周字段的编号规则：从 0 开始，0 对应星期几？顺着数到 1 是星期几？",
+          "analysis": "**标准解题思路**\\n1. cron 五段式：分 时 日 月 周。\\n2. 周字段取值范围 0~6（7 也代表周日）：0=周日、1=周一。\\n3. `0 9 * * 1` 中最后一段 1 = 周一。\\n4. 填 周一。\\n**延伸**：每天凌晨 3 点 = `0 3 * * *`；每 5 分钟 = `*/5 * * * *`；工作日（周一到周五）= `0 2 * * 1-5`。",
+          "enterprise_tip": "周报任务用周字段：`0 9 * * 1` 周一 9 点；日活报表用 `0 3 * * *`。面试问「0 2 * * 1-5 和 0 2 * * * 的区别」：前者只在工作日跑，后者天天跑。"
+        },
+        {
+          "task_id": "s03c04t10",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "crontab 定时任务的执行原理",
+          "question": "Linux 中 crontab 定时任务为什么能「到点就执行」？从**底层原理**看，正确的是？",
+          "options": [
+            {
+              "text": "系统常驻一个 crond 守护进程，**每分钟**醒来一次读取 crontab 配置，检查当前时刻是否匹配某条任务的时间表达式，匹配就 fork 出子进程执行命令",
+              "correct": true,
+              "explain": "正确。crond 每分钟唤醒检查一次五段式表达式，命中就派生子进程执行。"
+            },
+            {
+              "text": "内核在系统启动时把任务写死，只能重启系统才能修改",
+              "correct": false,
+              "explain": "错误。任务存在用户 crontab 配置里，crond 每次检查都重新读取，编辑后立即生效。"
+            },
+            {
+              "text": "每个用户都要手动运行一个循环脚本去检查时间",
+              "correct": false,
+              "explain": "错误。检查由系统级 crond 守护进程统一完成，用户只管配置。"
+            },
+            {
+              "text": "crontab 任务由浏览器网页定时触发",
+              "correct": false,
+              "explain": "错误。crontab 与网页无关，是操作系统层面的守护进程调度。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. crond 是常驻守护进程（系统启动即运行），每隔 60 秒醒来一次。\\n2. 每次醒来读取 crontab 配置（/var/spool/cron 下各用户的文件），解析每行的时间表达式（分 时 日 月 周）。\\n3. 当前时刻与某条任务匹配 → fork 一个子进程去执行命令；不匹配就继续睡。\\n4. 理解这个机制后，几个现象就顺理成章：任务执行在**精简环境**（PATH 不全，要写绝对路径）；输出要重定向（>> log 2>&1）才能留痕；最小粒度是分钟（`* * * * *` 每分钟）。\\n5. 结论：选 A。\\n**延伸**：企业调度平台（Azkaban / Airflow）就是同一个模型的工程化：调度器周期性检查依赖与时间，命中就触发任务、失败重试、告警。",
+          "enterprise_tip": "面试「为什么 crontab 里找不到 java 命令」：crond 环境是精简环境，不继承用户登录时的 PATH。答出「crond 每分钟检查 + 精简环境」两点，就比背命令的人高一个段位。"
+        },
+        {
+          "task_id": "s03c04t11",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "history 历史命令与快捷重跑",
+          "question": "想查看自己敲过的命令历史，并**快速重跑刚才那一条命令**，正确的做法是？",
+          "options": [
+            {
+              "text": "`history` 查看历史列表；`!!` 重跑上一条命令，`!N` 重跑编号 N 的命令",
+              "correct": true,
+              "explain": "正确。history 列出带编号的历史，!! 重跑上一条，!N 重跑指定编号。"
+            },
+            {
+              "text": "history 只能查看，无法重跑",
+              "correct": false,
+              "explain": "错误。!! 和 !N 都是快捷重跑方式。"
+            },
+            {
+              "text": "按 Ctrl+R 是清空历史记录",
+              "correct": false,
+              "explain": "错误。Ctrl+R 是反向搜索历史命令（输入关键字边输边匹配）。"
+            },
+            {
+              "text": "history 显示的是所有用户的历史命令",
+              "correct": false,
+              "explain": "错误。history 默认只显示当前用户在当前 shell 会话中的历史。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 查看历史：直接敲 history，列出带编号的历史命令。\n2. 重跑上一条：!!（两个感叹号）——省去重敲长命令。\n3. 重跑指定编号：!N（N 是 history 里的编号）。\n4. 反向搜索：Ctrl+R 输入关键字，边输边匹配历史。\n5. 选 A。\n**延伸**：历史默认存 ~/.bash_history（退出 shell 时写入）；HISTCONTROL=ignorespace 可让「以空格开头的命令」不进历史（保护敏感命令）。",
+          "enterprise_tip": "Ctrl+R 反向搜索历史是运维高频操作；注意含密码的命令（如 curl -u user:pass）会留在历史里，生产安全规范要求敏感操作不留痕。"
+        },
+        {
+          "task_id": "s03c04t12",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：设置命令别名",
+          "question": "把 `ls -l` 简写成 `ll`，命令是 `alias ____`（填完整的别名定义）。",
+          "answer": [
+            "ll='ls -l'",
+            "ll=\"ls -l\"",
+            "alias ll='ls -l'"
+          ],
+          "hint": "先回忆 alias 的语法：先写什么再写什么？等号两边能留空格吗？命令要不要引号？",
+          "analysis": "**标准解题思路**\n1. alias 语法：alias 别名='命令'，等号两边不能有空格。\n2. 把 ls -l 简写为 ll：alias ll='ls -l'。\n3. 填 ll='ls -l'。\n4. 使用：敲 ll 即执行 ls -l；取消别名用 unalias ll。\n**延伸**：alias 只在当前 shell 会话有效，重新登录就没了；永久生效写进 ~/.bashrc 再 source ~/.bashrc；脚本里慎用 alias（非交互 shell 默认不展开别名），脚本应写完整命令。",
+          "enterprise_tip": "把高频命令配成别名（ll、grep 加颜色）能显著提效；但脚本里必须写完整命令——crontab/脚本的非交互环境不加载 .bashrc 别名。"
+        },
+        {
+          "task_id": "s03c04t13",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "export 环境变量",
+          "question": "在终端执行 `export JAVA_HOME=/usr/java/jdk8` 后，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "JAVA_HOME 对当前 shell **及它启动的所有子进程**（脚本、程序）都可见",
+              "correct": true,
+              "explain": "正确。export 标记的变量可被子进程继承，这正是它与普通变量赋值的区别。"
+            },
+            {
+              "text": "只对当前 shell 可见，子进程看不到",
+              "correct": false,
+              "explain": "错误。这正是 export 的意义：让子进程也能看到；不加 export 的普通变量子进程才看不到。"
+            },
+            {
+              "text": "export 会永久写入系统配置文件",
+              "correct": false,
+              "explain": "错误。export 只对当前会话生效；要永久生效需写入 /etc/profile 或 ~/.bashrc。"
+            },
+            {
+              "text": "不加 export 的普通变量子进程也能看到",
+              "correct": false,
+              "explain": "错误。普通变量（name=value）默认只对当前 shell 可见，子进程看不到。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 变量分类：普通变量（name=value）只对当前 shell 可见；export 标记的变量**可被子进程继承**。\n2. export JAVA_HOME=... 后，当前 shell 启动的任何子进程（脚本、程序）都能读到 JAVA_HOME。\n3. 排除干扰项：export 不是永久写入（只对当前会话）；不加 export 子进程看不到。\n4. 选 A。\n**延伸**：crontab 环境是精简环境，脚本里找不到 java，就是 JAVA_HOME/PATH 没 export；要永久生效把 export 写进 /etc/profile（所有用户）或 ~/.bashrc（当前用户）。",
+          "enterprise_tip": "数仓脚本第一条规范：开头 export PATH、JAVA_HOME——否则手动跑正常、crontab 跑就报 command not found；这就是「export 对子进程可见」的实战意义。"
+        },
+        {
+          "task_id": "s03c04t14",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "进程优先级 nice 值",
+          "question": "关于 Linux 进程优先级 `nice` 值，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "nice 值范围是 **-20 ~ 19**，**值越小优先级越高**；普通用户只能把 nice 调大（降低优先级），调小（提高优先级）需要 root",
+              "correct": true,
+              "explain": "正确。-20 最高优先级、19 最低；普通用户只能降低自己任务的优先级，提高优先级要 root。"
+            },
+            {
+              "text": "nice 值越大优先级越高",
+              "correct": false,
+              "explain": "错误。恰恰相反，nice 值越小优先级越高，-20 最高。"
+            },
+            {
+              "text": "nice 值范围是 0 ~ 100",
+              "correct": false,
+              "explain": "错误。nice 值范围是 -20 ~ 19 共 40 级。"
+            },
+            {
+              "text": "nice 是查看系统内存的命令",
+              "correct": false,
+              "explain": "错误。查看内存是 free；nice 是设置/查看进程优先级。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. nice 值范围：-20 ~ 19，共 40 级；**越小优先级越高**，-20 最高、19 最低。\n2. 默认进程 nice 值为 0。\n3. 权限限制：普通用户只能把 nice 调大（降低自己任务的优先级，如 nice -n 10 cmd）；调小（提高优先级）需要 root。\n4. 动态调整运行中的进程用 renice。\n5. 选 A。\n**延伸**：大数据集群上把非核心批量任务 nice 调高，避免与核心实时任务抢 CPU；面试追问「nice 和 renice 区别」：nice 启动时设置、renice 调整运行中的进程。",
+          "enterprise_tip": "大数据集群上把占资源的后台批量任务 nice 调高（如 renice 10 PID），避免影响核心在线任务；调度平台批量任务常配合 nice/renice 控制资源优先级。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "crontab 五段式是什么？",
+          "a": "分 时 日 月 周，每段用空格分隔，* 表示任意值。例如 0 2 * * * 表示每天凌晨 2 点 0 分执行；*/5 * * * * 表示每 5 分钟执行一次。"
+        },
+        {
+          "q": "定时任务里为什么推荐写绝对路径？",
+          "a": "crontab 执行环境是精简环境，PATH 不完整、工作目录也不确定，写相对路径会「手动跑正常、定时跑报错」。脚本内命令最好也写绝对路径或开头 export PATH。"
+        },
+        {
+          "q": "定时任务失败了怎么排查？",
+          "a": "① 脚本输出重定向到日志文件（>> cron.log 2>&1），2>&1 把错误信息也写进去；② 手动执行一遍对比；③ 检查 crontab -l 确认任务确实在；④ 看日志定位报错。手动验证通过再挂定时是避免事故的关键。"
+        },
+        {
+          "q": "编写并部署定时脚本的正确流程？",
+          "a": "编写脚本 → chmod +x 给执行权限 → 手动执行验证 → crontab -e 写入（绝对路径 + 日志重定向）→ crontab -l 确认。先本地验证、再挂定时、最后确认，是运维闭环。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Shell 脚本",
+          "desc": "把命令序列写成可复用程序的文件，首行 #!/bin/bash 声明解释器。"
+        },
+        {
+          "term": "shebang",
+          "desc": "脚本第一行的 #!/bin/bash，指定用什么解释器执行。"
+        },
+        {
+          "term": "crontab",
+          "desc": "Linux 定时任务工具，-e 编辑、-l 查看、-r 删除。"
+        },
+        {
+          "term": "cron 表达式",
+          "desc": "分 时 日 月 周 五段式时间表达式，* 表示任意。"
+        },
+        {
+          "term": "*/5",
+          "desc": "步长写法，表示每 5 个时间单位执行一次（如每 5 分钟）。"
+        },
+        {
+          "term": "2>&1",
+          "desc": "把标准错误重定向到标准输出，让错误信息一并写入日志文件。"
+        },
+        {
+          "term": "调度平台",
+          "desc": "Azkaban / Airflow 等企业级定时调度系统，crontab 的工程化升级。"
+        }
+      ],
+      "kps": [
+        "Shell 脚本、shebang 与执行方式（bash 脚本 / ./脚本）",
+        "变量赋值与引用（等号两边无空格、$name）",
+        "位置参数 $1 / $2",
+        "if 条件判断（[ 条件 ]、then / else / fi）",
+        "for 循环（in 列表、do / done）",
+        "crontab 操作（-e 编辑 / -l 查看 / -r 删除）",
+        "cron 五段表达式（每 5 分钟、每天凌晨、每周一、*/步长）",
+        "crontab 执行原理：crond 守护进程每分钟检查",
+        "history 历史命令与快捷重跑（!!、!N、Ctrl+R）",
+        "alias 命令别名（临时与永久生效）",
+        "export 环境变量与子进程可见性",
+        "进程优先级 nice/renice（-20~19、值越小优先级越高）"
+      ]
+    },
+    {
+      "chapter_id": "s03c05",
+      "title": "3.5 Linux 底层原理：进程与文件系统",
+      "goal": "理解进程与内存地址空间、文件描述符与重定向的底层、inode 与硬/软链接、管道的内核缓冲区、信号与僵尸进程",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "**进程与内存。** 程序是磁盘上的静态文件（一堆代码），而**进程**是加载到内存中正在运行的程序实例。两者区别：程序不占内存、进程才占；同一个程序可以跑出多个进程。\\n每个进程在内核里都有一个 **PCB（进程控制块，Linux 中叫 task_struct）**，记录 PID、进程状态、寄存器、打开的文件等。进程的内存地址空间按段划分：\\n- **代码段（text）**：存放程序指令，只读；\\n- **数据段**：全局变量与静态变量；\\n- **堆（heap）**：动态分配（malloc/new），向高地址增长；\\n- **栈（stack）**：函数调用与局部变量，向低地址增长。\\n创建进程用 **fork()**：内核复制父进程的 PCB 生成子进程，父子 PID 不同，子进程从 fork 返回处继续执行；随后通常调用 **exec** 系列函数把新程序加载进内存替换镜像。"
+        },
+        {
+          "type": "text",
+          "content": "**文件描述符 fd 与重定向的底层。** Linux 一切皆文件，进程每打开一个文件，内核就返回一个**文件描述符（file descriptor）**——一个非负整数，进程后续读写都通过它。每个进程默认打开 3 个：\\n- **0 标准输入（stdin）**：默认来自键盘；\\n- **1 标准输出（stdout）**：默认输出到屏幕；\\n- **2 标准错误（stderr）**：默认也输出到屏幕（专门给报错信息）。\\n\\n**重定向的底层就是改变 fd 的指向**：`ls > out.txt` —— shell 先打开 out.txt 拿到文件 fd，再把这个 fd 复制到 1 号位，ls 的 stdout 就写进了文件；`>>` 是追加方式打开；`2>&1` 把 2 号 fd 指向 1 号 fd 的目标（先理解 `> log 2>&1` 与 `2>&1 > log` 的顺序差异）。"
+        },
+        {
+          "type": "text",
+          "content": "**文件系统：inode 与目录项。** 一个文件在磁盘上由三部分组成：\\n- **目录项（dentry）**：记录「文件名 → inode 编号」的映射；\\n- **inode**：存文件的元数据——大小、权限、时间戳、数据块指针，**不存文件名**，每个文件一个唯一 inode 编号；\\n- **数据块**：真正的内容。\\n`ls -i` 可以查看文件的 inode 编号。\\n\\n**硬链接 vs 软链接**：\\n- **硬链接**：多个文件名指向**同一个 inode**（ls -i 编号相同，ls -l 第 2 列链接数 +1），删除其中一个不影响另一个；\\n- **软链接（符号链接）**：是一个**独立的小文件**，内容存的是目标路径（inode 编号不同，第一列是 l），源文件删除后软链接失效（悬空链接）。\\n\\n**删除文件的原理**：rm 只是删除目录项、把 inode 链接计数减 1；计数归 0 且没有进程打开时，数据块才被标记释放。这就是「删除后数据还能抢救」与「进程占着已删文件磁盘不变小」的原因。"
+        },
+        {
+          "type": "code",
+          "lang": "bash",
+          "content": "# 进程查看：ps 快照、top 动态\nps -ef | head -n 5\ntop -b -n 1 | head -n 10\n\n# inode 与硬/软链接\nmkdir -p /tmp/demo && cd /tmp/demo\ntouch a.txt\nls -i a.txt              # 查看 inode 编号\nln a.txt a_hard          # 硬链接：与 a.txt 共享同一 inode\nln -s a.txt a_soft       # 软链接：独立文件，内容存目标路径\nls -li a.txt a_hard a_soft   # 对比：a_hard 编号同 a.txt，a_soft 不同且类型是 l\nrm a.txt                 # 删除源文件：a_hard 仍可读，a_soft 变成悬空链接\n\n# 管道与重定向\nls /data | wc -l         # ls 的 stdout(1) -> 内核管道 -> wc 的 stdin(0)\necho hello >> log.txt    # 追加写：fd 1 以追加模式指向 log.txt\ncmd >> log.txt 2>&1      # 先把 fd 1 指向 log.txt，再把 fd 2 指向 fd 1 的目标\n\n# 信号：kill 是发信号不是直接杀\nkill -15 PID   # SIGTERM：请求优雅退出\nkill -9 PID    # SIGKILL：强制杀死，进程无法拦截",
+          "caption": "进程 / inode / 链接 / 管道 / 重定向 / 信号演示"
+        },
+        {
+          "type": "text",
+          "content": "**管道 | 的底层。** `cmd1 | cmd2` 之所以能「前一个的输出直接喂给后一个」，是因为 shell 在两者之间创建了一个**管道**：\\n- 管道是**内核里的一段缓冲区**（默认约 64KB，不落盘）；\\n- cmd1 的**标准输出（fd 1）**被接到管道的**写端**；\\n- cmd2 的**标准输入（fd 0）**被接到管道的**读端**；\\n- cmd1 往里写、cmd2 从里读，数据在内核缓冲区中转，两边可以同时跑（流水线）。\\n\\n写端全部关闭后，读端会读到 EOF（文件结束），所以 `cat x | head` 里 head 拿到 EOF 就退出。管道是生产者-消费者模型的经典内核实现。"
+        },
+        {
+          "type": "text",
+          "content": "**进程查看与信号。** `ps` 显示进程**快照**：`ps -ef`（全格式）、`ps aux`（含 CPU/内存占用）；`top` 动态刷新进程列表，按 P 按 CPU 排、按 M 按内存排，是大数据排障第一工具。\\n**kill 不是「杀死」，而是「发信号」**：`kill -15 PID` 发 SIGTERM（默认，请求优雅退出）；`kill -9 PID` 发 SIGKILL（强制杀死，进程无法拦截）；`kill -0 PID` 只是探测进程是否存在。\\n\\n**僵尸进程（Zombie）**：子进程已经结束，但父进程没有调用 wait 回收它的 PCB，进程进入 Z 状态——它不占 CPU/内存，但占着 PID 和内核表项，**kill 不掉**（因为已经死了），只能等父进程回收或父进程退出后由 init（PID 1）接管清理。**孤儿进程**则是父进程先退出、子进程被 init 收养，属于正常现象。"
+        },
+        {
+          "type": "warning",
+          "content": "**两个高频陷阱**：① `kill -9` 是最后的武器——进程来不及保存状态/释放资源，生产上先给 `kill -15` 机会；② 系统报「too many open files」= 进程的文件描述符耗尽（fd 数量上限由 ulimit -n 控制），不是磁盘满了——排查时先看 fd 泄漏（连接没关、文件没关）。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：大数据集群上排障天天用到本章概念——Spark 的每个 Executor 就是一个 JVM 进程，`top` 看谁吃内存、`ps -ef | grep java` 找进程、`kill -9` 处理卡死的任务；日志服务遇到「删除日志后磁盘没变小」要用 inode/链接计数解释；「fork 失败」是进程数/内存达到上限；监控脚本 `kill -0` 探测进程存活。面试常考：僵尸进程怎么产生、怎么处理？fd 0/1/2 是什么？硬链接软链接区别？管道底层是什么？这一章就是 Linux 面试的底层原理题库。"
+        }
+      ],
+      "hands_on": "1. 用 `ps -ef | grep bash` 找到当前 shell 的进程，用 `top` 观察 CPU/内存占用最高的进程。\\n2. 创建文件 a.txt，用 `ls -i` 记录 inode 编号；分别用 `ln` 建硬链接、`ln -s` 建软链接，再用 `ls -li` 对比三个文件的 inode 编号与类型。\\n3. 删除 a.txt 后分别访问硬链接与软链接，观察哪个还能用、哪个变成悬空链接。\\n4. 用管道 `grep ERROR app.log | wc -l`，思考数据是怎么从 grep 传到 wc 的（内核缓冲区），再试试 `ls /data | head -n 2` 观察提前结束。\\n5. 写一段循环脚本在后台跑，用 ps 观察状态；对普通进程试 `kill -15` 与 `kill -9`，对比退出行为。",
+      "tasks": [
+        {
+          "task_id": "s03c05t01",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "文件描述符 0/1/2 的含义",
+          "question": "每个 Linux 进程默认打开 3 个文件描述符。编号 **0、1、2** 分别对应？",
+          "options": [
+            {
+              "text": "0 = 标准输入（stdin），1 = 标准输出（stdout），2 = 标准错误（stderr）",
+              "correct": true,
+              "explain": "正确。0/1/2 是进程启动时就绑定好的三个标准流，重定向改的就是它们。"
+            },
+            {
+              "text": "0 = 标准输出，1 = 标准输入，2 = 标准错误",
+              "correct": false,
+              "explain": "错误。0 永远是标准输入，1 才是标准输出，顺序不能记反。"
+            },
+            {
+              "text": "0 = 标准错误，1 = 标准输入，2 = 标准输出",
+              "correct": false,
+              "explain": "错误。标准错误是 2，标准输入是 0。"
+            },
+            {
+              "text": "三个都是普通文件的编号，与输入输出无关",
+              "correct": false,
+              "explain": "错误。0/1/2 是内核预留给标准流的位置，不是普通文件。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 文件描述符 = 进程打开文件的内核编号，进程通过它读写。\\n2. 启动时内核固定分配：0 标准输入（键盘）、1 标准输出（屏幕）、2 标准错误（屏幕）。\\n3. 重定向的底层就是改这些 fd 的指向：`> file` 把 1 指向文件、`2>&1` 把 2 指向 1 的目标。\\n4. 选 A。\\n**延伸**：`cmd 1>out 2>err` 可以把正常输出和报错分开存，排障时非常有用。",
+          "enterprise_tip": "面试手写题「把脚本的标准输出和标准错误分别重定向到两个文件」：`cmd 1>out.log 2>err.log`。答出 fd 0/1/2 的编号关系，是 Linux 底层基本功的试金石。"
+        },
+        {
+          "task_id": "s03c05t02",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：查看 inode 编号的命令",
+          "question": "查看文件 `app.log` 的 **inode 编号**，命令是 `ls ____ app.log`（填一个选项，小写字母）。",
+          "answer": [
+            "-i",
+            "-i ",
+            "ls -i",
+            "ls -i app.log"
+          ],
+          "hint": "回忆 3.5 节文件系统：查看 inode 编号，ls 需要加哪个选项？",
+          "analysis": "**标准解题思路**\\n1. inode 是文件的元数据（大小、权限、数据块指针），每个文件一个唯一编号。\\n2. `ls -i` 在输出前加上 inode 编号列。\\n3. 完整命令：ls -i app.log。\\n4. 填 `-i`。\\n**延伸**：`ls -li` 同时显示 inode 编号与详细权限；用 inode 编号判断硬链接——多个文件名 inode 编号相同就是同一文件的硬链接。",
+          "enterprise_tip": "面试「怎么判断两个文件是不是硬链接」：`ls -i` 对比 inode 编号，相同就是。inode 编号也是排查「删除后磁盘没变小」问题的入口。"
+        },
+        {
+          "task_id": "s03c05t03",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "硬链接与软链接的区别",
+          "question": "关于 Linux 的**硬链接**与**软链接**，下列说法正确的是？",
+          "options": [
+            {
+              "text": "硬链接与源文件共享同一个 inode（ls -i 编号相同），删除源文件后硬链接依然有效；软链接是独立文件、存目标路径，源文件删除后软链接失效（悬空）",
+              "correct": true,
+              "explain": "正确。硬链接是「同一个 inode 的另一个名字」，软链接是「指向路径的独立小文件」，删除行为截然不同。"
+            },
+            {
+              "text": "硬链接和软链接都只是存了一个目标路径",
+              "correct": false,
+              "explain": "错误。软链接才存路径；硬链接直接共享 inode，不存路径。"
+            },
+            {
+              "text": "硬链接的 inode 编号和源文件不同",
+              "correct": false,
+              "explain": "错误。硬链接与源文件 inode 编号相同，这正是硬链接的本质。"
+            },
+            {
+              "text": "删除源文件后，硬链接和软链接都会同时失效",
+              "correct": false,
+              "explain": "错误。只有软链接会失效；硬链接删了源文件照样能读（链接计数减 1 但没归零）。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 硬链接：ln 源 目标 → 在目录里新增一个「文件名 → 同一 inode」的映射，ls -i 编号相同、ls -l 第 2 列链接数 +1。\\n2. 软链接：ln -s 源 目标 → 创建独立的小文件，内容存目标路径，ls -l 第一列是 l、inode 编号不同。\\n3. 删除行为：rm 源文件 → 硬链接的链接计数减 1 但 inode 还在 → 硬链接可正常读写；软链接指向的路径不存在了 → 悬空链接、访问报错。\\n4. 选 A。\\n**易错点**：硬链接不能跨文件系统（inode 是文件系统内部的），软链接可以；硬链接不能链接目录，软链接可以。",
+          "enterprise_tip": "日志服务常把「今天的日志」用软链接指向实际文件，轮转时只换链接；面试追问「为什么硬链接不能跨分区」——inode 编号只在同一个文件系统内唯一。"
+        },
+        {
+          "task_id": "s03c05t04",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：追加写重定向符号",
+          "question": "把命令的输出**追加**到文件 `app.log` 末尾、**不覆盖**原有内容，重定向符号是 ____（填一个符号，两个字符）。",
+          "answer": [
+            ">>",
+            ">> ",
+            ">> 文件",
+            ">>app.log"
+          ],
+          "hint": "先回忆重定向的两类符号：`>` 和 `>>` 分别表示覆盖还是追加？题目要「不覆盖」，选哪个？",
+          "analysis": "**标准解题思路**\\n1. 重定向的底层是改变 fd 指向：> 以「覆盖」方式打开文件，>> 以「追加」方式打开。\\n2. 完整命令：echo hello >> app.log 或 cmd >> app.log。\\n3. 填 `>>`。\\n**延伸**：定时任务日志标配 `>> cron.log 2>&1`——追加 + 把标准错误也写进去；用 `>` 会覆盖历史日志，可能把排障线索清掉。",
+          "enterprise_tip": "面试陷阱题「> 和 >> 的区别」：> 覆盖、>> 追加，底层是打开方式不同（O_TRUNC vs O_APPEND）。企业日志一律追加写，绝不用 > 覆盖历史。"
+        },
+        {
+          "task_id": "s03c05t05",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "管道 | 的底层原理",
+          "question": "执行 `grep ERROR app.log | wc -l` 时，**管道 | 在底层**做了什么？",
+          "options": [
+            {
+              "text": "shell 在内核中创建一段缓冲区（管道）：grep 的标准输出（fd 1）接到管道写端，wc 的标准输入（fd 0）接到管道读端，数据经内核缓冲区中转、不落盘",
+              "correct": true,
+              "explain": "正确。管道 = 内核缓冲区 + 前后进程 fd 的对接，数据在内存中流动。"
+            },
+            {
+              "text": "shell 先把 grep 的输出写到一个临时文件，再让 wc 读这个文件",
+              "correct": false,
+              "explain": "错误。管道数据在内核缓冲区流动、不落盘；用临时文件中转是另一种机制。"
+            },
+            {
+              "text": "管道会复制一份完整数据给 wc，两份数据同时在磁盘上",
+              "correct": false,
+              "explain": "错误。管道不复制数据到磁盘，也不做两份存储。"
+            },
+            {
+              "text": "grep 和 wc 共享同一段内存地址空间，直接读写同一个变量",
+              "correct": false,
+              "explain": "错误。不同进程地址空间相互隔离，靠内核管道中转，不是直接共享变量。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 管道是内核提供的一段缓冲区（默认约 64KB），是进程间通信（IPC）的一种。\\n2. shell 接线：grep 的 fd 1 指向管道写端，wc 的 fd 0 指向管道读端。\\n3. 数据流：grep 边过滤边写入缓冲区，wc 边读边计数，两者可同时运行（流水线），数据不落盘。\\n4. 结束条件：写端全关闭 → 读端读到 EOF → wc 输出结果退出。\\n5. 选 A。\\n**易错点**：把管道理解成临时文件或共享内存——临时文件要落盘、共享内存要进程直接访问对方空间，都不是管道的工作方式。",
+          "enterprise_tip": "面试「管道和重定向有什么区别」：管道连接两个进程的 fd（进程间通信），重定向是把 fd 指向文件。大数据组件（如 Flume）的「管道式」数据流也是同样的生产者-消费者思想。"
+        },
+        {
+          "task_id": "s03c05t06",
+          "type": "order",
+          "difficulty": 3,
+          "title": "排列一条命令从 shell 到进程的流程",
+          "question": "在终端敲下 `ls -l /data` 并回车，把这条命令从**输入到进程执行**的底层流程按正确顺序排列。",
+          "steps": [
+            "用户在终端输入命令并按回车，shell 读取这一行",
+            "shell 解析命令：拆出命令名 ls 与参数 -l /data，在 PATH 中查找可执行文件",
+            "shell 调用 fork() 创建子进程（复制父进程 PCB，子进程拿到新的 PID）",
+            "子进程通过 exec 系列函数把 ls 程序加载进内存并运行",
+            "ls 执行完毕，进程退出并返回退出码，shell 回收子进程后等待下一条命令"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "终端输入 → shell 解析并查找程序（PATH）→ fork 创建子进程（新 PID）→ exec 加载并运行程序 → 退出并回收。fork + exec 两步就是「从命令到进程」的底层机制，也是理解 PID、僵尸进程（父进程不回收）的起点。",
+          "analysis": "**标准解题思路**\\n1. 第一步：shell 读取输入行（终端/脚本都行）。\\n2. 第二步：解析命令名与参数，按 PATH 找到可执行文件（找不到报 command not found）。\\n3. 第三步：fork() 创建子进程——复制父进程（shell）的 PCB，子进程获得新 PID，从 fork 返回处继续。\\n4. 第四步：exec 加载 ls 程序替换子进程镜像并运行（这也是「fork+exec」组合的由来）。\\n5. 第五步：程序结束返回退出码，shell 用 wait 回收子进程，继续等待下一条命令。\\n**易错点**：把 fork 和 exec 当成一步——fork 造进程、exec 换程序，两步缺一不可；父进程不 wait 回收 → 僵尸进程，正是下一步的知识点。",
+          "enterprise_tip": "面试「为什么 shell 能执行你敲的命令」：fork + exec + wait 三件套。脚本里 `$(cmd)` 也是同样的机制——子进程执行、父进程等结果，理解了这个就不会在脚本里把变量作用域搞混。"
+        },
+        {
+          "task_id": "s03c05t07",
+          "type": "choice",
+          "difficulty": 3,
+          "title": "僵尸进程的成因",
+          "question": "关于**僵尸进程（Zombie）**，下列说法正确的是？",
+          "options": [
+            {
+              "text": "子进程已经结束，但父进程没有调用 wait 回收它的 PCB（进程控制块），进程停留在 Z 状态；它不占 CPU/内存，但占着 PID，且 kill 不掉",
+              "correct": true,
+              "explain": "正确。僵尸进程是「死了没被收尸」的进程，只能靠父进程回收或父进程退出后由 init 清理。"
+            },
+            {
+              "text": "僵尸进程是正在运行、但暂时不干活的进程",
+              "correct": false,
+              "explain": "错误。不干活的是空闲/睡眠状态，僵尸进程是已经结束、等待回收的状态。"
+            },
+            {
+              "text": "僵尸进程可以通过 kill -9 直接消灭",
+              "correct": false,
+              "explain": "错误。僵尸进程已经死了，kill 发信号没有接收者，只能回收它的父进程或等 init 清理。"
+            },
+            {
+              "text": "父进程先退出、子进程变成的状态就是僵尸进程",
+              "correct": false,
+              "explain": "错误。父进程先退出、子进程被 init 收养的是孤儿进程；僵尸是子进程先死而父进程不回收。"
+            }
+          ],
+          "analysis": "**标准解题思路**\\n1. 进程生命周期：运行 → 退出 → 父进程 wait 回收 → 完全消失。\\n2. 僵尸成因：子进程先退出，父进程没调用 wait 回收 PCB，进程留在 Z 状态等收尸。\\n3. 特征：不占 CPU/内存（资源已释放），但占着 PID 和内核表项；已经死了，kill 信号没人接收。\\n4. 处理：正常父进程回收；父进程退出后子进程被 init（PID 1）接管清理。\\n5. 选 A。\\n**易错点**：把僵尸进程与孤儿进程搞混——孤儿是父先死、子被收养（正常）；僵尸是子先死、父不收（异常）。",
+          "enterprise_tip": "面试「服务器上全是僵尸进程怎么办」：先找它们的父进程（ps -ef 看 PPID），通常是有 bug 的程序没 wait；重启父进程或父进程退出即可清理。监控脚本可用 ps 统计 Z 状态数量做告警。"
+        },
+        {
+          "task_id": "s03c05t08",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "free 内存与 available 列",
+          "question": "执行 `free -h` 查看内存，`available`（可用内存）列表示什么？",
+          "options": [
+            {
+              "text": "系统**实际可分配给新程序**的内存量（含可回收的 buff/cache），判断内存够不够用应看它",
+              "correct": true,
+              "explain": "正确。available 包含可回收的缓存，是「真实可用」的指标。"
+            },
+            {
+              "text": "物理内存总大小",
+              "correct": false,
+              "explain": "错误。物理内存总大小是 total 列。"
+            },
+            {
+              "text": "已经被进程占用的内存",
+              "correct": false,
+              "explain": "错误。已占用是 used 列。"
+            },
+            {
+              "text": "交换分区（swap）的使用量",
+              "correct": false,
+              "explain": "错误。swap 是独立的一行，与 available 无关。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. free -h 各列：total（总内存）、used（已用）、free（完全空闲）、shared、buff/cache（缓存）、available（可用）。\n2. Linux 会把空闲内存用作缓存（buff/cache），所以 used 高不代表内存不够。\n3. available = 真实可分配内存（含可回收的缓存），判断「内存够不够」看它最准。\n4. 选 A。\n**延伸**：给大数据组件（Spark Executor）分配内存前先 free -h 看节点 available；内存不足先看是否有进程吃内存（top -o %MEM），缓存会被系统自动回收、无需手动清。",
+          "enterprise_tip": "判断服务器内存水位别看 used——Linux 把空闲内存当缓存，used 高但 available 充足是正常现象；给 Spark Executor 配内存前先 free -h 看节点 available，防止 Executor 分配过猛触发 OOM。"
+        },
+        {
+          "task_id": "s03c05t09",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：查看端口监听",
+          "question": "查看本机 **8080 端口**是否有进程在监听，命令是 `netstat ____ | grep 8080`（填参数组合：显示 TCP、监听、数字端口、进程名）。",
+          "answer": [
+            "-tlnp",
+            "-tunlp",
+            "-tlnp ",
+            "-tulnp"
+          ],
+          "hint": "要显示 TCP、监听状态、数字端口、进程名，netstat 各需要哪个选项？回忆每个字母的含义。",
+          "analysis": "**标准解题思路**\n1. 需求：查 8080 端口监听 → 网络排查命令 netstat（或更快的新工具 ss）。\n2. 参数拆解：-t（TCP）、-l（listening 监听）、-n（数字显示端口，不反解域名）、-p（显示进程名/PID）。\n3. 组合：netstat -tlnp | grep 8080，输出里 8080 那一行就是监听进程。\n4. 填 -tlnp（-tunlp 包含 UDP，同样可用）。\n**延伸**：端口被占用（Address already in use）排查：netstat -tlnp 找 PID → ps -p PID 确认进程 → 决定复用还是清理；ss -tlnp 是 netstat 的新替代，输出更快。",
+          "enterprise_tip": "「8080 端口被占用」是大数据组件启动失败的高频原因（HDFS/Spark 的 Web UI 端口冲突）；netstat -tlnp（或 ss -tlnp）找到 PID 再 ps 确认，是标准排查姿势。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "程序和进程有什么区别？",
+          "a": "程序是磁盘上的静态文件（代码），不占内存；进程是加载到内存中正在运行的程序实例，包含 PCB（PID、状态、寄存器）和内存地址空间（代码段、数据段、堆、栈）等运行时状态。"
+        },
+        {
+          "q": "文件描述符 0/1/2 分别是什么？重定向的底层原理？",
+          "a": "0 标准输入 stdin、1 标准输出 stdout、2 标准错误 stderr。重定向的底层是改变 fd 的指向：> 以覆盖方式打开文件、>> 以追加方式打开、2>&1 把 2 号 fd 指向 1 号 fd 的目标。"
+        },
+        {
+          "q": "硬链接和软链接有什么区别？",
+          "a": "硬链接与源文件共享同一 inode（ls -i 编号相同），删除源文件不影响硬链接；软链接是独立的小文件、内容存目标路径（inode 不同、类型 l），源文件删除后软链接失效变成悬空链接。硬链接不能跨文件系统、不能链接目录，软链接都可以。"
+        },
+        {
+          "q": "管道 | 的底层是什么？",
+          "a": "内核里的一段缓冲区。cmd1 | cmd2 时，cmd1 的标准输出接到管道写端、cmd2 的标准输入接到读端，数据经内核缓冲区中转、不落盘，两边可同时运行。写端关闭后读端读到 EOF。"
+        },
+        {
+          "q": "僵尸进程是怎么产生的？怎么处理？",
+          "a": "子进程先结束、父进程没有调用 wait 回收它的 PCB，进程进入 Z 状态。僵尸进程不占 CPU/内存但占 PID、kill 不掉，只能等父进程回收或父进程退出后由 init（PID 1）接管清理。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "PCB / task_struct",
+          "desc": "进程控制块：内核为每个进程维护的元数据（PID、状态、寄存器等）。"
+        },
+        {
+          "term": "fork / exec",
+          "desc": "创建子进程（复制 PCB）/ 加载并运行新程序，两者组合是 shell 执行命令的底层。"
+        },
+        {
+          "term": "文件描述符 fd",
+          "desc": "进程打开文件的编号，0/1/2 分别是标准输入/输出/错误。"
+        },
+        {
+          "term": "inode",
+          "desc": "文件的元数据（大小、权限、数据块指针），ls -i 查看编号。"
+        },
+        {
+          "term": "硬链接 / 软链接",
+          "desc": "共享同一 inode 的多个文件名 / 存目标路径的独立小文件。"
+        },
+        {
+          "term": "管道 |",
+          "desc": "内核缓冲区，连接前一个进程的 stdout 与后一个进程的 stdin，数据不落盘。"
+        },
+        {
+          "term": "kill / 信号",
+          "desc": "向进程发送信号：-15 SIGTERM 优雅退出、-9 SIGKILL 强制杀死。"
+        },
+        {
+          "term": "僵尸进程 / 孤儿进程",
+          "desc": "子进程结束但父进程未回收的残骸 / 父进程先退出的进程（被 init 收养）。"
+        }
+      ],
+      "kps": [
+        "进程 = 程序 + 状态：PCB 与内存地址空间（代码段 / 堆 / 栈）",
+        "fork 与 PID：创建子进程、exec 加载程序",
+        "文件描述符 fd：打开文件返回 fd、0/1/2 标准流",
+        "重定向的底层：改变 fd 指向（> 覆盖、>> 追加、2>&1）",
+        "inode 与目录项：ls -i 查看 inode 编号",
+        "硬链接 vs 软链接（inode 编号与删除行为）",
+        "管道 | 的底层：内核缓冲区连接 stdout 与 stdin",
+        "进程查看 ps/top、kill 与信号、僵尸进程与孤儿进程",
+        "free 内存查看与 available 语义（buff/cache 可回收）",
+        "netstat/ss 查看端口监听（-tlnp）"
+      ]
+    },
+    {
+      "chapter_id": "s03c06",
+      "title": "3.6 容器化基础：Docker 与 Kubernetes",
+      "goal": "理解容器与镜像的区别、Docker 常用命令与 Dockerfile、数据卷，掌握 K8s 的 Pod/Deployment/Service 核心概念，理解大数据组件容器化的意义",
+      "plan_days": 2,
+      "plan_breakdown": {
+        "theory_min": 40,
+        "tasks_min": 50,
+        "hands_on_min": 20,
+        "review_min": 10
+      },
+      "theory": [
+        {
+          "type": "text",
+          "content": "大数据集群的组件越来越多：Hadoop、Spark、Flink、Kafka……每个组件对环境的要求都不一样（JDK 版本、依赖库、配置文件）。传统部署方式（在一台机器上手动装环境）有两个痛点：**环境不一致**——开发环境能跑、生产环境报错；**部署慢**——几十台机器要重复装同样的环境。\n\n**容器化**就是解决这两个问题的：把「应用 + 它需要的完整运行环境」打包成一个标准单元，在任何装有容器引擎（Docker）的机器上都能一键运行。三大价值：\n- **环境一致**：开发、测试、生产用同一个镜像，杜绝「在我机器上能跑」；\n- **资源隔离**：每个容器有独立的文件系统与进程空间，互不干扰，还能限制 CPU/内存；\n- **快速部署**：镜像分发 + 容器启动是秒级，扩容就是多启动几个容器。\n\n对比传统虚拟机：虚拟机模拟整台电脑（要装操作系统，GB 级启动）；容器共享宿主机内核（只打包应用层，MB 级、秒级启动）。"
+        },
+        {
+          "type": "text",
+          "content": "Docker 的两大核心概念：**镜像（Image）** 与 **容器（Container）**。\n- **镜像**：一个**只读的、不可变的模板**，包含应用代码、依赖、配置和运行环境。可以理解为「光盘/模具」——同一份镜像可以启动任意多个容器。\n- **容器**：镜像的**运行实例**，是真正在跑的进程，有自己的可写层（运行时的修改写在这里）。可以理解为「用光盘刻录出来的运行中的机器」。\n\n一句话：**镜像定义「是什么」，容器是「跑起来」的那个东西**；镜像不变，容器可以启动、停止、删除。"
+        },
+        {
+          "type": "code",
+          "lang": "bash",
+          "content": "# 镜像管理\ndocker images              # 查看本机镜像列表\ndocker pull nginx:latest   # 从镜像仓库拉取镜像\ndocker rmi nginx           # 删除镜像\n\n# 容器生命周期\ndocker run -d -p 8080:80 -v /data:/app nginx   # 启动容器：-d 后台、-p 端口映射、-v 数据卷挂载\ndocker ps                  # 查看运行中的容器\ndocker ps -a               # 查看所有容器（含已停止）\ndocker exec -it 容器ID bash    # 进入容器执行命令\ndocker logs 容器ID         # 查看容器日志\ndocker stop 容器ID         # 停止容器\ndocker rm 容器ID           # 删除容器",
+          "caption": "Docker 常用命令：镜像管理 + 容器生命周期"
+        },
+        {
+          "type": "text",
+          "content": "**Dockerfile** 是构建镜像的「配方文件」，按行描述从基础镜像出发要做什么：\n- `FROM`：基于哪个基础镜像（如 `FROM openjdk:8`）；\n- `RUN`：构建时执行的命令（如 `RUN apt-get install -y xxx`）；\n- `CMD`：容器启动时默认执行的命令（如 `CMD ['java', '-jar', 'app.jar']`）。\n\n**数据卷（Volume）** 解决容器数据持久化问题：容器删除后，容器内的可写层数据会一起消失。用 `-v 宿主机目录:容器内目录` 把宿主机目录挂载进容器，数据存在宿主机上，容器删了数据还在——数据库、日志这类需要持久化的数据必须用数据卷。"
+        },
+        {
+          "type": "code",
+          "lang": "dockerfile",
+          "content": "# 一个 Java 应用的 Dockerfile\nFROM openjdk:8-jdk        # 基础镜像\nWORKDIR /app              # 工作目录\nCOPY app.jar /app/        # 复制文件进镜像\nRUN mkdir -p /data/logs   # 构建时创建日志目录\nCMD ['java', '-jar', 'app.jar']   # 容器启动时执行\n\n# 构建与运行（在 Dockerfile 所在目录）\ndocker build -t myapp:v1 .\ndocker run -d -p 8080:8080 -v /data/logs:/data/logs myapp:v1",
+          "caption": "Dockerfile 示例：FROM / RUN / CMD 三步构建"
+        },
+        {
+          "type": "text",
+          "content": "Docker 解决「单机容器化」，但生产环境是**几十上百台机器**：容器挂在哪台机器？挂了怎么重启？流量怎么分发？——这就是 **Kubernetes（K8s）** 要解决的问题：容器编排（容器集群的管理系统）。\n\n四个核心概念：\n- **Pod**：K8s 最小的调度单元，一个 Pod 里可以放 1 个或多个容器（通常 1 个），Pod 内的容器共享网络与存储；\n- **Deployment**：管理 Pod 的「控制器」，声明期望的**副本数**，Pod 挂了自动拉起新 Pod，支持滚动更新；\n- **Service**：为一组 Pod 提供**稳定的访问入口**（负载均衡），Pod 的 IP 会变，Service 的地址不变；\n- **ConfigMap**：把配置（环境变量、配置文件内容）与镜像解耦，改配置不用重新构建镜像。\n\n示意图：\n\n```\n          ┌────────────── Service（固定入口 + 负载均衡）───────────────┐\n          │                                                          │\n   ┌──────▼──────┐    ┌──────▼──────┐    ┌──────▼──────┐\n   │   Pod A     │    │   Pod B     │    │   Pod C     │   （同一 Deployment，副本数=3）\n   │  容器(应用)  │    │  容器(应用)  │    │  容器(应用)  │\n   └─────────────┘    └─────────────┘    └─────────────┘\n          ▲                ▲                ▲\n          └────── Deployment 控制器：挂了自动重启、滚动更新 ──────┘\n```"
+        },
+        {
+          "type": "text",
+          "content": "大数据组件（Hadoop/Spark/Hive 等）也能容器化：把每个组件做成镜像，用 K8s 编排——**弹性伸缩**（流量大自动加副本、闲时缩容省钱）、**环境统一**（组件版本、依赖全部固化在镜像里）、**快速交付**（新环境秒级就绪）。YARN 之外，Spark/Flink 已原生支持运行在 K8s 上（Spark on K8s、Flink on K8s），云厂商的大数据产品（EMR、Dataproc 等）底层就是容器化 + 编排。\n\n注意：大数据组件对存储和网络要求高（本地磁盘、网络吞吐），容器化时要配合数据卷挂载与 CNI 网络方案，不是「无脑上容器」。"
+        },
+        {
+          "type": "warning",
+          "content": "**三个高频坑**：① 容器是无状态的——容器里的数据写在可写层，容器删除数据就没了，**要持久化的数据必须挂数据卷（-v）**；② `docker run` 每次都是**新容器**，改完代码要重新 build 镜像再 run，不能指望改容器里的文件；③ Pod 是 K8s 的最小单位，不要直接在 Pod 外面裸跑容器，Deployment 会帮你管理 Pod 的生命周期。"
+        },
+        {
+          "type": "enterprise",
+          "content": "**企业视角**：\n- 面试必问：① 镜像和容器的区别？② docker run -p 8080:80 是什么意思？③ Dockerfile 的 FROM/RUN/CMD 各做什么？④ Pod 和容器什么关系？⑤ Deployment 和 Pod 什么关系？⑥ Service 是干什么的？\n- 生产实践：CI/CD 流水线「代码提交 → 自动构建镜像 → 推送到镜像仓库 → K8s 滚动更新」是标准链路；大数据平台的资源隔离（YARN 队列 + cgroup）与容器隔离思想同源，学完容器化回头看 YARN 的 Container 会有新理解。\n- 常见坑：忘记挂数据卷导致数据丢失；镜像越攒越大不清理；Pod 重启策略配置不当导致任务反复重启。"
+        }
+      ],
+      "hands_on": "1. 如果本机有 Docker：docker pull nginx 拉镜像 → docker run -d -p 8080:80 nginx 启动 → 浏览器访问 localhost:8080 → docker ps 看容器 → docker exec -it 容器ID bash 进入容器 → docker logs 看日志 → docker rm -f 清理。\n2. 写一个极简 Dockerfile（FROM busybox + CMD echo hello），docker build 后用 docker images 查看镜像，再 docker run 运行并观察输出。\n3. 用 -v 把宿主机一个目录挂载进容器，在容器里写文件，删掉容器后确认宿主机文件还在——体会数据卷的持久化。\n4. 用纸笔画一张 K8s 架构图：Deployment → 3 个 Pod → Service 负载均衡，标出副本数与访问入口。\n5. 思考题：为什么数据库容器必须挂数据卷？把答案写在笔记里。",
+      "tasks": [
+        {
+          "task_id": "s03c06t01",
+          "type": "choice",
+          "difficulty": 1,
+          "title": "镜像与容器的区别",
+          "question": "关于 Docker 的**镜像（Image）**与**容器（Container）**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "镜像是只读、不可变的模板；容器是镜像的运行实例，有独立的可写层",
+              "correct": true,
+              "explain": "正确。镜像定义环境和程序，容器是把它跑起来的实例，运行时的修改写在容器可写层。"
+            },
+            {
+              "text": "镜像会随着容器运行而改变",
+              "correct": false,
+              "explain": "错误。镜像只读不可变；运行时的修改写在容器的可写层，镜像本身不变。"
+            },
+            {
+              "text": "一个镜像只能启动一个容器",
+              "correct": false,
+              "explain": "错误。同一镜像可以启动任意多个容器。"
+            },
+            {
+              "text": "容器是模板，镜像是实例",
+              "correct": false,
+              "explain": "错误。说反了：镜像是模板，容器是实例。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. 镜像（Image）：只读、不可变的模板，包含应用、依赖、配置与运行环境——类比「光盘/类」。\n2. 容器（Container）：镜像的运行实例，有独立的文件系统与**可写层**（运行时的修改写在这里）——类比「用光盘刻录出来的运行实例/对象」。\n3. 关系：同一镜像可启动多个容器；镜像不变，容器可启停删；容器删除后可写层数据丢失（除非挂数据卷）。\n4. 排除干扰项：镜像运行时不改变；一个镜像可起多个容器；模板是镜像不是容器。\n5. 选 A。\n**延伸**：改代码 = 重新 build 镜像 = 用新镜像起新容器，不要改运行中的容器（重启后修改就没了）。",
+          "enterprise_tip": "面试必问「镜像和容器区别」：答「镜像=模板（类）、容器=实例（对象）」；生产上改代码必须重新 build 镜像再起新容器，改运行中容器是无用功。"
+        },
+        {
+          "task_id": "s03c06t02",
+          "type": "fill",
+          "difficulty": 1,
+          "title": "填空：查看运行中的容器",
+          "question": "查看**当前正在运行**的容器列表，命令是 `docker ____`（填 2 个字母的英文命令）。",
+          "answer": [
+            "ps",
+            "docker ps",
+            "ps -a"
+          ],
+          "hint": "先回忆：Linux 里查看进程用什么命令？Docker 查看容器复用了哪个命令名？",
+          "analysis": "**标准解题思路**\n1. 查看容器列表 → docker ps（process status，和 Linux 的 ps 同名）。\n2. docker ps 只看**运行中**的容器；docker ps -a 看所有容器（含已停止）。\n3. 填 ps。\n**延伸**：配合 docker logs 容器ID 看应用日志、docker exec -it 容器ID bash 进容器排查——这是容器排障三件套。",
+          "enterprise_tip": "容器排障第一步：docker ps 看容器在不在、docker ps -a 看是不是已退出（Exited）；配合 docker logs 容器ID 看应用报错，三步定位问题。"
+        },
+        {
+          "task_id": "s03c06t03",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "docker run -p 端口映射的含义",
+          "question": "执行 `docker run -d -p 8080:80 nginx`，`-p 8080:80` 表示什么？",
+          "options": [
+            {
+              "text": "把宿主机的 **8080** 端口映射到容器内的 **80** 端口：访问宿主机 8080 即访问容器内 nginx 的 80 端口",
+              "correct": true,
+              "explain": "正确。-p 格式是「宿主机端口:容器内端口」，左边是外界访问的端口。"
+            },
+            {
+              "text": "把容器的 8080 端口映射到宿主机的 80 端口",
+              "correct": false,
+              "explain": "错误。顺序反了，-p 的格式是「宿主机端口:容器端口」。"
+            },
+            {
+              "text": "限制容器最多使用 8080MB 内存",
+              "correct": false,
+              "explain": "错误。内存限制是 -m 参数，不是 -p。"
+            },
+            {
+              "text": "把容器内 80 端口直接发布到公网",
+              "correct": false,
+              "explain": "错误。-p 只把端口映射到宿主机端口，对外暴露还依赖宿主机的网络与负载均衡。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. -p 的格式：-p 宿主机端口:容器内端口。\n2. 左 8080 = 宿主机对外暴露的端口；右 80 = 容器内应用监听的端口。\n3. 效果：访问宿主机 IP:8080 → 转发到容器内 80 端口。\n4. 排除干扰项：顺序说反是常见错误；内存限制是 -m；公网暴露还涉及宿主机的网络/负载均衡。\n5. 选 A。\n**延伸**：容器有自己的网络命名空间，默认外界访问不到，必须 -p 映射或用 K8s Service 暴露；记法「从外到内」：外面的端口写在左边。",
+          "enterprise_tip": "面试必考「-p 8080:80 谁是谁」：左边宿主机、右边容器，记法「从外到内」；生产上多个容器端口冲突时，改宿主机侧端口即可。"
+        },
+        {
+          "task_id": "s03c06t04",
+          "type": "order",
+          "difficulty": 2,
+          "title": "排列从 Dockerfile 到运行容器的流程",
+          "question": "把「从编写 Dockerfile 到容器运行起来」的完整流程按正确顺序排列。",
+          "steps": [
+            "编写 Dockerfile，用 FROM / RUN / CMD 定义镜像内容",
+            "执行 docker build -t myapp:v1 . 构建出镜像",
+            "执行 docker images 查看构建出的镜像",
+            "执行 docker run -d -p 8080:8080 myapp:v1 启动容器",
+            "执行 docker ps 确认容器运行中，docker logs 查看输出"
+          ],
+          "correct_order": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "order_explain": "标准链路：写配方（Dockerfile）→ 构建（build 出镜像）→ 确认镜像（images）→ 运行（run 启动容器）→ 验证（ps/logs）。容器本质是镜像的运行实例，所以「先有镜像、后有容器」是铁律。",
+          "analysis": "**标准解题思路**\n1. 第一步**写配方**：Dockerfile 用 FROM（基础镜像）、RUN（构建时命令）、CMD（启动命令）定义镜像内容。\n2. 第二步**构建**：docker build -t myapp:v1 . 按配方构建镜像（. 是构建上下文目录）。\n3. 第三步**确认镜像**：docker images 查看构建结果。\n4. 第四步**运行**：docker run -d -p 8080:8080 myapp:v1 启动容器（-d 后台运行）。\n5. 第五步**验证**：docker ps 确认容器在跑、docker logs 看启动输出。\n**记忆**：配方 → 构建 → 查看 → 运行 → 验证；「先有镜像、后有容器」是铁律。\n**易错点**：跳过 docker build 直接 docker run 会报「镜像不存在」；改代码后忘记重新 build，还是用旧镜像。\n**对照企业 CI/CD**：代码提交 → 自动 build 镜像 → 推镜像仓库 → 部署（run/滚动更新）→ 监控验证，就是这五步的自动化。",
+          "enterprise_tip": "企业 CI/CD 的容器化链路就是这五步的自动化：代码提交 → 自动构建镜像 → 推送到镜像仓库 → 部署（run / 滚动更新）→ 监控验证；面试画「容器部署流水线」按这个顺序讲。"
+        },
+        {
+          "task_id": "s03c06t05",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "K8s 中 Pod 是什么",
+          "question": "关于 Kubernetes 的 **Pod**，下列说法**正确**的是？",
+          "options": [
+            {
+              "text": "Pod 是 K8s **最小的调度单元**，一个 Pod 内可包含 1 个或多个容器，Pod 内的容器共享网络与存储",
+              "correct": true,
+              "explain": "正确。调度、复制、健康检查都以 Pod 为单位，Pod 内容器共享网络与存储。"
+            },
+            {
+              "text": "Pod 是比容器更大的部署单位，一个 Pod 只能装一个容器",
+              "correct": false,
+              "explain": "错误。一个 Pod 可以装多个容器（通常 1 个），且共享网络与存储。"
+            },
+            {
+              "text": "Pod 是运行在宿主机上的虚拟机",
+              "correct": false,
+              "explain": "错误。Pod 里装的是容器，不是虚拟机。"
+            },
+            {
+              "text": "Pod 是镜像的另一个叫法",
+              "correct": false,
+              "explain": "错误。镜像是模板，Pod 是运行时的调度单元，两者完全不同。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. K8s 的最小调度单元是 Pod，不是容器——调度、复制、健康检查都以 Pod 为单位。\n2. 一个 Pod 可包含 1 个或多个容器：Pod 内的容器共享网络（同一 IP）与存储（同一卷），同生共死。\n3. 通常 1 个 Pod 放 1 个主容器；「应用 + 日志采集 sidecar」等多容器模式是 Pod 的典型用法。\n4. 排除干扰项：Pod 可以多容器；Pod 不是虚拟机；Pod 不是镜像。\n5. 选 A。\n**延伸**：Deployment 管理的是 Pod 的副本；Pod IP 会变，访问要走 Service。",
+          "enterprise_tip": "面试题「K8s 为什么用 Pod 而不是直接调度容器」：Pod 让一组紧密协作的容器（如应用 + 日志采集 sidecar）共享网络与存储、同生共死，是更灵活的调度单位。"
+        },
+        {
+          "task_id": "s03c06t06",
+          "type": "choice",
+          "difficulty": 2,
+          "title": "Deployment 的作用",
+          "question": "K8s 中 **Deployment** 的核心作用是下列哪一项？",
+          "options": [
+            {
+              "text": "声明 Pod 的期望副本数并维持：Pod 挂掉自动拉起新的，支持滚动更新与回滚",
+              "correct": true,
+              "explain": "正确。Deployment 是控制器：保证副本数、自动重启、滚动更新。"
+            },
+            {
+              "text": "为 Pod 提供固定访问入口与负载均衡",
+              "correct": false,
+              "explain": "错误。固定入口与负载均衡是 Service 的职责。"
+            },
+            {
+              "text": "存储配置信息，把配置与镜像解耦",
+              "correct": false,
+              "explain": "错误。那是 ConfigMap 的职责。"
+            },
+            {
+              "text": "把镜像打包成可分发的格式",
+              "correct": false,
+              "explain": "错误。构建/分发镜像是 Docker 与镜像仓库的职责。"
+            }
+          ],
+          "analysis": "**标准解题思路**\n1. Deployment 是「控制器」：你声明期望副本数（如 3），它保证集群里始终有 3 个 Pod 在跑。\n2. Pod 挂了 → Deployment 自动拉起新 Pod（自愈）。\n3. 版本更新 → 滚动更新（逐个替换，服务不中断）；出问题可回滚。\n4. 排除干扰项：固定入口/负载均衡是 Service；配置解耦是 ConfigMap；打包分发是镜像仓库/Docker 的事。\n5. 选 A。\n**延伸**：副本数 = 冗余 + 负载分散；Deployment 通过 ReplicaSet 管理 Pod 副本，面试答出这一层更完整。",
+          "enterprise_tip": "面试对比「Deployment vs Service」：Deployment 管「有多少个实例在跑」（副本与更新），Service 管「怎么访问这些实例」（入口与负载均衡）——一句话分清职责是加分项。"
+        },
+        {
+          "task_id": "s03c06t07",
+          "type": "fill",
+          "difficulty": 2,
+          "title": "填空：K8s 服务暴露方式",
+          "question": "K8s 中，为 Pod 提供**稳定访问入口与负载均衡**、把服务暴露给外部访问的对象叫 ____（英文单词，一个词）。",
+          "answer": [
+            "Service",
+            "service",
+            "Kubernetes Service",
+            "服务"
+          ],
+          "hint": "先想：Pod 的 IP 是动态的，谁来提供稳定的访问入口？回忆 K8s 小节的核心对象。",
+          "analysis": "**标准解题思路**\n1. 问题背景：Pod 的 IP 会随重启/重建变化，客户端不能直接访问 Pod。\n2. 解决方案：Service——为一组 Pod 提供**稳定的虚拟访问入口**，并做负载均衡。\n3. Service 把流量分发到其选择器匹配的多个 Pod 副本上。\n4. 填 Service。\n**延伸**：Service 三种类型：ClusterIP（集群内访问，默认）、NodePort（节点端口暴露）、LoadBalancer（云负载均衡）；Ingress 负责 HTTP 层的路由。",
+          "enterprise_tip": "Pod 重启 IP 就变，直接访问 Pod 不可靠；Service 是固定虚拟地址 + 负载均衡；面试常问「Service 的三种类型 ClusterIP / NodePort / LoadBalancer 的区别」。"
+        }
+      ],
+      "qa": [
+        {
+          "q": "镜像和容器有什么区别？",
+          "a": "镜像是只读、不可变的模板（应用 + 环境），容器是镜像的运行实例，有独立的可写层。同一镜像可启动多个容器，镜像不变，容器可启停删；容器删除后其内数据丢失，要持久化必须挂数据卷。"
+        },
+        {
+          "q": "docker run -p 8080:80 是什么意思？",
+          "a": "端口映射：把宿主机的 8080 端口映射到容器内的 80 端口，访问宿主机 8080 即到达容器内应用的 80 端口。格式是「宿主机端口:容器内端口」，左边是外面访问的端口。"
+        },
+        {
+          "q": "Pod 和容器是什么关系？",
+          "a": "Pod 是 K8s 最小的调度单元，一个 Pod 可包含 1 个或多个容器（通常 1 个），Pod 内的容器共享网络与存储、同生共死；Deployment 管理的是 Pod 的副本数。"
+        },
+        {
+          "q": "Deployment 的作用是什么？",
+          "a": "声明 Pod 的期望副本数并维持：Pod 挂了自动拉起新 Pod（自愈），支持滚动更新与回滚。副本数就是「同一份应用跑几个实例」。"
+        },
+        {
+          "q": "大数据组件为什么要容器化？",
+          "a": "环境统一（依赖固化进镜像）、弹性伸缩（按负载增减副本省钱）、快速交付（秒级部署新环境）；Spark/Flink 已原生支持运行在 K8s 上，云厂商大数据产品底层就是容器化 + 编排。"
+        }
+      ],
+      "glossary": [
+        {
+          "term": "Docker",
+          "desc": "容器引擎，把应用与运行环境打包成标准单元运行的平台。"
+        },
+        {
+          "term": "镜像（Image）",
+          "desc": "只读不可变的模板，包含应用、依赖与配置，是容器的「模具」。"
+        },
+        {
+          "term": "容器（Container）",
+          "desc": "镜像的运行实例，有独立文件系统与可写层，秒级启动。"
+        },
+        {
+          "term": "Dockerfile",
+          "desc": "构建镜像的配方文件，核心指令 FROM / RUN / CMD。"
+        },
+        {
+          "term": "数据卷（Volume）",
+          "desc": "把宿主机目录挂载进容器实现数据持久化，容器删除数据还在。"
+        },
+        {
+          "term": "Pod",
+          "desc": "K8s 最小调度单元，一个或多个容器的组合，共享网络与存储。"
+        },
+        {
+          "term": "Deployment",
+          "desc": "管理 Pod 副本数的控制器，负责自动重启与滚动更新。"
+        },
+        {
+          "term": "Service",
+          "desc": "为 Pod 提供稳定访问入口与负载均衡的抽象。"
+        }
+      ],
+      "kps": [
+        "为什么容器化：环境一致、资源隔离、快速部署（对比虚拟机）",
+        "镜像（Image）与容器（Container）的区别",
+        "Docker 常用命令（images / run -p -v / ps / exec / logs）",
+        "Dockerfile 基础（FROM / RUN / CMD）与数据卷持久化",
+        "K8s 核心对象：Pod（最小调度单元）",
+        "Deployment 与副本数（自动重启、滚动更新）",
+        "Service 稳定入口与大数据组件容器化意义（Spark/Flink on K8s）"
+      ]
+    }
+  ]
+}
